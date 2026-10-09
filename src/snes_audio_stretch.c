@@ -230,7 +230,8 @@ static uint32_t base = STEP_ONE;    /* measured production/consumption      */
 static volatile uint32_t pushed;    /* samples pushed since the last pull   */
 static uint32_t warm_in, warm_out;  /* exact running mean while warming up  */
 static uint32_t ema_in, ema_out;    /* then: decaying SUMS (Q8) of samples pushed / pulled */
-static uint16_t settled;            /* pulls seen                           */
+static uint16_t settled;            /* windows seen                         */
+static uint32_t win_in, win_out;    /* pushed / pulled since the last commit */
 static uint32_t underruns;
 /* Verification counters for the noise fix. The ear is the final judge, but these
  * say whether the mechanism engaged at all: on rain, insertions should fall to
@@ -270,6 +271,7 @@ void snes_stretch_reset(void) {
   warm_in = warm_out = 0;
   ema_in = ema_out = 0;
   settled = 0;
+  win_in = win_out = 0;
   underruns = 0;
   conf_lp = 0; noise_w = 0;
   g_stretch_ins = g_stretch_pulls = g_stretch_noise_pulls = 0; g_stretch_conf_lp = 0; g_stretch_rev = 0;
@@ -327,6 +329,7 @@ void snes_stretch_push(const int16_t *src, uint16_t n) {
     }
   }
   pushed += n;
+  win_in += n;
   uint8_t should_prime = (!primed && fill >= TARGET) ? 1 : 0;
   STRETCH_IRQ_RESTORE();
   /* Start playing only once a whole TARGET backlog exists. Priming earlier
@@ -349,6 +352,41 @@ void snes_stretch_push(const int16_t *src, uint16_t n) {
  * ring, and a 1/8 EMA still swung ~3%. So an exact running mean until the
  * answer is known, then slowly decaying sums to follow real speed changes.
  * Jitter here is not a stability curiosity -- it is audible pitch wobble. */
+/* The rate measurement, folded once per TWO frames (snes_stretch_commit).
+ *
+ * At half rate a drawn frame costs ~95% of the budget and the undrawn one
+ * after it ~64%. Now and then the drawn one runs a few percent over, and the
+ * undrawn one repays it: the pair is on time and no audio tick is lost. Per
+ * pull the measurement could not tell: the pull after the late frame saw 320
+ * pushed against 640 played, the rate fell 3% for those 640 samples, half a
+ * semitone flat for 40 ms, and the next pull put it back -- the short flat
+ * notes heard in Castlevania. Over the pair the sums are 640 against 640.
+ * A deficit that is real, one the next frame does not repay, still shows. */
+void snes_stretch_commit(void) {
+  STRETCH_IRQ_SAVE();
+  uint32_t in = win_in, out = win_out;
+  win_in = win_out = 0;
+  STRETCH_IRQ_RESTORE();
+  if (out == 0) return;   /* nothing played (muted, not primed): nothing to measure */
+  if (settled < 64u) {
+    warm_in  += in;
+    warm_out += out;
+    settled++;
+    base = (uint32_t)(((uint64_t)warm_in << 16) / (warm_out ? warm_out : 1u));
+    if (base > MEASURE_MAX) base = MEASURE_MAX;
+    if (settled == 64u) {   /* hand over: the warm sums, as 16 windows' worth */
+      ema_in  = (uint32_t)(((uint64_t)warm_in  << 8) / 4u);
+      ema_out = (uint32_t)(((uint64_t)warm_out << 8) / 4u);
+    }
+  } else {
+    /* decay 1/16 per two-frame window: follows a real speed change in ~32 frames */
+    ema_in  = ema_in  - (ema_in  >> 4) + (in  << 8);
+    ema_out = ema_out - (ema_out >> 4) + (out << 8);
+    base = (uint32_t)(((uint64_t)ema_in << 16) / (ema_out ? ema_out : 1u));
+    if (base > MEASURE_MAX) base = MEASURE_MAX;
+  }
+}
+
 static void retune(uint16_t n) {
   if (n == 0) return;
 
@@ -360,23 +398,7 @@ static void retune(uint16_t n) {
    * 0.84 floor in Zelda's title with the core exactly on time: the music
    * played three semitones flat and the overflow drain threw away 12-16% of
    * it. Sums weight every sample once, so any chunking gives the true ratio. */
-  if (settled < 128u) {
-    warm_in  += pushed;
-    warm_out += n;
-    settled++;
-    base = (uint32_t)(((uint64_t)warm_in << 16) / (warm_out ? warm_out : 1u));
-    if (base > MEASURE_MAX) base = MEASURE_MAX;
-    if (settled == 128u) {   /* hand over: the warm sums, as 32 pulls' worth */
-      ema_in  = (uint32_t)(((uint64_t)warm_in  << 8) / 4u);
-      ema_out = (uint32_t)(((uint64_t)warm_out << 8) / 4u);
-    }
-  } else {
-    /* decay 1/32 per pull: follows a real speed change in ~32 pulls */
-    ema_in  = ema_in  - (ema_in  >> 5) + ((uint32_t)pushed << 8);
-    ema_out = ema_out - (ema_out >> 5) + ((uint32_t)n << 8);
-    base = (uint32_t)(((uint64_t)ema_in << 16) / (ema_out ? ema_out : 1u));
-    if (base > MEASURE_MAX) base = MEASURE_MAX;
-  }
+  win_out += n;
   pushed = 0;
 
   /* Level term: nudge the backlog back toward TARGET, bounded to a few

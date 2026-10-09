@@ -2206,11 +2206,13 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
     wdog_refresh();
 
     bool half_lock = snes_half_lock_active();
+    /* the counter runs on every frame, half rate or not: it also marks the
+     * end of each two-frame audio measurement window (snes_stretch_commit) */
     bool present_slot = true;
-    if (half_lock) {
-      present_slot = (snes_half_ctr & 1) == 0;
-      snes_half_ctr++;
-    }
+    bool pair_end = (snes_half_ctr & 1) != 0;
+    if (half_lock)
+      present_slot = !pair_end;
+    snes_half_ctr++;
     snes_apply_frame_time();
 
     bool drawFrame;
@@ -2290,6 +2292,7 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
     uint32_t sp_apu1 = snes_perf_apu;
 #endif
     snes_pcm_submit();
+    if (pair_end) snes_stretch_commit();
     pcm_audio_enable(1);
     SNES_PROF_MARK(SNES_PROF_M_PCM);
 #ifdef SNES_PERF

@@ -86,6 +86,11 @@ void     snes_stretch_push(const int16_t *src, uint16_t n);
  * the whole point; it never zero-pads a short frame the way the old path did. */
 void     snes_stretch_pull(int16_t *dst, uint16_t n);
 
+/* Fold what was pushed and pulled since the last call into the rate
+ * measurement. Called every second emulated frame, at the end of a
+ * drawn+undrawn pair, so a drawn frame that the undrawn one repays is on time. */
+void     snes_stretch_commit(void);
+
 /* Diagnostics for the device profiler / tests. */
 uint16_t snes_stretch_fill(void);
 uint32_t snes_stretch_step_q16(void);
