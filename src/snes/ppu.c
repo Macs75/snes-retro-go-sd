@@ -3929,6 +3929,7 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
 #endif
 
   dst += (ppu->extraLeftRight - ppu->extraLeftCur);
+  SNES_PERF_PPU_END(SNES_PERF_PPU_CWIN, perf_c);
 
 #if SNES_ABLATE_COMPOSITE
   /* ABLATION, WRONG OUTPUT ON PURPOSE. Deletes the whole compositing pass --
@@ -4045,13 +4046,13 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
            * because it costs nothing there; the loop asks plainly.
            * The blue field needs no mask -- it is the top field, and 62 at
            * bit 22 cannot reach bit 28. */
-          dst = PpuBlendSpanAll(dst, mrow, srow, i, right, math_fixed);
+          PPU_PT(SNES_PERF_PPU_SPAN, dst = PpuBlendSpanAll(dst, mrow, srow, i, right, math_fixed));
           continue;
         }
         /* Field order follows the SNES word: bits 0-4 red, 5-9 green,
          * 10-14 blue -- so the spread keeps red at 0, green at 11, blue at
          * 22, and the three tables are read in that same order. */
-        dst = PpuBlendSpanPart(dst, mrow, srow, i, right, math_fixed, math_enabled_cur);
+        PPU_PT(SNES_PERF_PPU_SPAN, dst = PpuBlendSpanPart(dst, mrow, srow, i, right, math_fixed, math_enabled_cur));
         continue;
       }
 #endif

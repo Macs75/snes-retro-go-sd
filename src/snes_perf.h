@@ -31,10 +31,13 @@ extern uint32_t snes_perf_dma, snes_perf_dma_calls;   /* DMA, minus any APU work
 
 /* the PPU split (cycles, both inside snes_perf_ppu): sprite evaluation runs
  * on every line of every frame; the rest only on drawn lines. main/sub are
- * the two PpuDrawBackgrounds passes, which contain bg4/bg2/bgx/spr. */
+ * the two PpuDrawBackgrounds passes, which contain bg4/bg2/bgx/spr. comp
+ * contains cwin (the colour window and line setup, before the first pixel)
+ * and span (the colour-math blend spans, one probe pair per window region). */
 enum { SNES_PERF_PPU_EVAL, SNES_PERF_PPU_PRE, SNES_PERF_PPU_MAIN, SNES_PERF_PPU_SUB,
        SNES_PERF_PPU_COMP, SNES_PERF_PPU_BLIT,
        SNES_PERF_PPU_BG4, SNES_PERF_PPU_BG2, SNES_PERF_PPU_BGX, SNES_PERF_PPU_SPR,
+       SNES_PERF_PPU_CWIN, SNES_PERF_PPU_SPAN,
        SNES_PERF_PPU_N };
 extern uint32_t snes_perf_ppu_part[SNES_PERF_PPU_N];
 /* line counts: drawn, with a subscreen pass, with sprites, with colour math

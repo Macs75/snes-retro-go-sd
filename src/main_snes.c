@@ -339,6 +339,9 @@ static void snes_perf_report(void)
            (unsigned long)(pp[SNES_PERF_PPU_EVAL] / n), (unsigned long)(pp[SNES_PERF_PPU_PRE] / n),
            (unsigned long)(pp[SNES_PERF_PPU_MAIN] / n), (unsigned long)(pp[SNES_PERF_PPU_SUB] / n),
            (unsigned long)(pp[SNES_PERF_PPU_COMP] / n), (unsigned long)(pp[SNES_PERF_PPU_BLIT] / n));
+    printf("PROF/ppu: comp split cwin=%lu span=%lu other=%lu per emulated frame\n",
+           (unsigned long)(pp[SNES_PERF_PPU_CWIN] / n), (unsigned long)(pp[SNES_PERF_PPU_SPAN] / n),
+           (unsigned long)((pp[SNES_PERF_PPU_COMP] - pp[SNES_PERF_PPU_CWIN] - pp[SNES_PERF_PPU_SPAN]) / n));
     printf("PROF/ppu: layers bg4=%lu bg2=%lu other=%lu sprites=%lu per emulated frame\n",
            (unsigned long)(pp[SNES_PERF_PPU_BG4] / n), (unsigned long)(pp[SNES_PERF_PPU_BG2] / n),
            (unsigned long)(pp[SNES_PERF_PPU_BGX] / n), (unsigned long)(pp[SNES_PERF_PPU_SPR] / n));
