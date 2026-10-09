@@ -469,6 +469,98 @@ static void SNES_ITCM_SCHED cpu_tick(Snes *s) {
   s->cpuCyclesLeft -= 2;
 }
 
+#if !defined(SNES_SPIN_SKIP)
+/* run_one_opcode for run_dots: the same opcode and charge, returned instead
+ * of added to s->cpuCyclesLeft, which run_dots keeps in a register. */
+static inline uint32_t SNES_ITCM_SCHED run_one_opcode_charge(Snes *s) {
+  Cpu *cpu = s->cpu;
+  s->cpuMemOps = 0;
+#ifdef SNES_PERF_CPU
+  uint32_t pc_t0 = snes_perf_now(), pc_a0 = snes_perf_apu, pc_d0 = snes_perf_dma, pc_p0 = snes_perf_ppu;
+#endif
+  int cycles = SNES_PROF_CPU_CALL(CPU_RUN_OPCODE(cpu));
+#ifdef SNES_PERF_CPU
+  snes_perf_cpu_eng += snes_perf_now() - pc_t0 - (snes_perf_apu - pc_a0) - (snes_perf_dma - pc_d0)
+                       - (snes_perf_ppu - pc_p0);
+  snes_perf_cpu_ops++;
+  snes_perf_cpu_memops += s->cpuMemOps;
+#endif
+  return (uint32_t)cycles * 6 + (uint32_t)s->cpuMemOps * 2;
+}
+
+/* The dot loop with the scheduler's state in registers. Per opcode it used to
+ * load and store cpuCyclesLeft up to three times, load and store hPos and
+ * apuDotsAccum, and reach the DMA flags through s->dma. Now:
+ *  - cpuCyclesLeft is private to the scheduler (the engine never reads it,
+ *    nothing on the bus does): a register for the whole span, stored once;
+ *  - hPos and apuDotsAccum ARE visible to an opcode (the $2137 counter latch,
+ *    $4212's H-blank bit, the APU catch-up on the ports), so they are STORED
+ *    before every opcode and every DMA step -- never loaded -- and
+ *    apuDotsAccum is reloaded after an opcode, whose catch-up may zero it;
+ *  - the Dma pointer lives in a register.
+ * Every update happens in the same order as before, so the emulation is the
+ * same; the opcode and DMA calls see exactly the state they saw. */
+static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
+#ifdef SNES_SPIN_BAKE
+  /* One test per SPAN, outside the loop below. See spin_bake.h. */
+  if ((uint16_t)(s->cpu->pc - g_bake.pc_load) <= 2u)
+  {
+#ifdef SNES_PERF_CPU
+    uint32_t pb_t0 = snes_perf_now(), pb_d0 = snes_perf_dma;
+#endif
+    dots = spin_bake_run_span(s, s->cpu, dots);
+#ifdef SNES_PERF_CPU
+    snes_perf_cpu_bake += snes_perf_now() - pb_t0 - (snes_perf_dma - pb_d0);
+#endif
+  }
+#endif
+  Dma *dma = s->dma;
+  uint8_t left = s->cpuCyclesLeft;       /* uint8, like the field: same wrap */
+  uint16_t hpos = s->hPos;
+  uint32_t apud = s->apuDotsAccum;
+  bool dma_active = dma->dmaBusy || dma->hdmaTimer > 0;
+  while (dots > 0) {
+    if (dma_active) {
+      s->hPos = hpos;
+      s->apuDotsAccum = apud;
+#ifdef SNES_PERF
+      { SNES_PERF_DMA_BEGIN(perf_t, perf_a); dma_cycle(dma); SNES_PERF_DMA_END(perf_t, perf_a); }
+#else
+      dma_cycle(dma);
+#endif
+      apud = s->apuDotsAccum + 2;        /* a DMA to the APU ports catches up */
+      hpos += 2; dots -= 2;
+      dma_active = dma->dmaBusy || dma->hdmaTimer > 0;
+      SNES_PERF_CPU_INC(snes_perf_cpu_dmaloop);
+      continue;
+    }
+    bool started_dma = false;
+    if (left == 0) {
+      s->hPos = hpos;
+      s->apuDotsAccum = apud;
+      apply_irq_match(s);
+      left = (uint8_t)(left + run_one_opcode_charge(s));
+      apud = s->apuDotsAccum;            /* the opcode's APU catch-up may have zeroed it */
+      started_dma = dma->dmaBusy || dma->hdmaTimer > 0;
+    }
+    int step;
+    if (left >= 2 && !started_dma) {
+      step = left;
+      if (step > dots) step = dots;
+      left = (uint8_t)(left - step);
+    } else {
+      step = 2;
+      left = (uint8_t)(left - 2);
+    }
+    apud += step;
+    hpos += step; dots -= step;
+    dma_active = started_dma;
+  }
+  s->cpuCyclesLeft = left;
+  s->hPos = hpos;
+  s->apuDotsAccum = apud;
+}
+#else
 static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
   Cpu *cpu = s->cpu;
 #ifdef SNES_SPIN_BAKE
@@ -533,6 +625,7 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
     dma_active = started_dma;
   }
 }
+#endif
 
 /* The one scheduler entry the main loop calls (once a frame): kept out of
  * line so it, with run_dots / run_one_opcode / cpu_tick inlined into it, is
