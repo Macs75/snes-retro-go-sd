@@ -20,6 +20,53 @@
 #include "snes_gnw_alloc.h"
 
 extern bool g_is_turbo;
+
+#ifndef SNES_PAGEMAP
+#define SNES_PAGEMAP 1
+#endif
+#if SNES_PAGEMAP && SNES_ROMPAGE_LOW
+#error "SNES_PAGEMAP reproduces the fast paths with SNES_ROMPAGE_LOW off; add the low-ROM rule first"
+#endif
+#if SNES_PAGEMAP
+/* The 65816 read page map: one entry per 8 KB page of the 24-bit bus, a host
+ * pointer for a page snes_cpuRead serves directly, NULL for one that goes to
+ * snes_read. The rules are exactly the fast paths the compare chain had --
+ * WRAM in banks $7E/$7F, its low 8 KB mirror in banks $00-$3F/$80-$BF, and
+ * ROM at offsets >= $8000 where the cart allows the ROM page cache, outside
+ * the DSP-1 window -- each condition falls on an 8 KB boundary, so a page is
+ * uniformly one or the other. The SNES maps memory in 8 KB granules (low
+ * WRAM) and 32 KB LoROM banks, hence the page size (the arcade cores' map is
+ * 64 KB pages). Host pointers only: never in a savestate; rebuilt wherever
+ * the ROM page cache is dropped (init, reset after every load, savestates). */
+static uint8_t *g_snes_rdmap[0x800];
+
+static uint8_t *snes_pagemap_base(Snes *snes, uint32_t adr) {
+  uint8_t bank = adr >> 16;
+  uint16_t off = (uint16_t)adr;
+  if (bank == 0x7e || bank == 0x7f) return &snes->ram[((bank & 1) << 16) | off];
+  if (off < 0x2000 && (bank < 0x40 || (bank >= 0x80 && bank < 0xc0))) return &snes->ram[off];
+  Cart *cart = snes->cart;
+  if (cart && off >= 0x8000 && SNES_ROM_PAGE_OK(cart) && !SNES_DSP_LOROM_WINDOW(cart, bank)) {
+    uint32_t page = adr & ~(uint32_t)0x1fff;
+#if SNES_ROMPAGE_FOLD
+    return (cart->type == 1)
+      ? cart->bankBase[bank & 0x7f] + (page & 0x7fff)
+      : cart->bankBase[bank & 0x3f] + (page & 0xffff);
+#else
+    uint32_t pidx = (cart->type == 1)
+      ? (((uint32_t)((page >> 16) & 0x7f) << 15) | (page & 0x7fff))  /* LoROM */
+      : (((uint32_t)((page >> 16) & 0x3f) << 16) | (page & 0xffff)); /* HiROM */
+    return cart->rom + (pidx & cart->romMask);
+#endif
+  }
+  return NULL;
+}
+
+static void snes_build_pagemap(Snes *snes) {
+  for (uint32_t p = 0; p < 0x800; p++)
+    g_snes_rdmap[p] = snes_pagemap_base(snes, p << 13);
+}
+#endif
 int snes_frame_counter;
 static const double apuCyclesPerMaster = (32040 * 32) / (1364 * 262 * 60.0);
 extern uint8_t g_ram[0x20000];
@@ -66,6 +113,9 @@ Snes* snes_init(uint8_t *ram) {
    * garbage pointer. Set it here as well as in snes_reset(). */
   snes->romPageTag = ~(uint32_t)0;
   snes->romPageBase = NULL;
+#if SNES_PAGEMAP
+  snes_build_pagemap(snes);
+#endif
   snes->pal = false;
   snes->vcount = 262;
   snes->apuDotsAccum = 0;
@@ -129,6 +179,9 @@ void snes_saveload(Snes *snes, SaveLoadFunc *func, void *ctx) {
    * it -- cheap, and it removes the whole question. */
   snes->romPageTag = ~(uint32_t)0;
   snes->romPageBase = NULL;
+#if SNES_PAGEMAP
+  snes_build_pagemap(snes);
+#endif
 }
 
 void snes_reset(Snes* snes, bool hard) {
@@ -139,6 +192,9 @@ void snes_reset(Snes* snes, bool hard) {
   snes->romPageTag = ~(uint32_t)0;
   snes->romPageBase = NULL;
   cart_reset(snes->cart); // reset cart first, because resetting cpu will read from it (reset vector)
+#if SNES_PAGEMAP
+  snes_build_pagemap(snes);   /* after the cart, before the first read (the reset vector) */
+#endif
   cpu_reset(snes->cpu);
   apu_reset(snes->apu);
   dma_reset(snes->dma);
@@ -777,6 +833,27 @@ uint8_t snes_cpuRead(Snes* snes, uint32_t adr) {
    * 2^n-1 with n >= 13 for any real cart), so base+offset stays linear for
    * the whole page. The tag holds the page-aligned address, so the sentinel
    * below (low bits set, and beyond the 24-bit bus) can never collide. */
+#if SNES_PAGEMAP
+  {
+    /* One table load instead of the compare chain below. A ROM page also
+     * becomes the engine's inline fetch page (ROM_FETCH_FAST), exactly when
+     * the chain would have installed it. */
+    uint8_t *base = g_snes_rdmap[(adr >> 13) & 0x7ff];
+    if (base) {
+      if ((adr & 0x8000) && (adr >> 17) != 0x3f) {   /* ROM: not WRAM ($7E/$7F) */
+        uint32_t page = adr & ~(uint32_t)0x1fff;
+        if (page != snes->romPageTag) {
+          snes->romPageBase = base;
+          snes->romPageTag = page;
+          SNES_PERF_CPU_INC(snes_perf_cpu_rd_page);
+        }
+      }
+      return base[adr & 0x1fff];
+    }
+    SNES_PERF_CPU_INC(snes_perf_cpu_rd_slow);
+    return snes_read(snes, adr);
+  }
+#else
   if((adr & ~(uint32_t)0x1fff) == snes->romPageTag) {
 #ifdef RIG_CALL_PROFILE
     g_cpuRead_romhit++;
@@ -877,6 +954,7 @@ uint8_t snes_cpuRead(Snes* snes, uint32_t adr) {
 #endif
   SNES_PERF_CPU_INC(snes_perf_cpu_rd_slow);
   return snes_read(snes, adr);
+#endif
 }
 
 #ifdef SNES_BUS_IN_ITCM
