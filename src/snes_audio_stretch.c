@@ -229,6 +229,7 @@ static uint32_t step = STEP_ONE;    /* rate actually used by the pull       */
 static uint32_t base = STEP_ONE;    /* measured production/consumption      */
 static volatile uint32_t pushed;    /* samples pushed since the last pull   */
 static uint32_t warm_in, warm_out;  /* exact running mean while warming up  */
+static uint32_t ema_in, ema_out;    /* then: decaying SUMS (Q8) of samples pushed / pulled */
 static uint16_t settled;            /* pulls seen                           */
 static uint32_t underruns;
 /* Verification counters for the noise fix. The ear is the final judge, but these
@@ -267,6 +268,7 @@ void snes_stretch_reset(void) {
   step = base = STEP_ONE;
   pushed = 0;
   warm_in = warm_out = 0;
+  ema_in = ema_out = 0;
   settled = 0;
   underruns = 0;
   conf_lp = 0; noise_w = 0;
@@ -345,27 +347,35 @@ void snes_stretch_push(const int16_t *src, uint16_t n) {
  * converge quickly also TRACKS that alternation instead of averaging it: a
  * 1/2 EMA swung the rate between 0.37 and 0.68 and the peaks drained the
  * ring, and a 1/8 EMA still swung ~3%. So an exact running mean until the
- * answer is known, then a slow EMA to follow real speed changes. Jitter here
- * is not a stability curiosity -- it is audible pitch wobble. */
+ * answer is known, then slowly decaying sums to follow real speed changes.
+ * Jitter here is not a stability curiosity -- it is audible pitch wobble. */
 static void retune(uint16_t n) {
   if (n == 0) return;
 
-  /* Deliberately no LOWER clamp on inst: the zero-push pulls are half of what
-   * makes the mean correct, and clamping them to STEP_MIN biased it upward
-   * (0.82 measured where the answer is 0.739), which made the reader outrun
-   * the writer. The final step is clamped instead, where a clamp cannot skew
-   * an average. */
-  uint32_t inst = (uint32_t)(((uint64_t)pushed << 16) / n);
-  if (inst > MEASURE_MAX) inst = MEASURE_MAX;
-
+  /* The rate is a ratio of SUMS, never a mean of per-pull ratios. Pulls are
+   * not all the same size: the pump splits a refill into chunks of at most
+   * SNES_AUDIO_SAMPLES_MAX, so after an overrun frame NTSC pulls 320 samples
+   * that saw 532 pushed (1.66) and then 212 that saw none (0). Their mean is
+   * 0.83 where the truth is 532/532 = 1.0, and that pinned the rate at its
+   * 0.84 floor in Zelda's title with the core exactly on time: the music
+   * played three semitones flat and the overflow drain threw away 12-16% of
+   * it. Sums weight every sample once, so any chunking gives the true ratio. */
   if (settled < 128u) {
     warm_in  += pushed;
     warm_out += n;
     settled++;
     base = (uint32_t)(((uint64_t)warm_in << 16) / (warm_out ? warm_out : 1u));
     if (base > MEASURE_MAX) base = MEASURE_MAX;
+    if (settled == 128u) {   /* hand over: the warm sums, as 32 pulls' worth */
+      ema_in  = (uint32_t)(((uint64_t)warm_in  << 8) / 4u);
+      ema_out = (uint32_t)(((uint64_t)warm_out << 8) / 4u);
+    }
   } else {
-    base = base - (base >> 5) + (inst >> 5);       /* EMA, 1/32 */
+    /* decay 1/32 per pull: follows a real speed change in ~32 pulls */
+    ema_in  = ema_in  - (ema_in  >> 5) + ((uint32_t)pushed << 8);
+    ema_out = ema_out - (ema_out >> 5) + ((uint32_t)n << 8);
+    base = (uint32_t)(((uint64_t)ema_in << 16) / (ema_out ? ema_out : 1u));
+    if (base > MEASURE_MAX) base = MEASURE_MAX;
   }
   pushed = 0;
 
