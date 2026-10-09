@@ -129,6 +129,14 @@ void snes_writeBBus(Snes* snes, uint8_t adr, uint8_t val);
 uint8_t snes_read(Snes* snes, uint32_t adr);
 void snes_write(Snes* snes, uint32_t adr, uint8_t val);
 uint8_t snes_cpuRead(Snes* snes, uint32_t adr);
+#ifndef SNES_PAGEMAP
+#define SNES_PAGEMAP 1
+#endif
+#if SNES_PAGEMAP
+/* the 65816 page maps (snes.c): 8 KB pages, host pointer or NULL = slow path */
+extern uint8_t *g_snes_rdmap[0x800];   /* WRAM + cacheable ROM */
+extern uint8_t *g_snes_wrmap[0x800];   /* WRAM only */
+#endif
 void snes_cpuWrite(Snes* snes, uint32_t adr, uint8_t val);
 // debugging
 void snes_debugCycle(Snes* snes, bool* cpuNext, bool* spcNext);

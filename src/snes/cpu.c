@@ -133,7 +133,26 @@ uint8_t cpu_thumb2_read(Cpu* cpu, uint32_t adr) {
 #if defined(SNES_SPIN_SKIP) && !SNES_SPIN_NO_BUS_HOOKS
   if(g_spin.phase) spin_hook_read(cpu, adr);
 #endif
+#if SNES_PAGEMAP
+  /* The page map's fast path right here, where the engine's data reads
+   * arrive: a WRAM or ROM byte never enters snes_cpuRead. The engine has
+   * 280 bus call sites and ITCM no room to inline this at each, so the
+   * bridge they all call is where it goes. snes_cpuRead counts the access
+   * itself on the slow path, so it is counted exactly once either way. A
+   * data read no longer retargets the engine's opcode-fetch page (only
+   * fetches do): that changes speed, never a result. */
+  {
+    Snes *snes = (Snes*) cpu->mem;
+    uint8_t *base = g_snes_rdmap[(adr >> 13) & 0x7ff];
+    if (base) {
+      snes->cpuMemOps++;
+      return base[adr & 0x1fff];
+    }
+    return snes_cpuRead(snes, adr);
+  }
+#else
   return snes_cpuRead((Snes*) cpu->mem, adr);
+#endif
 }
 
 #ifdef SNES_BUS_IN_ITCM
@@ -143,7 +162,22 @@ void cpu_thumb2_write(Cpu* cpu, uint32_t adr, uint8_t val) {
 #if defined(SNES_SPIN_SKIP) && !SNES_SPIN_NO_BUS_HOOKS
   if(g_spin.phase) spin_hook_write();
 #endif
+#if SNES_PAGEMAP
+  /* the write twin: WRAM pages straight from the map, the rest (and the
+   * access count) through snes_cpuWrite */
+  {
+    Snes *snes = (Snes*) cpu->mem;
+    uint8_t *base = g_snes_wrmap[(adr >> 13) & 0x7ff];
+    if (base) {
+      snes->cpuMemOps++;
+      base[adr & 0x1fff] = val;
+      return;
+    }
+    snes_cpuWrite(snes, adr, val);
+  }
+#else
   snes_cpuWrite((Snes*) cpu->mem, adr, val);
+#endif
 }
 
 Cpu* cpu_init(void* mem, int memType) {

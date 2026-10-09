@@ -21,9 +21,6 @@
 
 extern bool g_is_turbo;
 
-#ifndef SNES_PAGEMAP
-#define SNES_PAGEMAP 1
-#endif
 #if SNES_PAGEMAP && SNES_ROMPAGE_LOW
 #error "SNES_PAGEMAP reproduces the fast paths with SNES_ROMPAGE_LOW off; add the low-ROM rule first"
 #endif
@@ -38,7 +35,9 @@ extern bool g_is_turbo;
  * WRAM) and 32 KB LoROM banks, hence the page size (the arcade cores' map is
  * 64 KB pages). Host pointers only: never in a savestate; rebuilt wherever
  * the ROM page cache is dropped (init, reset after every load, savestates). */
-static uint8_t *g_snes_rdmap[0x800];
+uint8_t *g_snes_rdmap[0x800];
+/* the write map: the WRAM pages only, exactly snes_cpuWrite's fast paths */
+uint8_t *g_snes_wrmap[0x800];
 
 static uint8_t *snes_pagemap_base(Snes *snes, uint32_t adr) {
   uint8_t bank = adr >> 16;
@@ -63,8 +62,15 @@ static uint8_t *snes_pagemap_base(Snes *snes, uint32_t adr) {
 }
 
 static void snes_build_pagemap(Snes *snes) {
-  for (uint32_t p = 0; p < 0x800; p++)
-    g_snes_rdmap[p] = snes_pagemap_base(snes, p << 13);
+  for (uint32_t p = 0; p < 0x800; p++) {
+    uint32_t adr = p << 13;
+    uint8_t bank = adr >> 16;
+    uint16_t off = (uint16_t)adr;
+    g_snes_rdmap[p] = snes_pagemap_base(snes, adr);
+    g_snes_wrmap[p] = (bank == 0x7e || bank == 0x7f ||
+                       (off < 0x2000 && (bank < 0x40 || (bank >= 0x80 && bank < 0xc0))))
+                      ? g_snes_rdmap[p] : NULL;
+  }
 }
 #endif
 int snes_frame_counter;
