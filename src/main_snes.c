@@ -154,6 +154,17 @@ extern bool g_ppu_skip_render;   /* ppu.c: skip compositing on dropped frames */
 
 /* ---- state ---------------------------------------------------------------- */
 static Snes *snes;
+/* input record/replay (further below) */
+static void rec_close(void);
+static bool rec_sram_blocked;
+static uint32_t rec_audio_h = 2166136261u;   /* FNV-1a of every frame's samples since the record/replay start */
+#ifdef HOST_BUILD
+/* host only: a running hash of the rendered picture, every frame. The state
+ * hashes cannot see a renderer change (palette tables, compositing); this can.
+ * Too slow for the device, where it would distort the PERF numbers. */
+static uint32_t rec_pic_h = 2166136261u;
+#endif
+static int rec_mode;                        /* REC_OFF / REC_RECORD / REC_REPLAY (further below) */
 /* 128 KB WRAM lives in the overlay BSS (like the SM port's g_ram): the AHB
  * pool is only 120 KB total and the Apu (~66 KB) already comes from it. */
 static uint8_t snes_wram[0x20000];
@@ -754,6 +765,38 @@ static const gw_i18n_entry_t i18n_pad_map[] = {
   GW_I18N_END
 };
 
+static const gw_i18n_entry_t i18n_record[] = {
+  { "en", "Record input" },
+  { "fr", "Enregistrer" },
+  { "es", "Grabar entrada" },
+  { "de", "Eingabe aufnehmen" },
+  GW_I18N_END
+};
+
+static const gw_i18n_entry_t i18n_replay[] = {
+  { "en", "Replay input" },
+  { "fr", "Rejouer" },
+  { "es", "Reproducir entrada" },
+  { "de", "Eingabe abspielen" },
+  GW_I18N_END
+};
+
+static const gw_i18n_entry_t i18n_record_stop[] = {
+  { "en", "Stop recording" },
+  { "fr", "Arrêter l'enregistrement" },
+  { "es", "Detener grabación" },
+  { "de", "Aufnahme beenden" },
+  GW_I18N_END
+};
+
+static const gw_i18n_entry_t i18n_replay_stop[] = {
+  { "en", "Stop replay" },
+  { "fr", "Arrêter la relecture" },
+  { "es", "Detener reproducción" },
+  { "de", "Wiedergabe beenden" },
+  GW_I18N_END
+};
+
 static const gw_i18n_entry_t i18n_reset[] = {
   { "en", "Reset" },
   { "fr", "Réinitialiser" },
@@ -969,6 +1012,12 @@ static void snes_pcm_submit(void) {
       }
     }
     dsp_getSamples(snes->apu->dsp, audio_buf, snes_audio_samples, 1);
+    if (rec_mode) {   /* the record/replay audio hash: the samples the DSP produced */
+      const uint8_t *b = (const uint8_t *)audio_buf;
+      uint32_t h = rec_audio_h;
+      for (int i = 0; i < snes_audio_samples * 2; i++) { h ^= b[i]; h *= 16777619u; }
+      rec_audio_h = h;
+    }
     SNES_PROF_APU_SCOPE_EXIT(apu_t0);
     }
   } else {
@@ -1065,6 +1114,7 @@ static bool snes_SaveState(const char *pathName) {
 }
 
 static bool snes_LoadState(const char *pathName) {
+  rec_close();   /* a loaded state is not the recording's machine any more */
   FILE *f = fopen(pathName, "rb");
   if (!f) return false;
   snes_state_header_t h;
@@ -1168,6 +1218,12 @@ static void snes_SramSave(void)
   Cart *cart;
   size_t wrote = 0;
 
+  rec_close();
+  if (rec_sram_blocked) {
+    /* a record/replay cleared the cartridge RAM for this session */
+    printf("snes: SRAM save skipped (record/replay session)\n");
+    return;
+  }
   if (!snes || !snes->cart)
     return;
   cart = snes->cart;
@@ -1248,6 +1304,229 @@ static void snes_SramLoad(void)
  * core only reads it. Copier headers (512 bytes) are skipped in place. */
 static const uint8_t *snes_rom;
 static uint32_t snes_rom_len;
+
+/* ---- input record / replay ---------------------------------------------
+ * A recording is the SNES pad of every emulated frame (port 1 or 2 as
+ * configured, AFTER the G&W button mapping, so a mapping change does not
+ * break it), from a power-on with the cartridge RAM cleared, in
+ * "<rom path without extension>.rec" next to the ROM:
+ *   header (16 bytes): "SNRC", version 1, flags (bit 0 PAL), FNV-1a of the
+ *   ROM, frame count (0 until the recording is closed); then one
+ *   little-endian uint16 per frame.
+ * Record on the host (SNES_RECORD=1) or the device (pause menu), replay on
+ * either (SNES_REPLAY=1 / pause menu): the same file. Every 120 frames both
+ * log "REC/hash", a hash of work RAM, VRAM, CGRAM, OAM, the APU RAM and the
+ * CPU registers: two runs of one recording must log the same lines.
+ * The cartridge RAM is cleared for the session, so the SRAM save is skipped
+ * from the first record/replay until the game is restarted. */
+#define REC_MAGIC   0x43524e53u   /* "SNRC" */
+#define REC_VERSION 1u
+#define REC_BUF     1024u
+typedef struct { uint32_t magic; uint16_t version, flags; uint32_t rom_hash, frames; } rec_header_t;
+enum { REC_OFF = 0, REC_RECORD, REC_REPLAY };
+static int rec_mode;
+static FILE *rec_f;
+static uint32_t rec_frame, rec_rom_hash;
+static uint16_t rec_buf[REC_BUF];
+static uint32_t rec_n, rec_pos;
+static odroid_dialog_choice_t *rec_opt_record, *rec_opt_replay;   /* their pause-menu entries */
+static void rec_labels(void);
+
+static uint32_t rec_fnv(const void *p, uint32_t n, uint32_t h)
+{
+  const uint8_t *b = (const uint8_t *)p;
+  for (uint32_t i = 0; i < n; i++) { h ^= b[i]; h *= 16777619u; }
+  return h;
+}
+
+static void rec_path(char *out, size_t cap)
+{
+  snprintf(out, cap, "%s", ACTIVE_FILE ? ACTIVE_FILE->path : "snes");
+  char *dot = strrchr(out, '.'), *slash = strrchr(out, '/');
+  if (dot && (!slash || dot > slash)) *dot = '\0';
+  strncat(out, ".rec", cap - strlen(out) - 1);
+}
+
+static void rec_flush(void)
+{
+  if (rec_f && rec_n) fwrite(rec_buf, sizeof(uint16_t), rec_n, rec_f);
+  rec_n = 0;
+}
+
+static void rec_close(void)
+{
+  if (!rec_f) { rec_mode = REC_OFF; return; }
+  if (rec_mode == REC_RECORD) {
+    rec_flush();
+    rec_header_t h = { REC_MAGIC, REC_VERSION, (uint16_t)(snes->pal ? 1 : 0), rec_rom_hash, rec_frame };
+    fseek(rec_f, 0, SEEK_SET);
+    fwrite(&h, sizeof h, 1, rec_f);
+    printf("REC: recorded %lu frames\n", (unsigned long)rec_frame);
+  } else {
+    printf("REC: replay stopped at frame %lu\n", (unsigned long)rec_frame);
+  }
+  fclose(rec_f);
+  rec_f = NULL;
+  rec_mode = REC_OFF;
+  rec_labels();
+}
+
+/* power-on, cartridge RAM cleared, the spin learner and the bake as after
+ * a ROM load: the same machine every time */
+static void rec_power_on(void)
+{
+  snes_do_console_reset();
+  if (snes->cart && snes->cart->ram && snes->cart->ramSize)
+    memset(snes->cart->ram, 0, snes->cart->ramSize);
+#ifdef SNES_SPIN_BAKE
+  spin_bake_reset();
+  spin_bake_scan(snes);
+#endif
+  spin_reset();
+  rec_sram_blocked = true;
+  rec_frame = 0;
+  rec_audio_h = 2166136261u;
+#ifdef HOST_BUILD
+  rec_pic_h = 2166136261u;
+#endif
+  rec_n = rec_pos = 0;
+#ifdef SNES_PERF
+  snes_perf_reset();
+#endif
+}
+
+static bool rec_start(int mode)
+{
+  char path[300];
+  rec_close();
+  rec_path(path, sizeof path);
+  if (!rec_rom_hash) rec_rom_hash = rec_fnv(snes_rom, snes_rom_len, 2166136261u);
+  if (mode == REC_RECORD) {
+    rec_f = fopen(path, "wb");
+    if (!rec_f) { printf("REC: cannot create %s\n", path); return false; }
+    rec_header_t h = { REC_MAGIC, REC_VERSION, (uint16_t)(snes->pal ? 1 : 0), rec_rom_hash, 0 };
+    fwrite(&h, sizeof h, 1, rec_f);
+  } else {
+    rec_header_t h;
+    rec_f = fopen(path, "rb");
+    if (!rec_f) { printf("REC: no recording %s\n", path); return false; }
+    if (fread(&h, sizeof h, 1, rec_f) != 1 || h.magic != REC_MAGIC || h.version != REC_VERSION) {
+      printf("REC: %s is not a recording (version %u)\n", path, 1u);
+      fclose(rec_f); rec_f = NULL; return false;
+    }
+    if (h.rom_hash != rec_rom_hash || (h.flags & 1) != (snes->pal ? 1 : 0)) {
+      printf("REC: %s was recorded with a different ROM (%08lx, this one %08lx)\n", path,
+             (unsigned long)h.rom_hash, (unsigned long)rec_rom_hash);
+      fclose(rec_f); rec_f = NULL; return false;
+    }
+    printf("REC: replaying %lu frames from %s\n", (unsigned long)h.frames, path);
+  }
+  rec_mode = mode;
+  rec_labels();
+  rec_power_on();
+  printf("REC: %s from power-on, %s, ROM %08lx\n", mode == REC_RECORD ? "recording" : "replay",
+         snes->pal ? "PAL" : "NTSC", (unsigned long)rec_rom_hash);
+  return true;
+}
+
+/* the pad the emulated frame gets: recorded, or replayed in place of the live one */
+static uint16_t rec_pad(uint16_t live)
+{
+  if (rec_mode == REC_RECORD) {
+    rec_buf[rec_n++] = live;
+    if (rec_n == REC_BUF) rec_flush();
+    return live;
+  }
+  if (rec_mode == REC_REPLAY) {
+    if (rec_pos == rec_n) {
+      rec_n = (uint32_t)fread(rec_buf, sizeof(uint16_t), REC_BUF, rec_f);
+      rec_pos = 0;
+      if (!rec_n) {
+        printf("REC: replay finished at frame %lu, live input from here\n", (unsigned long)rec_frame);
+        rec_close();
+        return live;
+      }
+    }
+    return rec_buf[rec_pos++];
+  }
+  return live;
+}
+
+static void rec_frame_done(void)
+{
+  if (rec_mode == REC_OFF) return;
+  rec_frame++;
+#ifdef HOST_BUILD
+  {
+    const Ppu *p = snes->ppu;
+    uint32_t h = rec_pic_h;
+    for (int row = 0; row < 224; row++) {
+      const uint32_t *px = (const uint32_t *)(const void *)(p->renderBuffer + row * p->renderPitch);
+      for (int i = 0; i < 128; i++) { h ^= px[i]; h *= 16777619u; }
+    }
+    rec_pic_h = h;
+  }
+#endif
+  if (rec_frame % 120u) return;
+#ifdef HOST_BUILD
+  printf("REC/pic frame=%lu pic=%08lx\n", (unsigned long)rec_frame, (unsigned long)rec_pic_h);
+#endif
+  const Cpu *cpu = snes->cpu;
+  uint32_t cpu_h = rec_fnv(&cpu->a, sizeof cpu->a, 2166136261u);
+  cpu_h = rec_fnv(&cpu->x, sizeof cpu->x, cpu_h);
+  cpu_h = rec_fnv(&cpu->sp, sizeof cpu->sp, cpu_h);
+  cpu_h = rec_fnv(&cpu->pc, sizeof cpu->pc, cpu_h);
+  cpu_h = rec_fnv(&cpu->dp, sizeof cpu->dp, cpu_h);
+  cpu_h = rec_fnv(&cpu->k, sizeof cpu->k, cpu_h);
+  cpu_h = rec_fnv(&cpu->db, sizeof cpu->db, cpu_h);
+  printf("REC/hash frame=%lu wram=%08lx vram=%08lx cgram=%08lx oam=%08lx aram=%08lx cpu=%08lx audio=%08lx\n",
+         (unsigned long)rec_frame,
+         (unsigned long)rec_fnv(snes->ram, 0x20000, 2166136261u),
+         (unsigned long)rec_fnv(snes->ppu->vram, 0x8000 * sizeof(uint16_t), 2166136261u),   /* a pointer under TARGET_GNW */
+         (unsigned long)rec_fnv(snes->ppu->cgram, sizeof snes->ppu->cgram, 2166136261u),
+         (unsigned long)rec_fnv(snes->ppu->oam, sizeof snes->ppu->oam, rec_fnv(snes->ppu->highOam, sizeof snes->ppu->highOam, 2166136261u)),
+         (unsigned long)rec_fnv(snes->apu->ram, sizeof snes->apu->ram, 2166136261u),
+         (unsigned long)cpu_h, (unsigned long)rec_audio_h);
+}
+
+/* actions, not toggles: the label says what selecting the entry does */
+static void rec_labels(void)
+{
+  if (rec_opt_record) rec_opt_record->label = gw_i18n(rec_mode == REC_RECORD ? i18n_record_stop : i18n_record);
+  if (rec_opt_replay) rec_opt_replay->label = gw_i18n(rec_mode == REC_REPLAY ? i18n_replay_stop : i18n_replay);
+}
+
+static bool rec_record_cb(odroid_dialog_choice_t *option, odroid_dialog_event_t event, uint32_t repeat)
+{
+  (void)option; (void)repeat;
+  if (event == ODROID_DIALOG_ENTER) {
+    if (rec_mode == REC_RECORD) rec_close();
+    else rec_start(REC_RECORD);
+  }
+  rec_labels();
+  return event == ODROID_DIALOG_ENTER;
+}
+
+static bool rec_replay_cb(odroid_dialog_choice_t *option, odroid_dialog_event_t event, uint32_t repeat)
+{
+  (void)option; (void)repeat;
+  if (event == ODROID_DIALOG_ENTER) {
+    if (rec_mode == REC_REPLAY) rec_close();
+    else rec_start(REC_REPLAY);
+  }
+  rec_labels();
+  return event == ODROID_DIALOG_ENTER;
+}
+
+#ifdef HOST_BUILD
+/* SNES_RECORD / SNES_REPLAY at start-up; the recording is closed at exit */
+static void rec_host_start(void)
+{
+  if (getenv("SNES_RECORD")) rec_start(REC_RECORD);
+  else if (getenv("SNES_REPLAY")) rec_start(REC_REPLAY);
+  atexit(rec_close);
+}
+#endif
 
 /* $ffd6 (ROM type): 0=ROM 1=ROM+RAM 2=ROM+RAM+battery; 3+ = coprocessor
  * (DSP-x/SA-1/SuperFX/...). The DSP-1 family (high nibble 0, low nibble 3-5)
@@ -1429,8 +1708,15 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
       {101, gw_i18n(i18n_pad_port), snes_pad_value, 1, &snes_pad_port_cb},
       {103, gw_i18n(i18n_pad_map), snes_pad_map_value, 1, &snes_pad_map_cb},
       {102, gw_i18n(i18n_reset), NULL, 1, &snes_reset_cb},
+      {104, gw_i18n(i18n_record), NULL, 1, &rec_record_cb},
+      {105, gw_i18n(i18n_replay), NULL, 1, &rec_replay_cb},
       ODROID_DIALOG_CHOICE_LAST
   };
+  for (odroid_dialog_choice_t *o = options; o->id != 0x0F0F0F0F; o++) {   /* ODROID_DIALOG_CHOICE_LAST */
+    if (o->id == 104) rec_opt_record = o;
+    if (o->id == 105) rec_opt_replay = o;
+  }
+  rec_labels();
 
   if (start_paused) {
     common_emu_state.pause_after_frames = 2;
@@ -1710,6 +1996,9 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 #ifdef SNES_PERF
   snes_perf_init();
 #endif
+#ifdef HOST_BUILD
+  rec_host_start();
+#endif
   while (1) {
 #ifdef SNES_DEVICE_PROFILE
     /* ONE DWT base per iteration. Every SNES_PROF_MARK below is a CUMULATIVE
@@ -1758,7 +2047,7 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
     common_emu_input_loop(&joystick, options, &blit);
     common_emu_input_loop_handle_turbo(&joystick);
 
-    uint16_t pad = read_snes_pad(&joystick);
+    uint16_t pad = rec_pad(read_snes_pad(&joystick));
     if (snes_pad_port) {
       snes->input1->currentState = 0;
       snes->input2->currentState = pad;
@@ -1972,6 +2261,14 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
       if (st < sp_step_min) sp_step_min = st;
     }
     if (sp_frames >= SNES_PERF_FRAMES) snes_perf_report();
+#endif
+    rec_frame_done();
+#ifdef HOST_BUILD
+    {   /* SNES_FRAMES=N: exit normally after N emulated frames (closes a recording) */
+      static long host_frames_left = -2;
+      if (host_frames_left == -2) { const char *e = getenv("SNES_FRAMES"); host_frames_left = e ? atol(e) : -1; }
+      if (host_frames_left > 0 && --host_frames_left == 0) exit(0);
+    }
 #endif
   }
 }
