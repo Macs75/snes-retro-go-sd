@@ -4434,26 +4434,31 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
                   continue;
 #endif
                 uint32 plane = addr[0] | addr[8] << 16;
+                /* a fully transparent sliver writes nothing: no decode, no loop */
+                if (!plane)
+                  continue;
                 uint32 chunky = PpuDecode4bpp(plane);
-                // go over each pixel
+                /* Screen pixel px is nibble px of `chunky` with bit 0x4000 set,
+                 * nibble 7-px without; reverse the nibbles once so both cases
+                 * read nibble px. Then visit only the opaque pixels inside the
+                 * visible range [px_left, px_right): each is still written at
+                 * most once and only onto a free objBuffer slot, exactly as the
+                 * pixel-by-pixel loops did, so the result is the same. */
+                if (!(oam1 & 0x4000)) {
+                  chunky = __builtin_bswap32(chunky);
+                  chunky = ((chunky >> 4) & 0x0f0f0f0fu) | ((chunky & 0x0f0f0f0fu) << 4);
+                }
                 int px_left = IntMax(-(col + x + kPpuExtraLeftRight), 0);
                 int px_right = IntMin(256 + kPpuExtraLeftRight - (col + x), 8);
-                PpuZbufType *dst = ppu->objBuffer.data + col + x + px_left + kPpuExtraLeftRight;
-
-                if (oam1 & 0x4000) {
-                  chunky >>= px_left * 4;
-                  for (int px = px_left; px < px_right; px++, dst++, chunky >>= 4) {
-                    int pixel = chunky & 0xf;
-                    if (pixel != 0 && (dst[0] & 0xff) == 0)
-                      dst[0] = z + pixel;
-                  }
-                } else {
-                  chunky <<= px_left * 4;
-                  for (int px = px_left; px < px_right; px++, dst++, chunky <<= 4) {
-                    int pixel = chunky >> 28;
-                    if (pixel != 0 && (dst[0] & 0xff) == 0)
-                      dst[0] = z + pixel;
-                  }
+                uint32 opaque = (chunky | chunky >> 1 | chunky >> 2 | chunky >> 3) & 0x11111111u;
+                opaque &= (px_right >= 8 ? ~0u : (1u << (px_right * 4)) - 1u) & (~0u << (px_left * 4));
+                PpuZbufType *dst = ppu->objBuffer.data + col + x + kPpuExtraLeftRight;
+                while (opaque) {
+                  uint32 b = (uint32)__builtin_ctz(opaque);
+                  opaque &= opaque - 1;
+                  PpuZbufType *d = dst + (b >> 2);
+                  if ((d[0] & 0xff) == 0)
+                    d[0] = z + ((chunky >> b) & 0xf);
                 }
 
               }
