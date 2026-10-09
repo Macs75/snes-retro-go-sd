@@ -1508,36 +1508,83 @@ static void PpuRebuildBlendLut(Ppu *ppu) {
 }
 
 /* The two colour-math blend loops of the compositing, as their own functions.
- * Inline in PpuDrawWholeLine they ran out of registers and reloaded two table
- * addresses from the literal pool on every pixel; here every base stays in a
- * register for the whole span.
+ * Inline in PpuDrawWholeLine they ran out of registers and reloaded table
+ * addresses from the stack on every pixel; here the bases stay in registers
+ * for the whole span. The three channel tables are contiguous, so one base
+ * reaches all of them.
  *
- * A pixel's output is a function of its raw main and sub z-buffer entries
- * alone (the tables cannot change inside a span), and neighbours repeat: a
- * tile is 8 pixels, a flat area far more. So the first thing each pixel does
- * is compare the raw pair, packed in one register, against the previous one;
- * a repeat stores the previous output and decodes nothing -- not the layer's
- * maths bit, not the bypass, not the blend. Only a change does the work. */
+ * Every pixel is one of three cases:
+ *   pass-through  a layer without colour maths, or an empty subscreen pixel:
+ *                 one table lookup;
+ *   repeat        a blended pixel's output is a function of its raw main and
+ *                 sub z-buffer entries alone (the tables cannot change inside
+ *                 a span), and neighbours repeat -- a tile is 8 pixels;
+ *   blend         two palette reads and three channel lookups.
+ *
+ * Which test goes first decides who pays for the other one, and no single
+ * order wins both kinds of scene measured on the device:
+ *   Zelda gameplay  nearly every pixel blends and 85% repeat: comparing the
+ *                   raw pair first makes a repeat 10 instructions;
+ *   Castlevania     86% of pixels pass through and a third of those differ
+ *                   from their neighbour: the repeat test first made them
+ *                   take a mispredicted branch and the slow path, +24%.
+ * So each function has both loops and picks per span from what the previous
+ * span saw. The counters sit on the slow paths only; the fast paths are the
+ * same instructions as a single-order loop. The choice is a speed hint: both
+ * loops produce the same pixels.
+ *
+ *   repeat-first   -> pass-first if pass-through pixels that missed the
+ *                     repeat exceed 1/8 of the span;
+ *   pass-first     -> repeat-first if blended pixels exceed 1/4 of it. */
+static uint8_t g_span_all_pass_first, g_span_part_pass_first;
+
 __attribute__((noinline))
 static uint16_t *PpuBlendSpanAll(uint16_t *dst, const PpuZbufType *mrow, const PpuZbufType *srow,
                                  uint32 i, uint32 right, const uint16_t *math_fixed) {
   const uint32_t *cs = g_cgram_spread, *ss = g_sub_spread;
-  const uint16_t *br = g_blend565[0], *bg = g_blend565[1], *bb = g_blend565[2];
+  const uint16_t *bt = g_blend565[0];
   if (i >= right) return dst;
-  uint32 last_z = ~(mrow[i] | (uint32)srow[i] << 16), last_out = 0;   /* differs from pixel i */
-  while (i < right) {
-    uint32 main_z = mrow[i], sub_z = srow[i];
-    uint32 z = main_z | sub_z << 16;
-    if (__builtin_expect(z != last_z, 0)) {
-      last_z = z;
-      uint32 sum = cs[main_z & 0xff] + ss[sub_z & 0xff];
-      if ((sum & kBlendBypass) || ((main_z >> 8) & 0xf) >= 6)
-        last_out = math_fixed[main_z & 0x7ff];
-      else
-        last_out = br[sum & 63] | bg[(sum >> 11) & 63] | bb[sum >> 22];
+  const uint32 n = right - i;
+  uint32 count = 0;
+  if (!g_span_all_pass_first) {
+    uint32 last_z = ~(mrow[i] | (uint32)srow[i] << 16), last_out = 0;   /* differs from pixel i */
+    while (i < right) {
+      uint32 main_z = mrow[i], sub_z = srow[i];
+      uint32 z = main_z | sub_z << 16;
+      if (__builtin_expect(z != last_z, 0)) {
+        last_z = z;
+        uint32 sum = cs[main_z & 0xff] + ss[sub_z & 0xff];
+        if ((sum & kBlendBypass) || ((main_z >> 8) & 0xf) >= 6)
+          last_out = math_fixed[main_z & 0x7ff], count++;
+        else
+          last_out = bt[sum & 63] | bt[64 + ((sum >> 11) & 63)] | bt[128 + (sum >> 22)];
+      }
+      dst[0] = (uint16_t)last_out;
+      dst++, i++;
     }
-    dst[0] = (uint16_t)last_out;
-    dst++, i++;
+    if (count * 8 > n) g_span_all_pass_first = 1;
+  } else {
+    /* g_sub_spread carries kBlendBypass on index 0 only, so this is the bypass
+     * of the sum, asked before reading either table. last_z starts at 0, which
+     * no blended pair can be: its sub index is nonzero. */
+    uint32 last_z = 0, last_out = 0;
+    while (i < right) {
+      uint32 main_z = mrow[i], sub_z = srow[i];
+      if ((sub_z & 0xff) == 0 || ((main_z >> 8) & 0xf) >= 6) {
+        dst[0] = math_fixed[main_z & 0x7ff];
+      } else {
+        uint32 z = main_z | sub_z << 16;
+        count++;
+        if (z != last_z) {
+          last_z = z;
+          uint32 sum = cs[main_z & 0xff] + ss[sub_z & 0xff];
+          last_out = bt[sum & 63] | bt[64 + ((sum >> 11) & 63)] | bt[128 + (sum >> 22)];
+        }
+        dst[0] = (uint16_t)last_out;
+      }
+      dst++, i++;
+    }
+    if (count * 4 > n) g_span_all_pass_first = 0;
   }
   return dst;
 }
@@ -1547,23 +1594,47 @@ static uint16_t *PpuBlendSpanPart(uint16_t *dst, const PpuZbufType *mrow, const 
                                   uint32 i, uint32 right, const uint16_t *math_fixed,
                                   uint32 math_enabled_cur) {
   const uint32_t *cs = g_cgram_spread;
-  const uint16_t *br = g_blend565[0], *bg = g_blend565[1], *bb = g_blend565[2];
+  const uint16_t *bt = g_blend565[0];
   if (i >= right) return dst;
-  uint32 last_z = ~(mrow[i] | (uint32)srow[i] << 16), last_out = 0;   /* differs from pixel i */
-  while (i < right) {
-    uint32 main_z = mrow[i], sub_z = srow[i];
-    uint32 z = main_z | sub_z << 16;
-    if (__builtin_expect(z != last_z, 0)) {
-      last_z = z;
-      if (!(math_enabled_cur & (1u << ((main_z >> 8) & 0xf))) || (sub_z & 0xff) == 0) {
-        last_out = math_fixed[main_z & 0x7ff];
-      } else {
-        uint32 sum = cs[main_z & 0xff] + cs[sub_z & 0xff];
-        last_out = br[sum & 63] | bg[(sum >> 11) & 63] | bb[(sum >> 22) & 63];
+  const uint32 n = right - i;
+  uint32 count = 0;
+  if (!g_span_part_pass_first) {
+    uint32 last_z = ~(mrow[i] | (uint32)srow[i] << 16), last_out = 0;   /* differs from pixel i */
+    while (i < right) {
+      uint32 main_z = mrow[i], sub_z = srow[i];
+      uint32 z = main_z | sub_z << 16;
+      if (__builtin_expect(z != last_z, 0)) {
+        last_z = z;
+        if (!(math_enabled_cur & (1u << ((main_z >> 8) & 0xf))) || (sub_z & 0xff) == 0) {
+          last_out = math_fixed[main_z & 0x7ff], count++;
+        } else {
+          uint32 sum = cs[main_z & 0xff] + cs[sub_z & 0xff];
+          last_out = bt[sum & 63] | bt[64 + ((sum >> 11) & 63)] | bt[128 + ((sum >> 22) & 63)];
+        }
       }
+      dst[0] = (uint16_t)last_out;
+      dst++, i++;
     }
-    dst[0] = (uint16_t)last_out;
-    dst++, i++;
+    if (count * 8 > n) g_span_part_pass_first = 1;
+  } else {
+    uint32 last_z = 0, last_out = 0;   /* 0 is no blended pair: see above */
+    while (i < right) {
+      uint32 main_z = mrow[i], sub_z = srow[i];
+      if (!(math_enabled_cur & (1u << ((main_z >> 8) & 0xf))) || (sub_z & 0xff) == 0) {
+        dst[0] = math_fixed[main_z & 0x7ff];
+      } else {
+        uint32 z = main_z | sub_z << 16;
+        count++;
+        if (z != last_z) {
+          last_z = z;
+          uint32 sum = cs[main_z & 0xff] + cs[sub_z & 0xff];
+          last_out = bt[sum & 63] | bt[64 + ((sum >> 11) & 63)] | bt[128 + ((sum >> 22) & 63)];
+        }
+        dst[0] = (uint16_t)last_out;
+      }
+      dst++, i++;
+    }
+    if (count * 4 > n) g_span_part_pass_first = 0;
   }
   return dst;
 }
