@@ -2781,6 +2781,54 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
 #undef NEXT_TP
 }
 
+/* The full-tile middle of a 2bpp layer pass, 8x8 tiles: the 2bpp twin of
+ * PpuBg4FullTiles, for the same reason (registers), with the same streaming
+ * nibble steps. 2bpp rows are one VRAM word, pixels are the low two bits of
+ * each nibble, the palette shift is 8, and a tile whose bits meet top_mask
+ * (or a virgin buffer) skips the z test, exactly as the loop it replaces. */
+#if !SNES_ABLATE_BG && !SNES_PPU_TILE_MEMO && !SNES_RENDER_CENSUS && !SNES_ABLATE_WALK && \
+    !SNES_ABLATE_FETCH && !SNES_PPU_COARSE_SKIP && \
+    !defined(SNES_LINE_CACHE) && !defined(SNES_LINE_REUSE_PROBE)
+#define SNES_PPU_BG2_RUN 1
+#if !SNES_PPU_BG4_RUN
+typedef struct { const uint16 *tp, *last, *next; } PpuTileWalk;
+#endif
+__attribute__((noinline))
+static PpuZbufType *PpuBg2FullTiles(const uint16 *vram, PpuTileWalk *tw, PpuZbufType *dstz, uint n,
+                                    uint32 tileadrs, uint32 zs, uint32 top_mask, bool no_ztest) {
+  const uint16 *tp = tw->tp, *tp_last = tw->last, *tp_next = tw->next;
+#define R_STEP(i, nib, adv, TEST) do { PpuZbufType *d_ = &dstz[i]; uint32 px_ = (nib); adv; if (TEST) *d_ = z + px_; } while (0)
+#define R_RUN(nib, adv, TEST) do { \
+    R_STEP(0, nib, adv, TEST); R_STEP(1, nib, adv, TEST); R_STEP(2, nib, adv, TEST); R_STEP(3, nib, adv, TEST); \
+    R_STEP(4, nib, adv, TEST); R_STEP(5, nib, adv, TEST); R_STEP(6, nib, adv, TEST); R_STEP(7, nib, adv, TEST); } while (0)
+  do {
+    uint32 tile = *tp;
+    if (tp != tp_last) tp += 1; else tp = tp_next, tp_next = tp_last - 31, tp_last = tp + 31;
+    int ta = (tile & 0x8000) ? (int)(tileadrs >> 16) : (int)(tileadrs & 0xffff);
+    PpuZbufType z = (tile & 0x2000) ? (PpuZbufType)(zs >> 16) : (PpuZbufType)zs;
+    uint32 bits = vram[(ta + (tile & 0x3ff) * 8) & 0x7fff];
+    if (bits) {
+      uint32 c = PpuDecode2bpp(bits);
+      z += ((tile & 0x1c00) >> 8);
+      if (tile & 0x4000) {   /* nibble i = low first */
+        if ((tile & top_mask) || no_ztest) R_RUN(c & 3, c >>= 4, px_);
+        else                               R_RUN(c & 3, c >>= 4, px_ && z > *d_);
+      } else {               /* nibble 7-i = high first */
+        if ((tile & top_mask) || no_ztest) R_RUN((c >> 28) & 3, c <<= 4, px_);
+        else                               R_RUN((c >> 28) & 3, c <<= 4, px_ && z > *d_);
+      }
+    }
+    dstz += 8;
+  } while (--n);
+#undef R_STEP
+#undef R_RUN
+  tw->tp = tp, tw->last = tp_last, tw->next = tp_next;
+  return dstz;
+}
+#else
+#define SNES_PPU_BG2_RUN 0
+#endif
+
 // Draw a whole line of a 2bpp background layer into bgBuffers.
 // top_mask: 0x2000 lets priority-set tiles take the unconditional-store fast
 // path -- valid only when this layer's high priority tops every z drawn so
@@ -2988,6 +3036,17 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
       x += clip;
     }
     // Handle full tiles in the middle
+#if SNES_PPU_BG2_RUN
+    if (!big && w >= 8) {
+      PpuTileWalk tw = { tp, tp_last, tp_next };
+      uint n = w >> 3;
+      dstz = PpuBg2FullTiles(ppu->vram, &tw, dstz, n,
+                             (uint32)(uint16)tileadr1 << 16 | (uint16)tileadr0,
+                             (uint32)(uint16)zhi << 16 | (uint16)zlo, top_mask, no_ztest);
+      tp = tw.tp, tp_last = tw.last, tp_next = tw.next;
+      w -= n << 3, x += n << 3;
+    }
+#endif
     while (w >= 8) {
       uint32 tile = PPU_PROBE_VRAM_PTR(ppu, tp);
       NEXT_MAP();
