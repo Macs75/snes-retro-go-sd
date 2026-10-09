@@ -52,6 +52,55 @@ void apu_free(Apu* apu) {
 #endif
 }
 
+/* LAZY SPC TIMERS. The three timers are a pure function of elapsed SPC
+ * cycles; the sound program only observes them through $FD-$FF (counter
+ * read, which also clears it) and changes them through $F1 (enable) and
+ * $FA-$FC (target). So instead of advancing them after every opcode,
+ * apu_timers_sync() advances them by the cycles elapsed since the last sync,
+ * just before each of those accesses, the idle skip's Timer 0 test and a
+ * savestate. A register access inside an opcode sees the state as of the
+ * opcode's start in both versions (apu->cycles moves after the opcode), so
+ * the result is the per-step update's, exactly.
+ *
+ * One closed form covers every case of a tick: the counter steps after
+ * s0 = ((target - divider - 1) & 0xff) + 1 ticks (divider climbs, wrapping at
+ * 256, until it equals target), then every `target` ticks (256 for target 0).
+ * For divider < target that is the old total/target, total%target.
+ *
+ * The sync point is a static, not an Apu field: the struct layout (savestate,
+ * the Thumb-2 engine's offsets) stays as it is. */
+static uint32_t apu_timer_sync;
+
+static void apu_timer_advance(Timer* t, int R, uint32_t n)
+{
+  uint32_t C = t->cycles;
+  uint32_t ticks = (C < n) ? ((n - 1 - C) / (uint32_t)R + 1) : 0;
+  if (!ticks) { t->cycles = (uint8_t)(C - n); return; }
+  if (t->enabled) {
+    uint32_t s0 = (((uint32_t)t->target - t->divider - 1) & 0xffu) + 1;
+    if (ticks < s0) {
+      t->divider = (uint8_t)(t->divider + ticks);
+    } else {
+      uint32_t period = t->target ? t->target : 256u;
+      uint32_t rest = ticks - s0;
+      t->counter = (uint8_t)((t->counter + 1 + rest / period) & 0xf);
+      t->divider = (uint8_t)(rest % period);
+    }
+  }
+  uint32_t lastK = C + (ticks - 1) * (uint32_t)R;
+  t->cycles = (uint8_t)((uint32_t)R + lastK - n);   /* value after the last reload */
+}
+
+static inline void apu_timers_sync(Apu* apu)
+{
+  uint32_t n = apu->cycles - apu_timer_sync;
+  if (!n) return;
+  apu_timer_sync = apu->cycles;
+  apu_timer_advance(&apu->timer[0], 128, n);
+  apu_timer_advance(&apu->timer[1], 128, n);
+  apu_timer_advance(&apu->timer[2], 16, n);
+}
+
 void apu_reset(Apu* apu) {
   apu->romReadable = true; // before resetting spc, because it reads reset vector from it
   spc_reset(apu->spc);
@@ -70,10 +119,13 @@ void apu_reset(Apu* apu) {
   }
   apu->cpuCyclesLeft = 7;
   apu->hist.count = 0;
+  apu_timer_sync = apu->cycles;
 }
 
 void apu_saveload(Apu *apu, SaveLoadFunc *func, void *ctx) {
+  apu_timers_sync(apu);                 /* a save writes the timers as of now */
   func(ctx, apu->ram, offsetof(Apu, pad) + 6 - offsetof(Apu, ram));
+  apu_timer_sync = apu->cycles;         /* a load: the loaded timers are as of its cycles */
   dsp_saveload(apu->dsp, func, ctx);
   spc_saveload(apu->spc, func, ctx);
 }
@@ -132,21 +184,7 @@ void apu_cycle(Apu* apu) {
 #endif
   }
 
-  // handle timers
-  for(int i = 0; i < 3; i++) {
-    if(apu->timer[i].cycles == 0) {
-      apu->timer[i].cycles = i == 2 ? 16 : 128;
-      if(apu->timer[i].enabled) {
-        apu->timer[i].divider++;
-        if(apu->timer[i].divider == apu->timer[i].target) {
-          apu->timer[i].divider = 0;
-          apu->timer[i].counter++;
-          apu->timer[i].counter &= 0xf;
-        }
-      }
-    }
-    apu->timer[i].cycles--;
-  }
+  /* timers: lazy, apu_timers_sync() at their register accesses */
 
   apu->cycles++;
 }
@@ -187,6 +225,7 @@ static int apu_idleSkipCycles(Apu* apu, int budget) {
   if (apu->romReadable && pc >= 0xffbc)
     return 0;                     /* those bytes would come from the boot ROM */
 
+  apu_timers_sync(apu);
   Timer* t = &apu->timer[0];
   if (!t->enabled || t->counter != 0 || t->target == 0 || t->divider >= t->target)
     return 0;
@@ -255,35 +294,7 @@ void apu_run(Apu* apu, int cyclesToRun) {
     }
 #endif
 
-    /* Each timer counts down; when it passes 0 it reloads to R and, if enabled,
-     * advances divider->counter. Over `step` cycles the zero-crossings land at
-     * k = C, C+R, C+2R, ... for k in [0,step). step <= cpuCyclesLeft (<=255), so the
-     * fallback loops are tiny. */
-    for (int i = 0; i < 3; i++) {
-      Timer* t = &apu->timer[i];
-      int R = (i == 2) ? 16 : 128;
-      int C = t->cycles;
-      int ticks = (C < step) ? ((step - 1 - C) / R + 1) : 0;
-      if (ticks) {
-        if (t->enabled) {
-          if (t->target && t->divider < t->target) {
-            int total = t->divider + ticks;
-            t->counter = (uint8_t)((t->counter + total / t->target) & 0xf);
-            t->divider = (uint8_t)(total % t->target);
-          } else {
-            /* target 0 (==test only on the 256-wrap) or divider>=target: step it */
-            for (int k = 0; k < ticks; k++) {
-              t->divider++;
-              if (t->divider == t->target) { t->divider = 0; t->counter = (t->counter + 1) & 0xf; }
-            }
-          }
-        }
-        int lastK = C + (ticks - 1) * R;
-        t->cycles = (uint8_t)(R + lastK - step);   /* value after the last reload */
-      } else {
-        t->cycles = (uint8_t)(C - step);
-      }
-    }
+    /* timers: lazy, apu_timers_sync() at their register accesses */
 
     apu->cycles = end;
     if (!idle) apu->cpuCyclesLeft -= (uint8_t)step;  /* an idle skip runs no opcode */
@@ -320,6 +331,7 @@ uint8_t apu_cpuRead(Apu* apu, uint16_t adr) {
     case 0xfd:
     case 0xfe:
     case 0xff: {
+      apu_timers_sync(apu);
       uint8_t ret = apu->timer[adr - 0xfd].counter;
       apu->timer[adr - 0xfd].counter = 0;
       return ret;
@@ -337,6 +349,7 @@ void apu_cpuWrite(Apu* apu, uint16_t adr, uint8_t val) {
       break; // test register
     }
     case 0xf1: {
+      apu_timers_sync(apu);
       for(int i = 0; i < 3; i++) {
         if(!apu->timer[i].enabled && (val & (1 << i))) {
           apu->timer[i].divider = 0;
@@ -384,6 +397,7 @@ void apu_cpuWrite(Apu* apu, uint16_t adr, uint8_t val) {
     case 0xfa:
     case 0xfb:
     case 0xfc: {
+      apu_timers_sync(apu);
       apu->timer[adr - 0xfa].target = val;
       break;
     }
