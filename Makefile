@@ -29,6 +29,8 @@ SNES_SPIN_SKIP ?= 0
 SNES_SPIN_BAKE ?= 1
 SNES_DSP_MONO ?= 0
 SNES_SPC_IDLE_SKIP ?= 1
+# silent DSP voices leave the per-sample loop, caught up when they wake (src/snes/dsp.c)
+SNES_DSP_IDLE_SKIP_VOICE ?= 1
 SNES_BUS_IN_ITCM ?= 1
 # PERF=1: per-component cycle profiler, PROF/... log lines every 120 frames (src/snes_perf.h)
 PERF ?= 0
@@ -82,6 +84,7 @@ CORE_C_DEFS := \
 -DSNES_DIRECT_VIDEO \
 -DSNES_PRESENT_DMA2D \
 -DSNES_SPC_IDLE_SKIP=$(SNES_SPC_IDLE_SKIP) \
+-DSNES_DSP_IDLE_SKIP_VOICE=$(SNES_DSP_IDLE_SKIP_VOICE) \
 -DSNES_PPU_OPAQUE_TILE=1 \
 -DSNES_PPU_BLEND_LUT=1 \
 -DSNES_PPU_VIRGIN_Z=1 \
