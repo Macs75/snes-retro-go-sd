@@ -122,6 +122,27 @@ int spin_bake_run_span(Snes *s, Cpu *cpu, int dots) {
         cpu->z = (val == 0);
         cpu->n = g_bake.mf ? ((val & 0x80) != 0) : ((val & 0x8000) != 0);
         if (val != 0) return dots;   /* loop is leaving -- let the interpreter leave it */
+        /* Whole laps in one step. Inside a span nothing can end the loop: the
+         * polled byte is WRAM that only the CPU, an NMI/IRQ or DMA could
+         * change, and every one of those was ruled out above or bails at an
+         * opcode boundary that this span does not reach (vPos is constant
+         * inside a span, events run outside it). So every remaining lap is
+         * this one again: the same a/z/n, the same two charges, consumed in
+         * full because each is an even number >= 2. Advance by k laps, keep
+         * the last one (and any partial lap) for the exact path below.
+         * apuDotsAccum is a plain sum until snes_catchupApu, so one add of
+         * k*L equals k adds of L. */
+        {
+          const int L = g_bake.charge_load + g_bake.charge_branch;
+          if (L > 0 && !((g_bake.charge_load | g_bake.charge_branch) & 1) &&
+              g_bake.charge_load >= 2 && g_bake.charge_branch >= 2 && dots >= 2 * L) {
+            const int k = dots / L - 1;
+            s->hPos = (uint16_t)(s->hPos + k * L);
+            s->apuDotsAccum += (uint32_t)(k * L);
+            dots -= k * L;
+            g_bake.laps += (uint32_t)k;
+          }
+        }
         cpu->pc = g_bake.pc_branch;
         s->cpuCyclesLeft += g_bake.charge_load;
       } else if (cpu->pc == g_bake.pc_branch) {
