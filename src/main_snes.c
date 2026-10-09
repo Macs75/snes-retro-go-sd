@@ -91,6 +91,7 @@ static void snes_wait_button(void)
 #include "snes/rc_dispatch.h"
 #include "snes_profile.h"
 #include "snes_perf.h"
+#include "snes_scale.h"
 
 #define APPID_SNES 25
 
@@ -694,36 +695,14 @@ static void present_frame(void) {
     return;
   }
 
-  if (scaling == ODROID_DISPLAY_SCALING_FULL) {
-    /* Stretch 256x224 → 320x240 (fills the panel, slight aspect distortion).
-     * Nearest-neighbour: for each dest pixel, pick the closest source pixel. */
-    for (int y = 0; y < GW_LCD_HEIGHT; y++) {
-      int sy = (y * SNES_HEIGHT) / GW_LCD_HEIGHT;
-      const uint16_t *srow = snes_frame + (sy + SNES_TOP_MARGIN) * GW_LCD_WIDTH + SNES_LEFT_MARGIN;
-      uint16_t *drow = dst + y * GW_LCD_WIDTH;
-      for (int x = 0; x < GW_LCD_WIDTH; x++)
-        drow[x] = srow[(x * SNES_WIDTH) / GW_LCD_WIDTH];
-    }
-    return;
-  }
-
-  /* FIT (and CUSTOM, treated the same): aspect-preserving. SNES 256:224 =
-   * 8:7 ≈ 1.143. The LCD 320:240 = 4:3 ≈ 1.333 is wider, so fill the height
-   * (240) and letterbox the width: fit_w = 240 * 256/224 ≈ 274, side borders
-   * ≈ 23 px each. */
-  {
-    int fit_w = (SNES_WIDTH * GW_LCD_HEIGHT + SNES_HEIGHT / 2) / SNES_HEIGHT;
-    int lpad = (GW_LCD_WIDTH - fit_w) / 2;
-    for (int y = 0; y < GW_LCD_HEIGHT; y++) {
-      int sy = (y * SNES_HEIGHT) / GW_LCD_HEIGHT;
-      const uint16_t *srow = snes_frame + (sy + SNES_TOP_MARGIN) * GW_LCD_WIDTH + SNES_LEFT_MARGIN;
-      uint16_t *drow = dst + y * GW_LCD_WIDTH;
-      for (int x = 0; x < lpad; x++) drow[x] = 0;          /* left border */
-      for (int x = 0; x < fit_w; x++)
-        drow[lpad + x] = srow[(x * SNES_WIDTH) / fit_w];   /* scaled image */
-      for (int x = lpad + fit_w; x < GW_LCD_WIDTH; x++) drow[x] = 0;  /* right */
-    }
-  }
+  /* FULL (256x224 stretched to 320x240) and FIT / CUSTOM (aspect kept:
+   * 274x240 between 23-pixel black borders): src/snes_scale.h, the same
+   * nearest-neighbour output as the per-pixel loops it replaced, with 32-bit
+   * stores and no division per pixel. */
+  if (scaling == ODROID_DISPLAY_SCALING_FULL)
+    snes_scale_full(dst, snes_frame, SNES_TOP_MARGIN, SNES_LEFT_MARGIN);
+  else
+    snes_scale_fit(dst, snes_frame, SNES_TOP_MARGIN, SNES_LEFT_MARGIN);
 }
 
 /* Present the last rendered frame and draw the in-game overlay on top. Used both
