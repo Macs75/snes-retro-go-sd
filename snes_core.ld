@@ -179,6 +179,12 @@ SECTIONS
     *cpu.o(.itcm_snes_interp.thumb2.bus)
     *dma.o(.itcm_snes_interp.thumb2.bus)
     */snes.o(.itcm_snes_interp.thumb2.bus)
+    /* the main loop and scheduler at a fixed offset too (where they measured
+     * best): a change in the bus helpers in front must not move them */
+    __ITCM_BUS_END__ = .;
+    ASSERT(__ITCM_BUS_END__ <= __CORE_ITCM_CODE_START__ + 0x564,
+           "SNES: ITCM bus helpers outgrew their slot in front of the main loop (0x564)");
+    . = __CORE_ITCM_CODE_START__ + 0x564;
     *main_snes.o(.itcm_snes_interp.thumb2.bus)
     __ITCM_MAIN_END__ = .;
     /* a diagnostic build (PERF_CPU=1) may move the engine with
