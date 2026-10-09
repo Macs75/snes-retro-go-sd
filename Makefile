@@ -247,3 +247,4 @@ docker_shell:
 # Host SDL (Linux / macOS)
 #######################################
 include host/Makefile.host
+include host/qemu/Makefile.qemu

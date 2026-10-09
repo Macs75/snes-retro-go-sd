@@ -1,0 +1,53 @@
+# QEMU (mps2-an500, Cortex-M7) build of the core WITH the device's Thumb-2
+# 65816 and SPC700 engines -- included from the project Makefile.
+#
+# The host build (make host) runs the C interpreters only: a change to the
+# Thumb-2 engines or their bus bridges is invisible to it. This build runs the
+# same record/replay on an emulated Cortex-M7 and prints the same REC/hash and
+# REC/pic lines, to compare with the host's (or the device's):
+#
+#   docker run ... sylverb/retro-go-sd-builder:v1.5 make qemu
+#   host/qemu/run.sh <dir with ROM + .rec> <rom file> <frames>
+#
+# Correctness only: QEMU is not cycle-accurate, costs need the device PROF log.
+
+QEMU_BUILD_DIR := build/qemu
+QEMU_ELF := $(CORE_NAME)_qemu.elf
+
+QEMU_CFLAGS := $(MCU) -O2 -g -ffunction-sections -fdata-sections -std=gnu11 \
+	-include host/stubs/config.h \
+	$(HOST_DEFS) -DSNES_THUMB2_CPU -DSPC_THUMB2_SPC -DQEMU_BUILD \
+	$(HOST_INCLUDES) -I$(SNES)/thumb2
+
+QEMU_SRCS := $(CORE_C_SOURCES) host/host_emu.c host/host_i18n.c \
+	host/qemu/qemu_platform.c host/qemu/qemu_main.c host/qemu/startup.c
+QEMU_OBJS := $(addprefix $(QEMU_BUILD_DIR)/,$(QEMU_SRCS:.c=.o)) \
+	$(addprefix $(QEMU_BUILD_DIR)/,$(CORE_ASM_SOURCES:.S=.o))
+
+.PHONY: qemu qemu_clean
+
+qemu: $(QEMU_ELF)
+
+$(QEMU_ELF): $(QEMU_OBJS) host/qemu/qemu.ld
+	$(V)$(ECHO) "[ LD QEMU ]" $@
+	$(V)$(CC) $(MCU) -nostartfiles -T host/qemu/qemu.ld -Wl,--gc-sections \
+		-Wl,-Map=$(QEMU_BUILD_DIR)/$(CORE_NAME)_qemu.map $(QEMU_OBJS) \
+		-Wl,--start-group -lc -lrdimon -lm -lgcc -Wl,--end-group -o $@
+	$(V)$(SZ) $@
+
+$(QEMU_BUILD_DIR)/%.o: %.c
+	$(V)mkdir -p $(dir $@)
+	$(V)$(ECHO) "[ CC QEMU ]" $<
+	$(V)$(CC) $(QEMU_CFLAGS) -MMD -MP -MF"$(@:%.o=%.d)" -c $< -o $@
+
+$(QEMU_BUILD_DIR)/%.o: %.S
+	$(V)mkdir -p $(dir $@)
+	$(V)$(ECHO) "[ AS QEMU ]" $<
+	$(V)$(CC) $(QEMU_CFLAGS) -x assembler-with-cpp -c $< -o $@
+
+qemu_clean:
+	$(V)rm -rf $(QEMU_BUILD_DIR) $(QEMU_ELF)
+
+clean:: qemu_clean
+
+-include $(QEMU_OBJS:.o=.d)
