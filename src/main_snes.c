@@ -534,6 +534,11 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
   }
 }
 
+/* The one scheduler entry the main loop calls (once a frame): kept out of
+ * line so it, with run_dots / run_one_opcode / cpu_tick inlined into it, is
+ * all the main_snes.c code ITCM holds. app_main_snes itself -- init, menus,
+ * record/replay, savestates -- is cold and lives in RAM. */
+__attribute__((noinline))
 static void SNES_ITCM_SCHED run_frame_events(Snes *s) {
   extern void wdog_refresh(void);
   uint16_t last_v = 0xffff;
@@ -1752,11 +1757,9 @@ static bool rc_smw_activate(const uint8_t *rom, uint32_t len) {
 #endif
 }
 
-/* In ITCM with the engine it drives — same as jshsakura monolithic overlay
- * (avoids BL veneers to cpu_runOpcode / snes_cpuRead every opcode). */
-#ifdef SNES_BUS_IN_ITCM
-__attribute__((section(".itcm_snes_interp.thumb2.bus")))
-#endif
+/* In RAM: the per-opcode path (run_frame_events and what it inlines) is in
+ * ITCM with the engine it drives, so no opcode pays a veneer; this function
+ * calls it once a frame. */
 void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 {
   gw_core_bridge_init();

@@ -169,29 +169,31 @@ SECTIONS
     __CORE_ITCM_CODE_START__ = .;
     /* Fixed order and a FIXED ENGINE ADDRESS, like the RAM_EMU windows.
      * ITCM has no cache, yet where the 65816 engine sits measured +-50-60K
-     * cycles a frame of CPU time: engine at 0x1E04 (the bus helpers and the
-     * main loop in front of it) was the best of three positions measured
-     * (0x1F74 and 0x0000 were both 50-60K worse, Castlevania and Zelda
-     * alike). So the bus helpers and the main loop come first, in the order
-     * that measured best, and the engine is pinned at 0x1E04: a change to the
-     * main loop now moves nothing, and if it outgrows its slot the link fails
-     * here instead of silently moving the engine. */
+     * cycles a frame of CPU time: engine at 0x1E04 was the best of three
+     * positions measured (0x1F74 and 0x0000 were both 50-60K worse,
+     * Castlevania and Zelda alike). It now sits at 0x0E04, exactly 4 KB
+     * lower: every address keeps its low 12 bits, so its branch targets
+     * keep their alignment in the fetch words, and the 4 KB that the cold
+     * main loop gave back (it moved to RAM) are free after the engine for
+     * it to grow into. In front of it: the bus helpers, then the scheduler
+     * (run_frame_events). If they outgrow their slot the link fails here
+     * instead of silently moving the engine. */
     *cpu.o(.itcm_snes_interp.thumb2.bus)
     *dma.o(.itcm_snes_interp.thumb2.bus)
     */snes.o(.itcm_snes_interp.thumb2.bus)
-    /* the main loop and scheduler at a fixed offset too (where they measured
-     * best): a change in the bus helpers in front must not move them */
+    /* the scheduler at a fixed offset too: a change in the bus helpers in
+     * front must not move it */
     __ITCM_BUS_END__ = .;
     ASSERT(__ITCM_BUS_END__ <= __CORE_ITCM_CODE_START__ + 0x564,
-           "SNES: ITCM bus helpers outgrew their slot in front of the main loop (0x564)");
+           "SNES: ITCM bus helpers outgrew their slot in front of the scheduler (0x564)");
     . = __CORE_ITCM_CODE_START__ + 0x564;
     *main_snes.o(.itcm_snes_interp.thumb2.bus)
     __ITCM_MAIN_END__ = .;
     /* a diagnostic build (PERF_CPU=1) may move the engine with
-     * --defsym=__SNES_ITCM_ENGINE_AT=...; every other build keeps 0x1E04 */
-    __ITCM_ENGINE_OFF = DEFINED(__SNES_ITCM_ENGINE_AT) ? __SNES_ITCM_ENGINE_AT : 0x1E04;
+     * --defsym=__SNES_ITCM_ENGINE_AT=...; every other build keeps 0x0E04 */
+    __ITCM_ENGINE_OFF = DEFINED(__SNES_ITCM_ENGINE_AT) ? __SNES_ITCM_ENGINE_AT : 0x0E04;
     ASSERT(__ITCM_MAIN_END__ <= __CORE_ITCM_CODE_START__ + __ITCM_ENGINE_OFF,
-           "SNES: ITCM bus+main loop outgrew its slot in front of the 65816 engine (0x1E04)");
+           "SNES: ITCM bus+scheduler outgrew their slot in front of the 65816 engine");
     . = __CORE_ITCM_CODE_START__ + __ITCM_ENGINE_OFF;
     __ITCM_ENGINE_START__ = .;
     *(.itcm_snes_interp.thumb2)
