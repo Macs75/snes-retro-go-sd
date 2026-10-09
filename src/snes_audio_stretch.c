@@ -236,6 +236,14 @@ static uint32_t underruns;
  * ~zero and noise_pulls should be nearly every pull. */
 uint32_t g_stretch_ins, g_stretch_pulls, g_stretch_noise_pulls, g_stretch_conf_lp;
 uint32_t g_stretch_rev;   /* of those insertions, how many were reversed */
+#ifdef SNES_PERF_AUDIO
+/* diagnostics (PERF_AUDIO=1): input samples read / dropped, pulls, pulled
+ * samples, the largest pull, pulls whose step was clamped at the floor or
+ * the ceiling, and the sum of the unclamped rate the loop asked for */
+uint32_t g_sa_used, g_sa_drop, g_sa_pulls, g_sa_pulled, g_sa_pull_max;
+uint32_t g_sa_floor, g_sa_ceil, g_sa_base_min = 0xffffffffu, g_sa_base_max;
+uint64_t g_sa_next_sum, g_sa_base_sum;
+#endif
 static int16_t  last;
 static volatile uint8_t  primed;    /* has the ring ever reached TARGET?    */
 static uint16_t picks_since = PICK_EVERY;  /* frames since the last search */
@@ -284,6 +292,9 @@ void snes_stretch_push(const int16_t *src, uint16_t n) {
     if (fill >= RING) {            /* core outrunning the DMA: drop oldest */
       rd = (uint16_t)((rd + 1u) & RING_MASK);
       fill--;
+#ifdef SNES_PERF_AUDIO
+      g_sa_drop++;
+#endif
     }
     ring[wr] = src[i];
     wr = (uint16_t)((wr + 1u) & RING_MASK);
@@ -308,6 +319,9 @@ void snes_stretch_push(const int16_t *src, uint16_t n) {
     while (fill > TARGET + p) {
       rd = (uint16_t)((rd + p) & RING_MASK);
       fill = (uint16_t)(fill - p);
+#ifdef SNES_PERF_AUDIO
+      g_sa_drop += p;
+#endif
     }
   }
   pushed += n;
@@ -425,6 +439,14 @@ static void retune(uint16_t n) {
                                                 : STEP_MIN_NOISE;
   int32_t lo = (int32_t)STEP_MIN - (int32_t)(((STEP_MIN - floor_q) * w) >> 8);
   int32_t hi = (int32_t)STEP_MAX;
+#endif
+#ifdef SNES_PERF_AUDIO
+  g_sa_pulls++; g_sa_pulled += n; if (n > g_sa_pull_max) g_sa_pull_max = n;
+  g_sa_next_sum += (uint32_t)(next > 0 ? next : 0); g_sa_base_sum += base;
+  if (base < g_sa_base_min) g_sa_base_min = base;
+  if (base > g_sa_base_max) g_sa_base_max = base;
+  if (next < lo) g_sa_floor++;
+  if (next > hi) g_sa_ceil++;
 #endif
   if (next < lo) next = lo;
   if (next > hi) next = hi;
@@ -615,6 +637,9 @@ void snes_stretch_pull(int16_t *dst, uint16_t n) {
       phase -= 65536u;
       rd = (uint16_t)((rd + 1u) & RING_MASK);
       fill--;
+#ifdef SNES_PERF_AUDIO
+      g_sa_used++;
+#endif
     }
   }
 }

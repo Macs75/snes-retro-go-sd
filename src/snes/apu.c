@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "../snes_perf.h"
 #include <stddef.h>
 
 
@@ -206,6 +207,10 @@ static int apu_idleSkipCycles(Apu* apu, int budget) {
  * DSP branch every single cycle; an opcode already told us its whole cost. Cycle-exact:
  * the framebuffer/WRAM/SRAM state hash is bit-identical to the per-cycle loop. */
 void apu_run(Apu* apu, int cyclesToRun) {
+#ifdef SNES_PERF
+  SNES_PERF_BEGIN(perf_t);
+  snes_perf_apu_calls++;
+#endif
   while (cyclesToRun > 0) {
     int step;
     bool idle = false;
@@ -234,8 +239,20 @@ void apu_run(Apu* apu, int cyclesToRun) {
      * every multiple of 32 in [cycles, cycles+step). */
     uint32_t start = apu->cycles, end = start + (uint32_t)step;
 #if !SNES_ABLATE_DSP
-    for (uint32_t m = (start + 31u) & ~31u; m < end; m += 32u)
-      dsp_cycle(apu->dsp);
+    {
+      uint32_t m = (start + 31u) & ~31u;
+#ifdef SNES_PERF
+      if (m < end) {
+        SNES_PERF_BEGIN(perf_d);
+        for (; m < end; m += 32u)
+          dsp_cycle(apu->dsp);
+        SNES_PERF_END(snes_perf_dsp, perf_d);
+      }
+#else
+      for (; m < end; m += 32u)
+        dsp_cycle(apu->dsp);
+#endif
+    }
 #endif
 
     /* Each timer counts down; when it passes 0 it reloads to R and, if enabled,
@@ -272,6 +289,9 @@ void apu_run(Apu* apu, int cyclesToRun) {
     if (!idle) apu->cpuCyclesLeft -= (uint8_t)step;  /* an idle skip runs no opcode */
     cyclesToRun -= step;
   }
+#ifdef SNES_PERF
+  SNES_PERF_END(snes_perf_apu, perf_t);
+#endif
 }
 
 uint8_t apu_cpuRead(Apu* apu, uint16_t adr) {

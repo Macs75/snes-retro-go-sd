@@ -30,6 +30,10 @@ SNES_SPIN_BAKE ?= 1
 SNES_DSP_MONO ?= 0
 SNES_SPC_IDLE_SKIP ?= 1
 SNES_BUS_IN_ITCM ?= 1
+# PERF=1: per-component cycle profiler, PROF/... log lines every 120 frames (src/snes_perf.h)
+PERF ?= 0
+PERF_PPU ?= 0
+PERF_AUDIO ?= 0
 
 CORE_C_SOURCES := \
 $(SNES)/apu.c \
@@ -86,6 +90,17 @@ CORE_C_DEFS := \
 
 ifeq ($(SNES_BUS_IN_ITCM),1)
 CORE_C_DEFS += -DSNES_BUS_IN_ITCM
+endif
+ifeq ($(PERF),1)
+CORE_C_DEFS += -DSNES_PERF
+# PERF_PPU=1 adds the PPU split (probes on every drawn line, a few K a frame)
+ifeq ($(PERF_PPU),1)
+CORE_C_DEFS += -DSNES_PERF_PPU
+endif
+# PERF_AUDIO=1 adds the stretcher / audio-rate diagnostics
+ifeq ($(PERF_AUDIO),1)
+CORE_C_DEFS += -DSNES_PERF_AUDIO
+endif
 endif
 ifeq ($(SNES_SPIN_SKIP),1)
 CORE_C_DEFS += -DSNES_SPIN_SKIP

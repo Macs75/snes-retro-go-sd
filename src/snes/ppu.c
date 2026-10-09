@@ -11,6 +11,7 @@
 #include "types.h"
 #ifdef TARGET_GNW
 #include "gw_malloc.h"
+#include "../snes_perf.h"
 /* The device framebuffer is RGB565. */
 #ifndef PPU_RGB565
 #define PPU_RGB565 1
@@ -1214,7 +1215,9 @@ void ppu_runLine(Ppu* ppu, int line) {
 #if SNES_MATHFIXED_CENSUS
       g_objeval_lines++;
 #endif
+      SNES_PERF_PPU_BEGIN(perf_e);
       ppu->lineHasSprites = !ppu->forcedBlank && ppu_evaluateSprites(ppu, line - 1);
+      SNES_PERF_PPU_END(SNES_PERF_PPU_EVAL, perf_e);
       if (!obj_untouched)
         ppu->objBufferClean = !ppu->lineHasSprites;
     }
@@ -3192,6 +3195,9 @@ PPU_SPLIT_NOINLINE static void PpuDrawSprites(Ppu *ppu, uint y, uint sub, bool c
   }
 }
 
+/* SNES_PERF: time one layer or sprite pass into its PPU part */
+#define PPU_PT(part, call) do { SNES_PERF_PPU_BEGIN(t_pt); call; SNES_PERF_PPU_END(part, t_pt); } while (0)
+
 PPU_SPLIT_NOINLINE static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
   // Top 4 bits contain the prio level, and bottom 4 bits the layer type.
   // SPRITE_PRIO_TO_PRIO can be used to convert from obj prio to this prio.
@@ -3210,37 +3216,37 @@ PPU_SPLIT_NOINLINE static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
 
   if (ppu->mode == 1) {
     if (ppu->lineHasSprites)
-      PpuDrawSprites(ppu, y, sub, true);
+      PPU_PT(SNES_PERF_PPU_SPR, PpuDrawSprites(ppu, y, sub, true));
 
 #ifdef GNW_SNES_CORE
     /* Mosaic ($2106) is handled inside the 4bpp/2bpp drawers. */
-    PpuDrawBackground_4bpp(ppu, y, sub, 0, 0xc000, 0x8000);
-    PpuDrawBackground_4bpp(ppu, y, sub, 1, 0xb100, 0x7100);
+    PPU_PT(SNES_PERF_PPU_BG4, PpuDrawBackground_4bpp(ppu, y, sub, 0, 0xc000, 0x8000));
+    PPU_PT(SNES_PERF_PPU_BG4, PpuDrawBackground_4bpp(ppu, y, sub, 1, 0xb100, 0x7100));
     /* $2105 bit 3 raises BG3 to rank 15. Without it, BG3 prio-1 is rank 3
      * (under BG1/BG2). Hardcoding the Zelda-3 constants put Pilotwings' HUD
      * under BG3's 2bpp tiles. */
-    PpuDrawBackground_2bpp(ppu, y, sub, 2,
+    PPU_PT(SNES_PERF_PPU_BG2, PpuDrawBackground_2bpp(ppu, y, sub, 2,
                            ppu->bg3priority ? 0xf200 : 0x3200,
                            0x1200,
-                           ppu->bg3priority ? 0x2000 : 0);
+                           ppu->bg3priority ? 0x2000 : 0));
 #else
     if (IS_MOSAIC_ENABLED(ppu, 0))
       assert(0);
     else
-      PpuDrawBackground_4bpp(ppu, y, sub, 0, 0xc000, 0x8000);
+      PPU_PT(SNES_PERF_PPU_BG4, PpuDrawBackground_4bpp(ppu, y, sub, 0, 0xc000, 0x8000));
 
     if (IS_MOSAIC_ENABLED(ppu, 1))
       assert(0);
     else
-      PpuDrawBackground_4bpp(ppu, y, sub, 1, 0xb100, 0x7100);
+      PPU_PT(SNES_PERF_PPU_BG4, PpuDrawBackground_4bpp(ppu, y, sub, 1, 0xb100, 0x7100));
 
     if (IS_MOSAIC_ENABLED(ppu, 2))
       assert(0);
     else
-      PpuDrawBackground_2bpp(ppu, y, sub, 2,
+      PPU_PT(SNES_PERF_PPU_BG2, PpuDrawBackground_2bpp(ppu, y, sub, 2,
                              ppu->bg3priority ? 0xf200 : 0x3200,
                              0x1200,
-                             ppu->bg3priority ? 0x2000 : 0);
+                             ppu->bg3priority ? 0x2000 : 0));
 #endif
   } else if (ppu->mode == 0) {
     /* Mode 0: four 2bpp layers, each with its own 32-colour CGRAM window
@@ -3252,66 +3258,66 @@ PPU_SPLIT_NOINLINE static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
      * (Mario Kart's whole menu flow -- driver select included -- is mode 0;
      * this used to fall through to the mode-7 renderer and drew garbage.) */
     if (ppu->lineHasSprites)
-      PpuDrawSprites(ppu, y, sub, true);
+      PPU_PT(SNES_PERF_PPU_SPR, PpuDrawSprites(ppu, y, sub, true));
     /* z is [prio:4][layer:4][cgram:8]. Backdrop is 0x0500 (layer 5), so a
      * prio-0 layer-3 word (0x03xx) loses the z test and BG4 vanishes — the
      * Burn-in Test Cartridge Mode 0 screen is exactly that: TM=BG4, prio 0.
      * Keep layer nibbles 2/3 and sit BG4p0 above 0x0500, BG3p0 above BG4p0,
      * both still below sprite prio 0 (0x24xx). */
-    PpuDrawBackground_2bpp(ppu, y, sub, 0, 0xd000,      0x9000,      0);
-    PpuDrawBackground_2bpp(ppu, y, sub, 1, 0xc100 + 32, 0x8100 + 32, 0);
-    PpuDrawBackground_2bpp(ppu, y, sub, 2, 0x5200 + 64, 0x2200 + 64, 0);
-    PpuDrawBackground_2bpp(ppu, y, sub, 3, 0x4300 + 96, 0x1300 + 96, 0);
+    PPU_PT(SNES_PERF_PPU_BG2, PpuDrawBackground_2bpp(ppu, y, sub, 0, 0xd000,      0x9000,      0));
+    PPU_PT(SNES_PERF_PPU_BG2, PpuDrawBackground_2bpp(ppu, y, sub, 1, 0xc100 + 32, 0x8100 + 32, 0));
+    PPU_PT(SNES_PERF_PPU_BG2, PpuDrawBackground_2bpp(ppu, y, sub, 2, 0x5200 + 64, 0x2200 + 64, 0));
+    PPU_PT(SNES_PERF_PPU_BG2, PpuDrawBackground_2bpp(ppu, y, sub, 3, 0x4300 + 96, 0x1300 + 96, 0));
   } else if (ppu->mode == 2) {
     /* Mode 2: BG1+BG2 4bpp. Streaming walk when OPT is unused; per-column
      * ppu_handleOPT otherwise. Hardware order S3 BG1p1 S2 BG2p1 S1 BG1p0 S0 BG2p0. */
     if (ppu->lineHasSprites)
-      PpuDrawSprites(ppu, y, sub, true);
+      PPU_PT(SNES_PERF_PPU_SPR, PpuDrawSprites(ppu, y, sub, true));
     if (PpuMode2HasOpt(ppu)) {
-      PpuDrawBackground_opt(ppu, y, sub, 0, 0xc000, 0x4000, 4);
-      PpuDrawBackground_opt(ppu, y, sub, 1, 0x9100, 0x1100, 4);
+      PPU_PT(SNES_PERF_PPU_BGX, PpuDrawBackground_opt(ppu, y, sub, 0, 0xc000, 0x4000, 4));
+      PPU_PT(SNES_PERF_PPU_BGX, PpuDrawBackground_opt(ppu, y, sub, 1, 0x9100, 0x1100, 4));
     } else {
-      PpuDrawBackground_4bpp(ppu, y, sub, 0, 0xc000, 0x4000);
-      PpuDrawBackground_4bpp(ppu, y, sub, 1, 0x9100, 0x1100);
+      PPU_PT(SNES_PERF_PPU_BG4, PpuDrawBackground_4bpp(ppu, y, sub, 0, 0xc000, 0x4000));
+      PPU_PT(SNES_PERF_PPU_BG4, PpuDrawBackground_4bpp(ppu, y, sub, 1, 0x9100, 0x1100));
     }
   } else if (ppu->mode == 4) {
     /* Mode 4: BG1 8bpp + BG2 2bpp. Hardware order
      * S3 BG1p1 S2 BG2p1 S1 BG1p0 S0 BG2p0. Sprite ranks are 14/10/6/2 in
      * the high byte; the z constants sit in the gaps. */
     if (ppu->lineHasSprites)
-      PpuDrawSprites(ppu, y, sub, true);
+      PPU_PT(SNES_PERF_PPU_SPR, PpuDrawSprites(ppu, y, sub, true));
     if (PpuMode4HasOpt(ppu)) {
-      PpuDrawBackground_opt(ppu, y, sub, 0, 0xc000, 0x4000, 8);
-      PpuDrawBackground_opt(ppu, y, sub, 1, 0x9100, 0x1100, 2);
+      PPU_PT(SNES_PERF_PPU_BGX, PpuDrawBackground_opt(ppu, y, sub, 0, 0xc000, 0x4000, 8));
+      PPU_PT(SNES_PERF_PPU_BGX, PpuDrawBackground_opt(ppu, y, sub, 1, 0x9100, 0x1100, 2));
     } else {
-      PpuDrawBackground_8bpp(ppu, y, sub, 0, 0xc000, 0x4000);
-      PpuDrawBackground_2bpp(ppu, y, sub, 1, 0x9100, 0x1100, 0);
+      PPU_PT(SNES_PERF_PPU_BGX, PpuDrawBackground_8bpp(ppu, y, sub, 0, 0xc000, 0x4000));
+      PPU_PT(SNES_PERF_PPU_BG2, PpuDrawBackground_2bpp(ppu, y, sub, 1, 0x9100, 0x1100, 0));
     }
   } else if (ppu->mode == 3) {
     /* Mode 3: BG1 8bpp + BG2 4bpp. Same priority ranks as Mode 2/4
      * (S3 BG1p1 S2 BG2p1 S1 BG1p0 S0 BG2p0). No OPT. */
     if (ppu->lineHasSprites)
-      PpuDrawSprites(ppu, y, sub, true);
-    PpuDrawBackground_8bpp(ppu, y, sub, 0, 0xc000, 0x4000);
-    PpuDrawBackground_4bpp(ppu, y, sub, 1, 0x9100, 0x1100);
+      PPU_PT(SNES_PERF_PPU_SPR, PpuDrawSprites(ppu, y, sub, true));
+    PPU_PT(SNES_PERF_PPU_BGX, PpuDrawBackground_8bpp(ppu, y, sub, 0, 0xc000, 0x4000));
+    PPU_PT(SNES_PERF_PPU_BG4, PpuDrawBackground_4bpp(ppu, y, sub, 1, 0x9100, 0x1100));
   } else if (ppu->mode == 5) {
     /* Mode 5: BG1 4bpp + BG2 2bpp, 512-wide tiles shown at 256.
      * Same priority ranks as Mode 2/3/4. */
     if (ppu->lineHasSprites)
-      PpuDrawSprites(ppu, y, sub, true);
-    PpuDrawBackground_hires(ppu, y, sub, 0, 0xc000, 0x4000, 4);
-    PpuDrawBackground_hires(ppu, y, sub, 1, 0x9100, 0x1100, 2);
+      PPU_PT(SNES_PERF_PPU_SPR, PpuDrawSprites(ppu, y, sub, true));
+    PPU_PT(SNES_PERF_PPU_BGX, PpuDrawBackground_hires(ppu, y, sub, 0, 0xc000, 0x4000, 4));
+    PPU_PT(SNES_PERF_PPU_BGX, PpuDrawBackground_hires(ppu, y, sub, 1, 0x9100, 0x1100, 2));
   } else if (ppu->mode == 6) {
     /* Mode 6: BG1 4bpp hires + OPT. Hardware has no BG2.
      * PpuDrawBackground_hires already calls ppu_handleOPT. */
     if (ppu->lineHasSprites)
-      PpuDrawSprites(ppu, y, sub, true);
-    PpuDrawBackground_hires(ppu, y, sub, 0, 0xc000, 0x4000, 4);
+      PPU_PT(SNES_PERF_PPU_SPR, PpuDrawSprites(ppu, y, sub, true));
+    PPU_PT(SNES_PERF_PPU_BGX, PpuDrawBackground_hires(ppu, y, sub, 0, 0xc000, 0x4000, 4));
   } else {
     /* Mode 7 only. */
-    PpuDrawBackground_mode7(ppu, y, sub, 0x5000);
+    PPU_PT(SNES_PERF_PPU_BGX, PpuDrawBackground_mode7(ppu, y, sub, 0x5000));
     if (ppu->lineHasSprites)
-      PpuDrawSprites(ppu, y, sub, false);
+      PPU_PT(SNES_PERF_PPU_SPR, PpuDrawSprites(ppu, y, sub, false));
   }
 }
 
@@ -3403,6 +3409,10 @@ static void PpuRebuildMathFixed(Ppu *ppu, uint32_t key) {
 #endif
 
 PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
+  SNES_PERF_PPU_BEGIN(perf_p);
+  SNES_PERF_COUNT(snes_perf_ppu_drawn);
+  SNES_PERF_COUNT(snes_perf_ppu_mode[ppu->mode & 7]);
+  if (ppu->lineHasSprites) SNES_PERF_COUNT(snes_perf_ppu_spr_lines);
 #ifdef PPU_RGB565
   bool palette_was_dirty = ppu->paletteDirty;
   if (palette_was_dirty)
@@ -3413,8 +3423,10 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
   if (palette_was_dirty || math_fixed_key != ppu->mathFixedKey) g_mathfixed_rebuilds++;
 #endif
 #if !SNES_ABLATE_MATHFIXED
-  if (palette_was_dirty || math_fixed_key != ppu->mathFixedKey)
+  if (palette_was_dirty || math_fixed_key != ppu->mathFixedKey) {
     PpuRebuildMathFixed(ppu, math_fixed_key);
+    SNES_PERF_COUNT(snes_perf_ppu_math_rebuilds);
+  }
 #else
   /* ABLATION, WRONG OUTPUT. The table is 3,072 entries and its key includes
    * fixedColorR/G/B, so every $2132 COLDATA write invalidates it -- and COLDATA
@@ -3433,6 +3445,7 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
     if (palette_was_dirty || bk != g_blend_key) { PpuRebuildBlendLut(ppu); g_blend_key = bk; } }
 #endif
 #endif
+  SNES_PERF_PPU_END(SNES_PERF_PPU_PRE, perf_p);
   if (ppu->forcedBlank) {
     uint8 *dst = &ppu->renderBuffer[(y - 1) * ppu->renderPitch];
 #ifdef PPU_RGB565
@@ -3522,7 +3535,9 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
 #endif
 
   // Render main screen
+  SNES_PERF_PPU_BEGIN(perf_m);
   PpuDrawBackgrounds(ppu, y, false);
+  SNES_PERF_PPU_END(SNES_PERF_PPU_MAIN, perf_m);
 
   // The 6:th bit is automatically zero, math is never applied to the first half of the sprites.
   uint32 math_enabled = 0;
@@ -3542,12 +3557,17 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
 #if SNES_RENDER_CENSUS
       g_sub_lines++;
 #endif
+      SNES_PERF_PPU_BEGIN(perf_s);
       PpuDrawBackgrounds(ppu, y, true);
+      SNES_PERF_PPU_END(SNES_PERF_PPU_SUB, perf_s);
+      SNES_PERF_COUNT(snes_perf_ppu_sub_lines);
       rendered_subscreen = true;
     }
   }
 
   // Color window affects the drawing mode in each region
+  SNES_PERF_PPU_BEGIN(perf_c);
+  if (ppu->preventMathMode != 3 && math_enabled) SNES_PERF_COUNT(snes_perf_ppu_math_lines);
   PpuWindows cwin;
   PpuWindows_Calc(&cwin, ppu, 5);
   static const uint8 kCwBitsMod[8] = {
@@ -3837,10 +3857,14 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
     }
   } while (cw_clip_math >>= 1, ++windex < cwin.nr);
 #endif
+  SNES_PERF_PPU_END(SNES_PERF_PPU_COMP, perf_c);
 
 #ifdef TARGET_GNW
-  if (g_ppu_line_cb)
+  if (g_ppu_line_cb) {
+    SNES_PERF_PPU_BEGIN(perf_b);
     g_ppu_line_cb(y, dst_org);
+    SNES_PERF_PPU_END(SNES_PERF_PPU_BLIT, perf_b);
+  }
 #endif
 }
 

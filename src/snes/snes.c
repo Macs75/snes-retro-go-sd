@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "../snes_perf.h"
 #include <stddef.h>
 #include <assert.h>
 #include "snes.h"
@@ -221,8 +222,14 @@ void snes_handle_pos_stuff(Snes *snes) {
     }
   } else if (snes->hPos == 512) {
     // render the line halfway of the screen for better compatibility
-    if (!snes->inVblank && !snes->disableRender)
+    if (!snes->inVblank && !snes->disableRender) {
+      SNES_PERF_BEGIN(perf_t);
       ppu_runLine(snes->ppu, snes->vPos);
+      SNES_PERF_END(snes_perf_ppu, perf_t);
+#ifdef SNES_PERF
+      snes_perf_ppu_lines++;
+#endif
+    }
   } else if (snes->hPos == 1024) {
     // start of hblank
     if (!snes->inVblank)
@@ -323,8 +330,14 @@ void snes_run_line(Snes *snes) {
   }
 
   /* hPos == 512: the line is rendered halfway across, for compatibility */
-  if (!snes->inVblank && !snes->disableRender)
+  if (!snes->inVblank && !snes->disableRender) {
+    SNES_PERF_BEGIN(perf_t);
     ppu_runLine(snes->ppu, snes->vPos);
+    SNES_PERF_END(snes_perf_ppu, perf_t);
+#ifdef SNES_PERF
+    snes_perf_ppu_lines++;
+#endif
+  }
 
   /* hPos == 1024: start of hblank */
   if (!snes->inVblank)
@@ -599,7 +612,11 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
                snes->ppu->vramPointer, snes->dma->channel[1].size, data);
       }
       dma_startDma(snes->dma, val, false);
-      while (dma_cycle(snes->dma)) {}
+      {
+        SNES_PERF_DMA_BEGIN(perf_t, perf_a);
+        while (dma_cycle(snes->dma)) {}
+        SNES_PERF_DMA_END(perf_t, perf_a);
+      }
       break;
     }
     case 0x420c: {

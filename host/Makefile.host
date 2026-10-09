@@ -33,12 +33,14 @@ endif
 
 HOST_INC_ROOT := $(GNW_CORE_SDK)/include
 
-# Drop device-only Thumb-2 / ITCM section / DMA2D flags; host uses interpreter + CPU blit.
+# Drop device-only Thumb-2 / ITCM section / DMA2D flags (and the DWT profiler);
+# host uses interpreter + CPU blit.
 HOST_CORE_DEFS := $(filter-out \
 	-DSNES_THUMB2_CPU \
 	-DSPC_THUMB2_SPC \
 	-DSNES_PRESENT_DMA2D \
 	-DSNES_BUS_IN_ITCM \
+	-DSNES_PERF \
 	,$(CORE_C_DEFS))
 
 HOST_DEFS := \
