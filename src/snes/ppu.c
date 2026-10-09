@@ -1416,7 +1416,13 @@ static inline uint32 PpuDecode2bpp(uint32 bits) {
  * not be in it. */
 static uint32_t g_cgram_spread[256];
 static uint32_t g_sub_spread[256];
-static uint16_t g_blend_r565[64], g_blend_g565[64], g_blend_b565[64];
+/* One array, so the blend loops reach all three channel tables from a single
+ * base register (three separate arrays cost a literal-pool load each, per
+ * pixel, once the compositing ran out of registers). */
+static uint16_t g_blend565[3][64];
+#define g_blend_r565 (g_blend565[0])
+#define g_blend_g565 (g_blend565[1])
+#define g_blend_b565 (g_blend565[2])
 static uint32_t g_blend_key = 0xffffffffu;
 /* Three 5-bit channels at bits 0, 11 and 22 leave bits 28-31 free, and the two
  * conditions that send a pixel down the bypass are folded into them:
@@ -1449,6 +1455,63 @@ static void PpuRebuildBlendLut(Ppu *ppu) {
     g_blend_g565[x] = (uint16_t)((v >> 2) << 5);
     g_blend_b565[x] = (uint16_t)(v >> 3);
   }
+}
+
+/* The two colour-math blend loops of the compositing, as their own functions.
+ * Inline in PpuDrawWholeLine they ran out of registers and reloaded two table
+ * addresses from the literal pool on every pixel; here every base stays in a
+ * register for the whole span. Same arithmetic, same order: bit-identical. */
+__attribute__((noinline))
+static uint16_t *PpuBlendSpanAll(uint16_t *dst, const PpuZbufType *mrow, const PpuZbufType *srow,
+                                 uint32 i, uint32 right, const uint16_t *math_fixed) {
+  const uint32_t *cs = g_cgram_spread, *ss = g_sub_spread;
+  const uint16_t *br = g_blend565[0], *bg = g_blend565[1], *bb = g_blend565[2];
+  uint32 last_key = ~0u, last_out = 0;   /* see PpuBlendSpanPart */
+  while (i < right) {
+    uint32 main_z = mrow[i], sub_z = srow[i];
+    uint32 key = (main_z & 0xff) | (sub_z & 0xff) << 8;
+    uint32 sum = cs[main_z & 0xff] + ss[sub_z & 0xff];
+    if ((sum & kBlendBypass) || ((main_z >> 8) & 0xf) >= 6) {
+      dst[0] = math_fixed[main_z & 0x7ff];
+    } else {
+      if (key != last_key) {
+        last_key = key;
+        last_out = br[sum & 63] | bg[(sum >> 11) & 63] | bb[sum >> 22];
+      }
+      dst[0] = (uint16_t)last_out;
+    }
+    dst++, i++;
+  }
+  return dst;
+}
+
+__attribute__((noinline))
+static uint16_t *PpuBlendSpanPart(uint16_t *dst, const PpuZbufType *mrow, const PpuZbufType *srow,
+                                  uint32 i, uint32 right, const uint16_t *math_fixed,
+                                  uint32 math_enabled_cur) {
+  const uint32_t *cs = g_cgram_spread;
+  const uint16_t *br = g_blend565[0], *bg = g_blend565[1], *bb = g_blend565[2];
+  /* A blended pixel is a function of its main and sub colour indices alone
+   * (the tables cannot change inside a span), and neighbours repeat: in
+   * Zelda's title 86% of blended pixels have the same pair as the pixel
+   * before. Remember the last pair and its result. */
+  uint32 last_key = ~0u, last_out = 0;
+  while (i < right) {
+    uint32 main_z = mrow[i], sub_z = srow[i];
+    if (!(math_enabled_cur & (1u << ((main_z >> 8) & 0xf))) || (sub_z & 0xff) == 0) {
+      dst[0] = math_fixed[main_z & 0x7ff];
+    } else {
+      uint32 key = (main_z & 0xff) | (sub_z & 0xff) << 8;
+      if (key != last_key) {
+        last_key = key;
+        uint32 sum = cs[main_z & 0xff] + cs[sub_z & 0xff];
+        last_out = br[sum & 63] | bg[(sum >> 11) & 63] | bb[(sum >> 22) & 63];
+      }
+      dst[0] = (uint16_t)last_out;
+    }
+    dst++, i++;
+  }
+  return dst;
 }
 #endif
 #ifndef SNES_COMP_CENSUS
@@ -3778,41 +3841,19 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
            * frame). It does not remove work, it reshapes it, and this loop does
            * not reward that. Everything that has won today removed work that
            * was provably unnecessary. */
-          while (i < right) {
-            uint32 main_z = mrow[i], sub_z = srow[i];
-            /* Folding both bypass tests into a sentinel bit carried by the
-             * sub table was tried and measured 57.53 against 57.60: it does not
-             * delete either test, it adds an OR. The sentinel stays in the table
-             * because it costs nothing there; the loop asks plainly.
-             * The blue field needs no mask -- it is the top field, and 62 at
-             * bit 22 cannot reach bit 28. */
-            uint32 sum = g_cgram_spread[main_z & 0xff] + g_sub_spread[sub_z & 0xff];
-            if ((sum & kBlendBypass) || ((main_z >> 8) & 0xf) >= 6) {
-              dst[0] = math_fixed[main_z & 0x7ff];
-            } else {
-              dst[0] = g_blend_r565[sum & 63]
-                     | g_blend_g565[(sum >> 11) & 63]
-                     | g_blend_b565[sum >> 22];
-            }
-            dst++, i++;
-          }
+          /* Folding both bypass tests into a sentinel bit carried by the
+           * sub table was tried and measured 57.53 against 57.60: it does not
+           * delete either test, it adds an OR. The sentinel stays in the table
+           * because it costs nothing there; the loop asks plainly.
+           * The blue field needs no mask -- it is the top field, and 62 at
+           * bit 22 cannot reach bit 28. */
+          dst = PpuBlendSpanAll(dst, mrow, srow, i, right, math_fixed);
           continue;
         }
-        while (i < right) {
-          uint32 main_z = mrow[i], sub_z = srow[i];
-          if (!(math_enabled_cur & (1u << ((main_z >> 8) & 0xf))) || (sub_z & 0xff) == 0) {
-            dst[0] = math_fixed[main_z & 0x7ff];
-          } else {
-            uint32 sum = g_cgram_spread[main_z & 0xff] + g_cgram_spread[sub_z & 0xff];
-            /* Field order follows the SNES word: bits 0-4 red, 5-9 green,
-             * 10-14 blue -- so the spread keeps red at 0, green at 11, blue at
-             * 22, and the three tables must be read in that same order. */
-            dst[0] = g_blend_r565[sum & 63]
-                   | g_blend_g565[(sum >> 11) & 63]
-                   | g_blend_b565[(sum >> 22) & 63];
-          }
-          dst++, i++;
-        }
+        /* Field order follows the SNES word: bits 0-4 red, 5-9 green,
+         * 10-14 blue -- so the spread keeps red at 0, green at 11, blue at
+         * 22, and the three tables are read in that same order. */
+        dst = PpuBlendSpanPart(dst, mrow, srow, i, right, math_fixed, math_enabled_cur);
         continue;
       }
 #endif
