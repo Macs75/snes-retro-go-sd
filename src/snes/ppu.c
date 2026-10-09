@@ -1510,26 +1510,33 @@ static void PpuRebuildBlendLut(Ppu *ppu) {
 /* The two colour-math blend loops of the compositing, as their own functions.
  * Inline in PpuDrawWholeLine they ran out of registers and reloaded two table
  * addresses from the literal pool on every pixel; here every base stays in a
- * register for the whole span. Same arithmetic, same order: bit-identical. */
+ * register for the whole span.
+ *
+ * A pixel's output is a function of its raw main and sub z-buffer entries
+ * alone (the tables cannot change inside a span), and neighbours repeat: a
+ * tile is 8 pixels, a flat area far more. So the first thing each pixel does
+ * is compare the raw pair, packed in one register, against the previous one;
+ * a repeat stores the previous output and decodes nothing -- not the layer's
+ * maths bit, not the bypass, not the blend. Only a change does the work. */
 __attribute__((noinline))
 static uint16_t *PpuBlendSpanAll(uint16_t *dst, const PpuZbufType *mrow, const PpuZbufType *srow,
                                  uint32 i, uint32 right, const uint16_t *math_fixed) {
   const uint32_t *cs = g_cgram_spread, *ss = g_sub_spread;
   const uint16_t *br = g_blend565[0], *bg = g_blend565[1], *bb = g_blend565[2];
-  uint32 last_key = ~0u, last_out = 0;   /* see PpuBlendSpanPart */
+  if (i >= right) return dst;
+  uint32 last_z = ~(mrow[i] | (uint32)srow[i] << 16), last_out = 0;   /* differs from pixel i */
   while (i < right) {
     uint32 main_z = mrow[i], sub_z = srow[i];
-    uint32 key = (main_z & 0xff) | (sub_z & 0xff) << 8;
-    uint32 sum = cs[main_z & 0xff] + ss[sub_z & 0xff];
-    if ((sum & kBlendBypass) || ((main_z >> 8) & 0xf) >= 6) {
-      dst[0] = math_fixed[main_z & 0x7ff];
-    } else {
-      if (key != last_key) {
-        last_key = key;
+    uint32 z = main_z | sub_z << 16;
+    if (__builtin_expect(z != last_z, 0)) {
+      last_z = z;
+      uint32 sum = cs[main_z & 0xff] + ss[sub_z & 0xff];
+      if ((sum & kBlendBypass) || ((main_z >> 8) & 0xf) >= 6)
+        last_out = math_fixed[main_z & 0x7ff];
+      else
         last_out = br[sum & 63] | bg[(sum >> 11) & 63] | bb[sum >> 22];
-      }
-      dst[0] = (uint16_t)last_out;
     }
+    dst[0] = (uint16_t)last_out;
     dst++, i++;
   }
   return dst;
@@ -1541,24 +1548,21 @@ static uint16_t *PpuBlendSpanPart(uint16_t *dst, const PpuZbufType *mrow, const 
                                   uint32 math_enabled_cur) {
   const uint32_t *cs = g_cgram_spread;
   const uint16_t *br = g_blend565[0], *bg = g_blend565[1], *bb = g_blend565[2];
-  /* A blended pixel is a function of its main and sub colour indices alone
-   * (the tables cannot change inside a span), and neighbours repeat: in
-   * Zelda's title 86% of blended pixels have the same pair as the pixel
-   * before. Remember the last pair and its result. */
-  uint32 last_key = ~0u, last_out = 0;
+  if (i >= right) return dst;
+  uint32 last_z = ~(mrow[i] | (uint32)srow[i] << 16), last_out = 0;   /* differs from pixel i */
   while (i < right) {
     uint32 main_z = mrow[i], sub_z = srow[i];
-    if (!(math_enabled_cur & (1u << ((main_z >> 8) & 0xf))) || (sub_z & 0xff) == 0) {
-      dst[0] = math_fixed[main_z & 0x7ff];
-    } else {
-      uint32 key = (main_z & 0xff) | (sub_z & 0xff) << 8;
-      if (key != last_key) {
-        last_key = key;
+    uint32 z = main_z | sub_z << 16;
+    if (__builtin_expect(z != last_z, 0)) {
+      last_z = z;
+      if (!(math_enabled_cur & (1u << ((main_z >> 8) & 0xf))) || (sub_z & 0xff) == 0) {
+        last_out = math_fixed[main_z & 0x7ff];
+      } else {
         uint32 sum = cs[main_z & 0xff] + cs[sub_z & 0xff];
         last_out = br[sum & 63] | bg[(sum >> 11) & 63] | bb[(sum >> 22) & 63];
       }
-      dst[0] = (uint16_t)last_out;
     }
+    dst[0] = (uint16_t)last_out;
     dst++, i++;
   }
   return dst;
