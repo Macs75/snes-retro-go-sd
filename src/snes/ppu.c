@@ -214,6 +214,9 @@ void ppu_reset(Ppu* ppu) {
   ppu->vramRemapMode = 0;
   ppu->vramReadBuffer = 0;
   memset(ppu->cgram, 0, sizeof(ppu->cgram));
+#ifdef PPU_RGB565
+  ppu->paletteDirty = true;   /* the derived tables (some static) describe the old cgram */
+#endif
   ppu->cgramPointer = 0;
   ppu->cgramSecondWrite = false;
   ppu->cgramBuffer = 0;
@@ -488,6 +491,17 @@ _Static_assert(_Alignof(PpuPixelPrioBufs) >= 8,
 
 #if defined(SNES_LINE_REUSE_PROBE) || defined(SNES_LINE_CACHE)
 enum { kLineHistoryLines = 240, kLineHistoryVramPages = 512 };
+#endif
+
+#ifdef PPU_RGB565
+/* CGRAM entries written with a NEW value since the last drawn line. The
+ * line-start rebuild updates only these in the palette, colour-math and blend
+ * tables; ppu->paletteDirty still means "rebuild all of it" (brightness, load).
+ * HDMA colour gradients rewrite one or two entries a line, and the full
+ * rebuild that used to follow was ~3,000 cycles a line on the device. Derived
+ * state, so a static: never in a savestate. */
+static uint32_t g_cgram_dirty[8];
+static bool g_cgram_dirty_any;
 #endif
 
 static inline void ClearBackdrop(PpuPixelPrioBufs *buf) {
@@ -1415,7 +1429,7 @@ static uint32_t g_blend_key = 0xffffffffu;
  * nothing the colours do can reach the flag. */
 enum { kBlendBypass = 1u << 30 };
 #define PPU_SPREAD(c) (((c) & 0x1f) | ((((c) >> 5) & 0x1f) << 11) | ((((c) >> 10) & 0x1f) << 22))
-static void PpuRebuildBlendLut(Ppu *ppu) {
+static void PpuRebuildBlendSpread(Ppu *ppu) {
   for (int i = 0; i < 256; i++) {
     uint32 c = ppu->cgram[i];
     g_cgram_spread[i] = PPU_SPREAD(c);
@@ -1424,6 +1438,10 @@ static void PpuRebuildBlendLut(Ppu *ppu) {
   /* A subscreen pixel of index 0 is the backdrop: the SNES does not blend it, it
    * falls back to the fixed colour, which is what math_fixed already holds. */
   g_sub_spread[0] |= kBlendBypass;
+}
+
+/* the channel tables: brightness and halfColor only, not cgram */
+static void PpuRebuildBlendLut(Ppu *ppu) {
   const uint8_t *map = ppu->halfColor ? ppu->brightnessMultHalf : ppu->brightnessMult;
   for (int x = 0; x < 64; x++) {
     uint32 v = map[x];
@@ -3322,14 +3340,16 @@ PPU_SPLIT_NOINLINE static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
 }
 
 #ifdef PPU_RGB565
+static inline uint16_t PpuPalette565(const Ppu *ppu, uint32 color) {
+  return (uint16_t)(
+      (ppu->brightnessMult[color & 0x1f] >> 3) << 11 |
+      (ppu->brightnessMult[(color >> 5) & 0x1f] >> 2) << 5 |
+      (ppu->brightnessMult[(color >> 10) & 0x1f] >> 3));
+}
+
 static void PpuRebuildPalette(Ppu *ppu) {
-  for (int i = 0; i < 256; i++) {
-    uint32 color = ppu->cgram[i];
-    ppu->palette565[i] = (uint16_t)(
-        (ppu->brightnessMult[color & 0x1f] >> 3) << 11 |
-        (ppu->brightnessMult[(color >> 5) & 0x1f] >> 2) << 5 |
-        (ppu->brightnessMult[(color >> 10) & 0x1f] >> 3));
-  }
+  for (int i = 0; i < 256; i++)
+    ppu->palette565[i] = PpuPalette565(ppu, ppu->cgram[i]);
   ppu->paletteDirty = false;
 }
 
@@ -3341,6 +3361,20 @@ static uint32_t PpuMathFixedKey(Ppu *ppu) {
   for (int layer = 0; layer < 6; layer++)
     key |= (uint32_t)ppu->mathEnabled[layer] << (18 + layer);
   return key;
+}
+
+static inline uint16_t PpuMathFixed565(const Ppu *ppu, uint32_t color, uint32_t mask,
+                                       uint32_t r2, uint32_t g2, uint32_t b2,
+                                       const uint8_t *color_map) {
+  uint32_t r = color & mask, g = color >> 5 & mask, b = color >> 10 & mask;
+  if (ppu->subtractColor) {
+    r = r >= r2 ? r - r2 : 0;
+    g = g >= g2 ? g - g2 : 0;
+    b = b >= b2 ? b - b2 : 0;
+  } else {
+    r += r2, g += g2, b += b2;
+  }
+  return (uint16_t)((color_map[b] >> 3) | (color_map[g] >> 2) << 5 | (color_map[r] >> 3) << 11);
 }
 
 static void PpuRebuildMathFixed(Ppu *ppu, uint32_t key) {
@@ -3387,23 +3421,47 @@ static void PpuRebuildMathFixed(Ppu *ppu, uint32_t key) {
         continue;
       }
       math_row = layer;
-      for (int index = 0; index < 256; index++) {
-        uint32_t color = ppu->cgram[index];
-        uint32_t r = color & mask, g = color >> 5 & mask, b = color >> 10 & mask;
-        uint8_t *color_map = math_map;
-        if (ppu->subtractColor) {
-          r = r >= r2 ? r - r2 : 0;
-          g = g >= g2 ? g - g2 : 0;
-          b = b >= b2 ? b - b2 : 0;
-        } else {
-          r += r2, g += g2, b += b2;
-        }
-        row[index] =
-            (color_map[b] >> 3) | (color_map[g] >> 2) << 5 | (color_map[r] >> 3) << 11;
-      }
+      for (int index = 0; index < 256; index++)
+        row[index] = PpuMathFixed565(ppu, ppu->cgram[index], mask, r2, g2, b2, math_map);
     }
   }
   ppu->mathFixedKey = key;
+}
+
+/* Bring the tables up to date for the CGRAM entries written since the last
+ * line. Each entry is computed by the same function the full rebuild uses, so
+ * the result is the full rebuild's, entry for entry. `math_too` is false when
+ * the colour-math key also changed: the full math rebuild that follows reads
+ * palette565 and recomputes every row anyway. */
+static void PpuUpdateCgramEntries(Ppu *ppu, bool math_too) {
+  uint32_t fixed = ppu->fixedColorR | ppu->fixedColorG << 5 | ppu->fixedColorB << 10;
+  uint32_t r2 = fixed & 0x1f, g2 = fixed >> 5 & 0x1f, b2 = fixed >> 10 & 0x1f;
+  uint8_t *math_map = ppu->halfColor && !ppu->addSubscreen ?
+      ppu->brightnessMultHalf : ppu->brightnessMult;
+  for (int w = 0; w < 8; w++) {
+    uint32_t bits = g_cgram_dirty[w];
+    g_cgram_dirty[w] = 0;
+    while (bits) {
+      int i = w * 32 + __builtin_ctz(bits);
+      bits &= bits - 1;
+      uint32 color = ppu->cgram[i];
+      uint16_t c565 = PpuPalette565(ppu, color);
+      ppu->palette565[i] = c565;
+#if SNES_PPU_BLEND_LUT
+      g_cgram_spread[i] = PPU_SPREAD(color);
+      g_sub_spread[i] = PPU_SPREAD(color) | (i == 0 ? kBlendBypass : 0);
+#endif
+      if (math_too) {
+        /* clip=0 rows do not depend on cgram (mask 0); clip=1 rows are either
+         * the palette (no math on that layer) or the math value */
+        uint16_t m = PpuMathFixed565(ppu, color, 0x1f, r2, g2, b2, math_map);
+        for (int layer = 0; layer < 8; layer++)
+          ppu->mathFixed565[1][layer][i] =
+              (layer >= 6 || !ppu->mathEnabled[layer]) ? c565 : m;
+      }
+    }
+  }
+  g_cgram_dirty_any = false;
 }
 
 #endif
@@ -3414,10 +3472,36 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
   SNES_PERF_COUNT(snes_perf_ppu_mode[ppu->mode & 7]);
   if (ppu->lineHasSprites) SNES_PERF_COUNT(snes_perf_ppu_spr_lines);
 #ifdef PPU_RGB565
-  bool palette_was_dirty = ppu->paletteDirty;
-  if (palette_was_dirty)
-    PpuRebuildPalette(ppu);   /* cgram or brightness moved since the last line */
+  bool palette_was_dirty = ppu->paletteDirty;   /* brightness or a load: everything */
   uint32_t math_fixed_key = PpuMathFixedKey(ppu);
+  if (palette_was_dirty) {
+    PpuRebuildPalette(ppu);
+#if SNES_PPU_BLEND_LUT
+    PpuRebuildBlendSpread(ppu);
+#endif
+    for (int w = 0; w < 8; w++) g_cgram_dirty[w] = 0;
+    g_cgram_dirty_any = false;
+  } else if (g_cgram_dirty_any) {
+    /* only the entries written since the last line */
+    PpuUpdateCgramEntries(ppu, math_fixed_key == ppu->mathFixedKey && !SNES_ABLATE_MATHFIXED);
+    SNES_PERF_COUNT(snes_perf_ppu_cgram_lines);
+#ifdef SNES_PPU_TABLE_CHECK
+    /* host self-check: the incremental tables must equal a full rebuild */
+    if (math_fixed_key == ppu->mathFixedKey) {
+      static uint16_t pal[256], mf[2][8][256];
+      static uint32_t cs[256], ss[256];
+      static unsigned long checks, bad;
+      memcpy(pal, ppu->palette565, sizeof pal); memcpy(mf, ppu->mathFixed565, sizeof mf);
+      memcpy(cs, g_cgram_spread, sizeof cs); memcpy(ss, g_sub_spread, sizeof ss);
+      PpuRebuildPalette(ppu); PpuRebuildMathFixed(ppu, math_fixed_key); PpuRebuildBlendSpread(ppu);
+      checks++;
+      if (memcmp(pal, ppu->palette565, sizeof pal) || memcmp(mf, ppu->mathFixed565, sizeof mf) ||
+          memcmp(cs, g_cgram_spread, sizeof cs) || memcmp(ss, g_sub_spread, sizeof ss))
+        fprintf(stderr, "TABLECHECK MISMATCH line %u (%lu)\n", y, ++bad);
+      if ((checks & 0x3ff) == 0) fprintf(stderr, "TABLECHECK %lu checks, %lu bad\n", checks, bad);
+    }
+#endif
+  }
 #if SNES_MATHFIXED_CENSUS
   g_mathfixed_lines++;
   if (palette_was_dirty || math_fixed_key != ppu->mathFixedKey) g_mathfixed_rebuilds++;
@@ -4774,10 +4858,16 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
           PpuLineCacheBump(&g_line_cache_cgram_serial,
                            &g_line_cache_cgram_last[ppu->cgramPointer]);
 #endif
-        ppu->cgram[ppu->cgramPointer++] = value;
 #ifdef PPU_RGB565
-        ppu->paletteDirty = true;
+        if (ppu->cgram[ppu->cgramPointer] != value) {
+          g_cgram_dirty[ppu->cgramPointer >> 5] |= 1u << (ppu->cgramPointer & 31);
+          g_cgram_dirty_any = true;
+        }
+#ifdef SNES_PPU_FULL_REBUILD_REF
+        ppu->paletteDirty = true;   /* A/B reference: the old full rebuild on every write */
 #endif
+#endif
+        ppu->cgram[ppu->cgramPointer++] = value;
       }
       ppu->cgramSecondWrite = !ppu->cgramSecondWrite;
       break;
