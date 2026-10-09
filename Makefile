@@ -36,6 +36,7 @@ SNES_BUS_IN_ITCM ?= 1
 PERF ?= 0
 PERF_PPU ?= 0
 PERF_AUDIO ?= 0
+PERF_CPU ?= 0
 
 CORE_C_SOURCES := \
 $(SNES)/apu.c \
@@ -100,6 +101,12 @@ CORE_C_DEFS += -DSNES_PERF
 ifeq ($(PERF_PPU),1)
 CORE_C_DEFS += -DSNES_PERF_PPU
 endif
+# PERF_CPU=1 splits the 65816 figure (engine / spin bake / events / rest) and
+# counts opcodes, C fallbacks and slow bus accesses. Diagnostic only: two timer
+# reads per opcode, and the probes push the ITCM engine 0x400 further.
+ifeq ($(PERF_CPU),1)
+CORE_C_DEFS += -DSNES_PERF_CPU -DSNES_OP_CENSUS=1
+endif
 # PERF_AUDIO=1 adds the stretcher / audio-rate diagnostics
 ifeq ($(PERF_AUDIO),1)
 CORE_C_DEFS += -DSNES_PERF_AUDIO
@@ -123,6 +130,11 @@ endif
 
 CORE_LDSCRIPT := snes_core.ld
 CORE_LDLIBS := -lm
+ifeq ($(PERF),1)
+ifeq ($(PERF_CPU),1)
+CORE_LDLIBS += -Wl,--defsym=__SNES_ITCM_ENGINE_AT=0x2204
+endif
+endif
 
 GNW_CORE_SDK ?= sdk
 BUILD_DIR ?= build/$(PROJECT_KIND)

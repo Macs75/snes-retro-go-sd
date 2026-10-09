@@ -200,6 +200,12 @@ uint32_t snes_perf_ppu_part[SNES_PERF_PPU_N];
 uint32_t snes_perf_ppu_drawn, snes_perf_ppu_sub_lines, snes_perf_ppu_spr_lines;
 uint32_t snes_perf_ppu_math_lines, snes_perf_ppu_mode[8];
 uint32_t snes_perf_ppu_cgram_lines, snes_perf_ppu_math_rebuilds;
+#ifdef SNES_PERF_CPU
+uint32_t snes_perf_cpu_eng, snes_perf_cpu_ops, snes_perf_cpu_memops;
+uint32_t snes_perf_cpu_bake, snes_perf_cpu_events, snes_perf_cpu_dmaloop;
+uint32_t snes_perf_cpu_rd_slow, snes_perf_cpu_rd_page, snes_perf_cpu_wr_slow;
+extern uint32_t g_op_total, g_op_fallback, g_op_fbhist[256];
+#endif
 /* main-loop phases, cycles per window */
 enum { SP_FRAMECTL, SP_INPUT, SP_EMU, SP_KICK, SP_PCM, SP_WAIT, SP_OVERLAY, SP_SWAP, SP_N };
 static uint32_t sp_phase[SP_N];
@@ -299,6 +305,32 @@ static void snes_perf_report(void)
            (unsigned long)((uint64_t)sp_au_isr * 1000u / w));
   }
 #endif
+#ifdef SNES_PERF_CPU
+  {
+    uint32_t ops = snes_perf_cpu_ops ? snes_perf_cpu_ops : 1;
+    uint32_t eng = snes_perf_cpu_eng / n, bake = snes_perf_cpu_bake / n, ev = snes_perf_cpu_events / n;
+    uint32_t rest = cpu > eng + bake + ev ? cpu - eng - bake - ev : 0;
+    printf("PROF/cpu: engine=%lu bake=%lu events=%lu rest=%lu (of cpu=%lu) per emulated frame\n",
+           (unsigned long)eng, (unsigned long)bake, (unsigned long)ev, (unsigned long)rest, (unsigned long)cpu);
+    printf("PROF/cpu: opcodes=%lu memops=%lu engine_per_op=%lu dma_loop_steps=%lu per emulated frame\n",
+           (unsigned long)(snes_perf_cpu_ops / n), (unsigned long)(snes_perf_cpu_memops / n),
+           (unsigned long)(snes_perf_cpu_eng / ops), (unsigned long)(snes_perf_cpu_dmaloop / n));
+    printf("PROF/cpu: bus slow_reads=%lu rom_page_refills=%lu slow_writes=%lu per emulated frame\n",
+           (unsigned long)(snes_perf_cpu_rd_slow / n), (unsigned long)(snes_perf_cpu_rd_page / n),
+           (unsigned long)(snes_perf_cpu_wr_slow / n));
+    /* the five opcodes that fall back to the C interpreter most */
+    char top[96]; int tl = 0; top[0] = 0;
+    for (int k = 0; k < 5; k++) {
+      int best = -1; uint32_t bv = 0;
+      for (int o = 0; o < 256; o++) if (g_op_fbhist[o] > bv) { bv = g_op_fbhist[o]; best = o; }
+      if (best < 0) break;
+      tl += snprintf(top + tl, sizeof top - tl, " %02x:%lu", best, (unsigned long)(bv / n));
+      g_op_fbhist[best] = 0;
+    }
+    printf("PROF/cpu: c_fallback=%lu of %lu opcodes per emulated frame, top%s\n",
+           (unsigned long)(g_op_fallback / n), (unsigned long)(g_op_total / n), top);
+  }
+#endif
 #ifdef SNES_PERF_PPU
   {
     uint32_t d = snes_perf_ppu_drawn ? snes_perf_ppu_drawn : 1;
@@ -341,6 +373,13 @@ static void snes_perf_reset(void)
   memset(snes_perf_ppu_mode, 0, sizeof(snes_perf_ppu_mode));
   snes_perf_ppu_drawn = snes_perf_ppu_sub_lines = snes_perf_ppu_spr_lines = snes_perf_ppu_math_lines = 0;
   snes_perf_ppu_cgram_lines = snes_perf_ppu_math_rebuilds = 0;
+#ifdef SNES_PERF_CPU
+  snes_perf_cpu_eng = snes_perf_cpu_ops = snes_perf_cpu_memops = 0;
+  snes_perf_cpu_bake = snes_perf_cpu_events = snes_perf_cpu_dmaloop = 0;
+  snes_perf_cpu_rd_slow = snes_perf_cpu_rd_page = snes_perf_cpu_wr_slow = 0;
+  g_op_total = g_op_fallback = 0;
+  memset(g_op_fbhist, 0, sizeof(g_op_fbhist));
+#endif
 #ifdef SNES_PERF_AUDIO
   g_sa_used = g_sa_drop = g_sa_pulls = g_sa_pulled = g_sa_pull_max = g_sa_floor = g_sa_ceil = 0;
   g_sa_next_sum = g_sa_base_sum = 0; g_sa_base_min = 0xffffffffu; g_sa_base_max = 0;
@@ -396,7 +435,16 @@ static int SNES_ITCM_SCHED run_one_opcode(Snes *s) {
   }
 #endif
   s->cpuMemOps = 0;
+#ifdef SNES_PERF_CPU
+  uint32_t pc_t0 = snes_perf_now(), pc_a0 = snes_perf_apu, pc_d0 = snes_perf_dma, pc_p0 = snes_perf_ppu;
+#endif
   int cycles = SNES_PROF_CPU_CALL(CPU_RUN_OPCODE(cpu));
+#ifdef SNES_PERF_CPU
+  snes_perf_cpu_eng += snes_perf_now() - pc_t0 - (snes_perf_apu - pc_a0) - (snes_perf_dma - pc_d0)
+                       - (snes_perf_ppu - pc_p0);
+  snes_perf_cpu_ops++;
+  snes_perf_cpu_memops += s->cpuMemOps;
+#endif
   /* 6*cycles + 2*memOps -- identical to the old 8-per-access charge plus
    * (cycles - memOps)*6, but paid once instead of on every bus access. */
   s->cpuCyclesLeft += cycles * 6 + s->cpuMemOps * 2;
@@ -426,7 +474,15 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
 #ifdef SNES_SPIN_BAKE
   /* One test per SPAN, outside the loop below. See spin_bake.h. */
   if ((uint16_t)(s->cpu->pc - g_bake.pc_load) <= 2u)
+  {
+#ifdef SNES_PERF_CPU
+    uint32_t pb_t0 = snes_perf_now(), pb_d0 = snes_perf_dma;
+#endif
     dots = spin_bake_run_span(s, s->cpu, dots);
+#ifdef SNES_PERF_CPU
+    snes_perf_cpu_bake += snes_perf_now() - pb_t0 - (snes_perf_dma - pb_d0);
+#endif
+  }
 #endif
   bool dma_active = s->dma->dmaBusy || s->dma->hdmaTimer > 0;
   while (dots > 0) {
@@ -439,6 +495,7 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
       s->apuDotsAccum += 2;
       s->hPos += 2; dots -= 2;
       dma_active = s->dma->dmaBusy || s->dma->hdmaTimer > 0;
+      SNES_PERF_CPU_INC(snes_perf_cpu_dmaloop);
       continue;
     }
     bool started_dma = false;
@@ -486,7 +543,16 @@ static void SNES_ITCM_SCHED run_frame_events(Snes *s) {
       wdog_refresh();
     }
     s->apuDotsAccum += 2;
+#ifdef SNES_PERF_CPU
+    {
+      uint32_t pe_t0 = snes_perf_now(), pe_a0 = snes_perf_apu, pe_d0 = snes_perf_dma, pe_p0 = snes_perf_ppu;
+      snes_handle_pos_stuff(s);
+      snes_perf_cpu_events += snes_perf_now() - pe_t0 - (snes_perf_apu - pe_a0) - (snes_perf_dma - pe_d0)
+                              - (snes_perf_ppu - pe_p0);
+    }
+#else
     snes_handle_pos_stuff(s);
+#endif
     cpu_tick(s);
     if (s->hPos == 0 && s->vPos == 0) break;
     run_dots(s, dots_to_next_event(s));

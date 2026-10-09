@@ -181,9 +181,12 @@ SECTIONS
     */snes.o(.itcm_snes_interp.thumb2.bus)
     *main_snes.o(.itcm_snes_interp.thumb2.bus)
     __ITCM_MAIN_END__ = .;
-    ASSERT(__ITCM_MAIN_END__ <= __CORE_ITCM_CODE_START__ + 0x1E04,
+    /* a diagnostic build (PERF_CPU=1) may move the engine with
+     * --defsym=__SNES_ITCM_ENGINE_AT=...; every other build keeps 0x1E04 */
+    __ITCM_ENGINE_OFF = DEFINED(__SNES_ITCM_ENGINE_AT) ? __SNES_ITCM_ENGINE_AT : 0x1E04;
+    ASSERT(__ITCM_MAIN_END__ <= __CORE_ITCM_CODE_START__ + __ITCM_ENGINE_OFF,
            "SNES: ITCM bus+main loop outgrew its slot in front of the 65816 engine (0x1E04)");
-    . = __CORE_ITCM_CODE_START__ + 0x1E04;
+    . = __CORE_ITCM_CODE_START__ + __ITCM_ENGINE_OFF;
     __ITCM_ENGINE_START__ = .;
     *(.itcm_snes_interp.thumb2)
     *(.itcm_snes_interp.thumb2.*)

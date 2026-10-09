@@ -828,6 +828,7 @@ uint8_t snes_cpuRead(Snes* snes, uint32_t adr) {
 #endif
     snes->romPageBase = base;
     snes->romPageTag = page;
+    SNES_PERF_CPU_INC(snes_perf_cpu_rd_page);
 #ifdef RIG_CALL_PROFILE
     g_cpuRead_romhit++;
 #endif
@@ -874,6 +875,7 @@ uint8_t snes_cpuRead(Snes* snes, uint32_t adr) {
 #ifdef RIG_CALL_PROFILE
   g_cpuRead_slow++;
 #endif
+  SNES_PERF_CPU_INC(snes_perf_cpu_rd_slow);
   return snes_read(snes, adr);
 }
 
@@ -893,6 +895,7 @@ void snes_cpuWrite(Snes* snes, uint32_t adr, uint8_t val) {
 #ifdef RIG_CALL_PROFILE
   g_cpuWrite_slow++;
 #endif
+  SNES_PERF_CPU_INC(snes_perf_cpu_wr_slow);
   snes_write(snes, adr, val);
 }
 

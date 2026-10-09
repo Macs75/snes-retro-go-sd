@@ -43,6 +43,22 @@ extern uint32_t snes_perf_ppu_drawn, snes_perf_ppu_sub_lines, snes_perf_ppu_spr_
 extern uint32_t snes_perf_ppu_math_lines, snes_perf_ppu_mode[8];
 /* line-start table updates: lines with CGRAM entries updated, full colour-math rebuilds */
 extern uint32_t snes_perf_ppu_cgram_lines, snes_perf_ppu_math_rebuilds;
+/* PERF_CPU=1, a diagnostic for the 65816 side, distorting by design (two
+ * timer reads per opcode): the "cpu" remainder split into the engine
+ * itself (per opcode, minus any APU/DMA/PPU work it triggered), the spin
+ * bake, the scheduler's event handler (snes_handle_pos_stuff minus the
+ * PPU/DMA/APU inside it) and the rest (the scheduler loops). Plus counts:
+ * opcodes, memory accesses, bus accesses that leave the ITCM fast paths,
+ * ROM page-cache refills, opcodes that fall back to the C interpreter. */
+#ifdef SNES_PERF_CPU
+extern uint32_t snes_perf_cpu_eng, snes_perf_cpu_ops, snes_perf_cpu_memops;
+extern uint32_t snes_perf_cpu_bake, snes_perf_cpu_events, snes_perf_cpu_dmaloop;
+extern uint32_t snes_perf_cpu_rd_slow, snes_perf_cpu_rd_page, snes_perf_cpu_wr_slow;
+#define SNES_PERF_CPU_INC(c) ((c)++)
+#else
+#define SNES_PERF_CPU_INC(c) do { } while (0)
+#endif
+
 /* the split costs probes on every drawn line: only with PERF_PPU=1 */
 #ifdef SNES_PERF_PPU
 #define SNES_PERF_PPU_BEGIN(t)     uint32_t t = snes_perf_now()
@@ -67,6 +83,7 @@ extern uint32_t snes_perf_ppu_cgram_lines, snes_perf_ppu_math_rebuilds;
 #define SNES_PERF_END(acc, t)     do { } while (0)
 #define SNES_PERF_DMA_BEGIN(t, a) do { } while (0)
 #define SNES_PERF_DMA_END(t, a)   do { } while (0)
+#define SNES_PERF_CPU_INC(c)      do { } while (0)
 #define SNES_PERF_PPU_BEGIN(t)     do { } while (0)
 #define SNES_PERF_PPU_END(part, t) do { } while (0)
 #define SNES_PERF_COUNT(c)         do { } while (0)

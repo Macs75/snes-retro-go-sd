@@ -296,11 +296,11 @@ int cpu_runOpcode(Cpu* cpu) {
  * the same shape as the cpu_thumb2_read/write bridges above. The byte comes in
  * as an argument precisely because it is ALREADY fetched and pc already
  * advanced -- refetching here would run the operand as an opcode. */
-#ifdef SNES_BUS_IN_ITCM
-__attribute__((section(".itcm_snes_interp.thumb2.bus")))
-#endif
 #if SNES_OP_CENSUS
 uint32_t g_op_total, g_op_fallback, g_op_fbhist[256];
+#endif
+#ifdef SNES_BUS_IN_ITCM
+__attribute__((section(".itcm_snes_interp.thumb2.bus")))
 #endif
 int cpu_thumb2_fallback(Cpu* cpu, uint32_t opcode) {
 #if SNES_OP_CENSUS
