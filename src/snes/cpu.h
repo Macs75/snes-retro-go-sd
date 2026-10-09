@@ -57,10 +57,8 @@ __attribute__((section(".itcm_snes_interp.thumb2.bus")))
 #endif
 int cpu_runOpcode(Cpu* cpu);
 #ifdef SNES_THUMB2_CPU
-/* The C interpreter exposed as oracle/fallback for the Thumb-2 dispatcher. */
-#ifdef SNES_BUS_IN_ITCM
-__attribute__((section(".itcm_snes_interp.thumb2.bus")))
-#endif
+/* The C interpreter exposed as oracle/fallback for the Thumb-2 dispatcher.
+ * Nothing on the Thumb-2 path calls it, so it is not in ITCM. */
 int cpu_runOpcode_c(Cpu* cpu);
 /* Thumb-2 fast path. The caller (try path) has already fetched the opcode and
    charged cyclesPerOpcode[opcode]; the step path fetches it itself. Either way,

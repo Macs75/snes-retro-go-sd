@@ -696,6 +696,9 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
   }
 }
 
+/* noinline: snes_cpuRead's slow path calls it, and inlined there it put
+ * ~700 bytes of I/O decode into ITCM for the accesses that need it least */
+__attribute__((noinline))
 uint8_t snes_read(Snes* snes, uint32_t adr) {
   uint8_t bank = adr >> 16;
   adr &= 0xffff;

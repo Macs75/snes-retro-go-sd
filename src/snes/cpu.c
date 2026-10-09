@@ -249,8 +249,10 @@ void cpu_saveload(Cpu *cpu, SaveLoadFunc *func, void *ctx) {
 #endif
 /* Also in ITCM: this is the wrapper that calls the engine, and it lives in the
  * overlay while the engine lives in ITCM, so the BL between them went through a
- * veneer -- 2.1% of the frame by device profile, on every opcode. 188 bytes. */
-#ifdef SNES_BUS_IN_ITCM
+ * veneer -- 2.1% of the frame by device profile, on every opcode. 188 bytes.
+ * With the Thumb-2 engine this is the C oracle cpu_runOpcode_c, which nothing
+ * calls: it stays out of ITCM. */
+#if defined(SNES_BUS_IN_ITCM) && !defined(SNES_THUMB2_CPU)
 __attribute__((section(".itcm_snes_interp.thumb2.bus")))
 #endif
 int SNES_RUNOPCODE_IMPL(Cpu* cpu) {
