@@ -470,6 +470,17 @@ static void SNES_ITCM_SCHED cpu_tick(Snes *s) {
 }
 
 #if !defined(SNES_SPIN_SKIP)
+/* The engine's batch entry (snes_thumb2.S): run_dots' per-opcode loop for as
+ * long as consecutive opcodes end inside the span. Off in PERF_CPU builds,
+ * whose per-opcode probes it would bypass. */
+#if defined(SNES_THUMB2_CPU) && !defined(SNES_PERF_CPU) && !defined(SNES_T2_NO_BATCH)
+#define SNES_T2_BATCH 1
+typedef struct { int32_t dots; uint32_t apud; uint16_t hpos; uint16_t pad; Snes *snes; } SnesBatch;
+_Static_assert(offsetof(SnesBatch, dots) == 0 && offsetof(SnesBatch, apud) == 4 &&
+               offsetof(SnesBatch, hpos) == 8 && offsetof(SnesBatch, snes) == 12,
+               "snes_thumb2_batch reads SnesBatch at these offsets");
+int snes_thumb2_batch(Cpu *cpu, SnesBatch *b);
+#endif
 /* run_one_opcode for run_dots: the same opcode and charge, returned instead
  * of added to s->cpuCyclesLeft, which run_dots keeps in a register. */
 static inline uint32_t SNES_ITCM_SCHED run_one_opcode_charge(Snes *s) {
@@ -536,11 +547,24 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
     }
     bool started_dma = false;
     if (left == 0) {
-      s->hPos = hpos;
-      s->apuDotsAccum = apud;
-      apply_irq_match(s);
-      left = (uint8_t)(left + run_one_opcode_charge(s));
-      apud = s->apuDotsAccum;            /* the opcode's APU catch-up may have zeroed it */
+#ifdef SNES_T2_BATCH
+      /* opcodes that end inside the span run in the engine; it hands back
+       * the last one's charge (it started a DMA or crosses the span's end),
+       * or -1 when the next opcode needs the ordinary path */
+      SnesBatch b = { dots, apud, hpos, 0, s };
+      int c = snes_thumb2_batch(s->cpu, &b);
+      dots = b.dots; apud = b.apud; hpos = b.hpos;
+      if (c >= 0) {
+        left = (uint8_t)c;
+      } else
+#endif
+      {
+        s->hPos = hpos;
+        s->apuDotsAccum = apud;
+        apply_irq_match(s);
+        left = (uint8_t)(left + run_one_opcode_charge(s));
+        apud = s->apuDotsAccum;          /* the opcode's APU catch-up may have zeroed it */
+      }
       started_dma = dma->dmaBusy || dma->hdmaTimer > 0;
     }
     int step;

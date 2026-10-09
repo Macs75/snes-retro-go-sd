@@ -46,6 +46,21 @@ CPU_CK(in_emu,       CPU_IN_EMU);
  * Nothing failed, nothing was slower by any test we had; it just quietly cost
  * a fifth of the bus path. Assert them. */
 #include "snes/snes.h"
+#include "dma.h"
+_Static_assert(offsetof(Snes, dma)          == SNES_DMA,     "SNES_DMA stale");
+_Static_assert(offsetof(Snes, hPos)         == SNES_HPOS,    "SNES_HPOS stale");
+_Static_assert(offsetof(Snes, vPos)         == SNES_VPOS,    "SNES_VPOS stale");
+_Static_assert(offsetof(Snes, apuDotsAccum) == SNES_APUDOTS, "SNES_APUDOTS stale");
+_Static_assert(offsetof(Snes, hIrqEnabled)  == SNES_HIRQEN,  "SNES_HIRQEN stale");
+_Static_assert(offsetof(Snes, vIrqEnabled)  == SNES_VIRQEN,  "SNES_VIRQEN stale");
+_Static_assert(offsetof(Snes, hTimer)       == SNES_HTIMER,  "SNES_HTIMER stale");
+_Static_assert(offsetof(Snes, vTimer)       == SNES_VTIMER,  "SNES_VTIMER stale");
+_Static_assert(offsetof(Snes, inIrq)        == SNES_INIRQ,   "SNES_INIRQ stale");
+_Static_assert(offsetof(Dma, hdmaTimer)     == DMA_HDMATIMER, "DMA_HDMATIMER stale");
+_Static_assert(offsetof(Dma, dmaBusy)       == DMA_BUSY,      "DMA_BUSY stale");
+_Static_assert(sizeof(((Snes*)0)->hPos) == 2 && sizeof(((Snes*)0)->apuDotsAccum) == 4 &&
+               sizeof(((Snes*)0)->hTimer) == 2 && sizeof(((Snes*)0)->vTimer) == 2 &&
+               sizeof(((Dma*)0)->hdmaTimer) == 2, "batch field widths changed");
 _Static_assert(offsetof(Snes, romPageBase)   == SNES_ROMPAGEBASE,   "SNES_ROMPAGEBASE stale");
 _Static_assert(offsetof(Snes, romPageTag)    == SNES_ROMPAGETAG,    "SNES_ROMPAGETAG stale");
 _Static_assert(offsetof(Snes, cpuCyclesLeft) == SNES_CPUCYCLESLEFT, "SNES_CPUCYCLESLEFT stale");

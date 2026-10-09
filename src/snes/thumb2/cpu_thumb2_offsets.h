@@ -49,5 +49,17 @@
 #define SNES_ROMPAGEBASE   112
 #define SNES_ROMPAGETAG    116
 #define SNES_RAM            44   /* uint8_t *ram, for the WRAM inline path */
+/* the batch entry (snes_thumb2_batch): the scheduler state it keeps */
+#define SNES_DMA            20   /* Dma *dma */
+#define SNES_HPOS           52
+#define SNES_VPOS           54
+#define SNES_APUDOTS        72   /* uint32_t apuDotsAccum */
+#define SNES_HIRQEN         76
+#define SNES_VIRQEN         77
+#define SNES_HTIMER         80
+#define SNES_VTIMER         82
+#define SNES_INIRQ          85
+#define DMA_HDMATIMER      212   /* uint16_t */
+#define DMA_BUSY           220   /* bool */
 
 #endif

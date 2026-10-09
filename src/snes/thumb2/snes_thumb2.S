@@ -2313,16 +2313,15 @@ snes_thumb2_run:
         b       .L_handled
 
 .L_noteb:
-        @ --- unsupported: run finishes the byte itself; try returns 0; step
-        @ returns the fetched opcode for C to finish.  Reachable at runtime, not
-        @ just for the one opcode with no table entry: decimal-mode ADC/SBC bail
-        @ here before touching any operand. ---
+        @ --- unsupported: run and batch finish the byte in C (.L_noteb_c, at
+        @ the end of the engine so that this block stays the size it was and no
+        @ handler after it moves); try returns 0; step returns the fetched
+        @ opcode for C to finish.  Reachable at runtime, not just for the one
+        @ opcode with no table entry: decimal-mode ADC/SBC bail here before
+        @ touching any operand. ---
         cmp     r5, #2
-        bne     .L_noteb_legacy
-        mov     r0, r4
-        mov     r1, r6                  @ the byte already fetched; do NOT refetch
-        bl      cpu_thumb2_fallback
-        pop     {r4, r5, r6, pc}
+        blo     .L_noteb_legacy
+        b.w     .L_noteb_c
 .L_noteb_legacy:
         cmp     r5, #0
         ite     eq
@@ -2331,8 +2330,11 @@ snes_thumb2_run:
         pop     {r4, r5, r6, pc}
 
 .L_handled:
-        @ run returns cyclesUsed; try returns 1; step returns -1.  Run is tested
-        @ first: it is the shipping path and this is the tail of every opcode.
+        @ batch continues its loop; run returns cyclesUsed; try returns 1; step
+        @ returns -1.  Batch and run are tested first: the shipping paths, and
+        @ this is the tail of every opcode.
+        cmp     r5, #3
+        beq     .Lb_after
         cmp     r5, #2
         bne     .L_handled_legacy
         ldrb    r0, [r4, #CPU_CYCLESUSED]
@@ -2343,6 +2345,9 @@ snes_thumb2_run:
         moveq   r0, #1
         movne   r0, #-1
         pop     {r4, r5, r6, pc}
+
+
+
 
 @ ===========================================================================
 @ Stage 3D -- direct-page opcodes (bank 0x00, 16-bit wrap, dp&0xff cycle).
@@ -8851,6 +8856,138 @@ snes_thumb2_run:
 
 @ Keep the Stage 0 probe: it is still a build-path smoke test (offset header
 @ resolves inside assembly). Unreferenced under release, so GC'd at link.
+@ ===========================================================================
+@ Batch entry: run_dots' per-opcode loop, inside the engine.
+@
+@ int snes_thumb2_batch(Cpu *cpu, SnesBatch *b)   b = {dots, apud, hpos, Snes*}
+@
+@ run_dots ran ONE opcode per call: the C loop's own bookkeeping, a BL into
+@ snes_thumb2_run, its push/pop, its return -- every opcode.  This entry keeps
+@ the loop here for as long as consecutive opcodes complete strictly inside
+@ the span, doing per opcode exactly what run_dots does, in the same order:
+@   store hPos and apuDotsAccum (an opcode can read both through the bus),
+@   the H-IRQ timer match (apply_irq_match),
+@   the entry checks of snes_thumb2_run (STP, WAI, NMI, a takeable IRQ, rc),
+@   cpuMemOps = 0, fetch, dispatch, the handler (or the C fallback),
+@   charge = cycles*6 + memOps*2 as a uint8, reload apuDotsAccum,
+@   then continue only if no DMA started, the charge is >= 2 and it ends
+@   before the span does (hPos/apuDotsAccum += charge, dots -= charge).
+@ It returns -1 with nothing run when an entry check fails (C runs that
+@ opcode the ordinary way; the IRQ match it repeats is idempotent), or the
+@ charge of the last opcode run when that one starts a DMA or does not end
+@ inside the span: C then applies its step exactly as before.  The span
+@ state is written back to *b either way.
+@
+@ Registers across the loop (callee-saved, untouched by every handler and by
+@ every C function they call): r7 = Snes*, r8 = dots, r9 = hPos, r10 =
+@ apuDotsAccum, r11 = Dma*; r4 = Cpu* and r5 = 3 (the batch contract) as the
+@ handlers expect.
+@ ===========================================================================
+        .global snes_thumb2_batch
+        .type   snes_thumb2_batch,%function
+        .thumb_func
+snes_thumb2_batch:
+        push    {r1, r4, r5, r6, r7, r8, r9, r10, r11, lr}   @ 40 bytes, 8-aligned; b at [sp]
+        mov     r4, r0
+        ldr     r8, [r1, #0]            @ dots
+        ldr     r10, [r1, #4]           @ apuDotsAccum
+        ldrh    r9, [r1, #8]            @ hPos
+        ldr     r7, [r1, #12]           @ Snes*
+        ldr     r11, [r7, #SNES_DMA]    @ Dma*
+        movs    r5, #3                  @ return contract: batch
+.Lb_top:
+        strh    r9, [r7, #SNES_HPOS]
+        str     r10, [r7, #SNES_APUDOTS]
+        @ apply_irq_match: needs H-IRQ on, the V test passing if V-IRQ is on,
+        @ and hPos == hTimer*4; then inIrq = irqWanted = true
+        ldrb    r0, [r7, #SNES_HIRQEN]
+        ldrb    r1, [r7, #SNES_VIRQEN]
+        cbz     r0, .Lb_noirq           @ no H-IRQ: nothing to match (V alone returns too)
+        cbz     r1, .Lb_hmatch
+        ldrh    r2, [r7, #SNES_VPOS]
+        ldrh    r3, [r7, #SNES_VTIMER]
+        cmp     r2, r3
+        bne     .Lb_noirq
+.Lb_hmatch:
+        ldrh    r2, [r7, #SNES_HTIMER]
+        cmp     r9, r2, lsl #2
+        bne     .Lb_noirq
+        movs    r2, #1
+        strb    r2, [r7, #SNES_INIRQ]
+        strb    r2, [r4, #CPU_IRQWANTED]
+.Lb_noirq:
+        @ the entry checks of snes_thumb2_run
+        ldrb    r1, [r4, #CPU_STOPPED]
+        ldrb    r2, [r4, #CPU_WAITING]
+        orrs    r1, r1, r2
+        ldrb    r2, [r4, #CPU_NMIWANTED]
+        orrs    r1, r1, r2
+        ldrb    r2, [r4, #CPU_IRQWANTED]
+        ldrb    r3, [r4, #CPU_I]
+        bics    r2, r2, r3              @ irqWanted && !i
+        orrs    r1, r1, r2
+        bne     .Lb_exit_noop
+        movw    r2, #:lower16:g_rc_active
+        movt    r2, #:upper16:g_rc_active
+        ldrb    r2, [r2]
+        cmp     r2, #0
+        bne     .Lb_exit_noop
+        movs    r0, #0
+        strb    r0, [r7, #SNES_CPUMEMOPS]   @ cpuMemOps = 0
+        mov     r0, r7                  @ fetch, exactly as snes_thumb2_run
+        ldrb    r1, [r4, #CPU_K]
+        ldrh    r2, [r4, #CPU_PC]
+        lsl     r1, r1, #16
+        orr     r1, r1, r2
+        adds    r3, r2, #1
+        strh    r3, [r4, #CPU_PC]       @ uint16_t wrap matches cpu->pc++
+        ROM_FETCH_FAST
+        uxtb    r6, r0
+        movw    r2, #:lower16:snes_cycles_per_opcode
+        movt    r2, #:upper16:snes_cycles_per_opcode
+        ldrb    r3, [r2, r6]
+        strb    r3, [r4, #CPU_CYCLESUSED]
+        b       .Ldispatch
+
+.Lb_after:                              @ every handler of a batch opcode ends here
+        ldrb    r0, [r4, #CPU_CYCLESUSED]
+        ldrb    r1, [r7, #SNES_CPUMEMOPS]
+        add     r0, r0, r0, lsl #1      @ cycles*3
+        add     r0, r0, r1              @ + memOps
+        lsls    r0, r0, #1              @ cycles*6 + memOps*2
+        uxtb    r0, r0                  @ the uint8 cpuCyclesLeft
+        ldr     r10, [r7, #SNES_APUDOTS]    @ the opcode's APU catch-up may have zeroed it
+        ldrb    r1, [r11, #DMA_BUSY]
+        cbnz    r1, .Lb_out             @ DMA started: C takes the step
+        ldrh    r1, [r11, #DMA_HDMATIMER]
+        cbnz    r1, .Lb_out
+        cmp     r0, #2
+        blo     .Lb_out                 @ (never: a charge is >= 6) C's else-branch
+        cmp     r0, r8
+        bge     .Lb_out                 @ does not end strictly inside the span
+        add     r10, r10, r0
+        add     r9, r9, r0
+        uxth    r9, r9
+        sub     r8, r8, r0
+        b       .Lb_top
+.Lb_exit_noop:
+        mov     r0, #-1
+.Lb_out:
+        ldr     r1, [sp]
+        str     r8, [r1, #0]
+        str     r10, [r1, #4]
+        strh    r9, [r1, #8]
+        pop     {r1, r4, r5, r6, r7, r8, r9, r10, r11, pc}
+
+@ The C finish of an opcode the engine does not handle (run and batch).
+.L_noteb_c:
+        mov     r0, r4
+        mov     r1, r6                  @ the byte already fetched; do NOT refetch
+        bl      cpu_thumb2_fallback     @ r5 is callee-saved: still the contract
+        cmp     r5, #3
+        beq     .Lb_after
+        pop     {r4, r5, r6, pc}
+
         .section .text.snes_thumb2_probe,"ax",%progbits
         .align  2
         .global snes_thumb2_probe
