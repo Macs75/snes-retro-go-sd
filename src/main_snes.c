@@ -963,16 +963,17 @@ static void snes_pcm_pump(void)
   if (need > space)
     need = space;
 
-  while (need) {
-    uint16_t n = need;
-    if (n > (uint16_t)SNES_AUDIO_SAMPLES_MAX)
-      n = (uint16_t)SNES_AUDIO_SAMPLES_MAX;
-    snes_stretch_pull(audio_buf, n);
-    for (uint16_t i = 0; i < n; i++) {
-      snes_pcm_ring[head] = audio_buf[i];
-      head = (uint16_t)((head + 1u) & mask);
-    }
-    need = (uint16_t)(need - n);
+  /* ONE pull for the whole refill. The stretcher sets its playback rate per
+   * pull from what was pushed since the previous one; after an overrun frame
+   * the refill is two periods, and pulled in two chunks (320 + 212 on NTSC)
+   * the rate swung about +-1.2% on every refill -- 30 times a second, which
+   * is heard as roughness, not as vibrato. In one piece every pull sees a
+   * whole refill and the rate holds still. need <= target <= SNES_PCM_RING/2. */
+  static int16_t pump_buf[SNES_PCM_RING / 2u];
+  snes_stretch_pull(pump_buf, need);
+  for (uint16_t i = 0; i < need; i++) {
+    snes_pcm_ring[head] = pump_buf[i];
+    head = (uint16_t)((head + 1u) & mask);
   }
   snes_pcm_head = head;
 }
