@@ -2122,6 +2122,84 @@ static void PpuDrawBackground_hires(Ppu *ppu, uint y, bool sub, uint layer,
   }
 }
 
+/* The full-tile middle of a 4bpp layer pass, 8x8 tiles, as its own function.
+ * Inside PpuDrawBackground_4bpp it shared registers with the window loop, the
+ * clipped edges and the 16x16 path, and reloaded and stored about nine values
+ * on the stack per tile; here the walk state, the two tile bases and the two
+ * z bases stay in registers for the whole run. The body is the production
+ * path of the loop it replaces (OPAQUE_TILE on, every ablation and census
+ * off), expression for expression, so the output is the same. The tilemap
+ * walk state goes in and comes back through `tw`. */
+#if SNES_PPU_OPAQUE_TILE && !SNES_ABLATE_BG && !SNES_PPU_PIPELINE && !SNES_PPU_TILE_MEMO && \
+    !SNES_PPU_PREFETCH && !SNES_RENDER_CENSUS && !SNES_PPU_SIMD_PIXELS && !SNES_ABLATE_WALK && \
+    !SNES_ABLATE_ADDR && !SNES_ABLATE_FETCH && !SNES_PPU_COARSE_SKIP && \
+    !defined(SNES_LINE_CACHE) && !defined(SNES_LINE_REUSE_PROBE)
+#define SNES_PPU_BG4_RUN 1
+typedef struct { const uint16 *tp, *last, *next; } PpuTileWalk;
+
+__attribute__((noinline))
+static PpuZbufType *PpuBg4FullTiles(const uint16 *vram, PpuTileWalk *tw, PpuZbufType *dstz, uint n,
+                                    uint32 tileadrs, uint32 zs, bool no_ztest) {
+  /* tileadrs = tileadr1 << 16 | tileadr0 and zs = zhi << 16 | zlo: one
+   * register each instead of two stack slots. The pixel steps consume the
+   * decoded word one nibble at a time (c >>= 4 / c <<= 4), so one value is
+   * live instead of eight precomputed extracts that spilled. */
+  const uint16 *tp = tw->tp, *tp_last = tw->last, *tp_next = tw->next;
+#define R_STEP(i, nib, adv, TEST, STORE) do { PpuZbufType *d_ = &dstz[i]; uint32 px_ = (nib); adv; if (TEST) *d_ = STORE; } while (0)
+#define R_RUN(nib, adv, TEST, STORE) do { \
+    R_STEP(0, nib, adv, TEST, STORE); R_STEP(1, nib, adv, TEST, STORE); \
+    R_STEP(2, nib, adv, TEST, STORE); R_STEP(3, nib, adv, TEST, STORE); \
+    R_STEP(4, nib, adv, TEST, STORE); R_STEP(5, nib, adv, TEST, STORE); \
+    R_STEP(6, nib, adv, TEST, STORE); R_STEP(7, nib, adv, TEST, STORE); } while (0)
+/* non-flipped tiles (bit 0x4000) read nibble i = low first; flipped read 7-i = high first */
+#define R_LO c & 0xf
+#define R_LO_ADV c >>= 4
+#define R_HI c >> 28
+#define R_HI_ADV c <<= 4
+  do {
+    uint32 tile = *tp;
+    if (tp != tp_last) tp += 1; else tp = tp_next, tp_next = tp_last - 31, tp_last = tp + 31;
+    int ta = (tile & 0x8000) ? (int)(tileadrs >> 16) : (int)(tileadrs & 0xffff);
+    PpuZbufType z = (tile & 0x2000) ? (PpuZbufType)(zs >> 16) : (PpuZbufType)zs;
+    const uint16 *addr = &vram[(ta + (tile & 0x3ff) * 16) & 0x7fff];
+    uint32 bits = addr[0] | addr[8] << 16;
+    if (bits) {
+      uint32 c = PpuDecode4bpp(bits);
+      z += ((tile & 0x1c00) >> 6);
+      const uint32 nz = (c | c >> 1 | c >> 2 | c >> 3) & 0x11111111u;
+      if (nz == 0x11111111u) {
+        if (no_ztest) {
+          if (tile & 0x4000) R_RUN(R_LO, R_LO_ADV, 1, z + px_);
+          else               R_RUN(R_HI, R_HI_ADV, 1, z + px_);
+        } else if (tile & 0x4000) {
+          R_RUN(R_LO, R_LO_ADV, z > *d_, z + px_);
+        } else {
+          R_RUN(R_HI, R_HI_ADV, z > *d_, z + px_);
+        }
+      } else if (no_ztest) {
+        if (tile & 0x4000) R_RUN(R_LO, R_LO_ADV, px_, z + px_);
+        else               R_RUN(R_HI, R_HI_ADV, px_, z + px_);
+      } else if (tile & 0x4000) {
+        R_RUN(R_LO, R_LO_ADV, px_ && z > *d_, z + px_);
+      } else {
+        R_RUN(R_HI, R_HI_ADV, px_ && z > *d_, z + px_);
+      }
+    }
+    dstz += 8;
+  } while (--n);
+#undef R_STEP
+#undef R_RUN
+#undef R_LO
+#undef R_LO_ADV
+#undef R_HI
+#undef R_HI_ADV
+  tw->tp = tp, tw->last = tp_last, tw->next = tp_next;
+  return dstz;
+}
+#else
+#define SNES_PPU_BG4_RUN 0
+#endif
+
 // Draw a whole line of a 4bpp background layer into bgBuffers
 static void PpuDrawBackground_4bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZbufType zhi, PpuZbufType zlo) {
 /* SNES_ABLATE_BG=2: keep the tilemap walk and the VRAM fetch, delete only the
@@ -2527,6 +2605,17 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
 #endif
     }
 #else
+#if SNES_PPU_BG4_RUN
+    if (!big && w >= 8) {
+      PpuTileWalk tw = { tp, tp_last, tp_next };
+      uint n = w >> 3;
+      dstz = PpuBg4FullTiles(ppu->vram, &tw, dstz, n,
+                             (uint32)(uint16)tileadr1 << 16 | (uint16)tileadr0,
+                             (uint32)(uint16)zhi << 16 | (uint16)zlo, no_ztest);
+      tp = tw.tp, tp_last = tw.last, tp_next = tw.next;
+      w -= n << 3, x += n << 3;
+    }
+#endif
     while (w >= 8) {
       uint32 tile = PPU_PROBE_VRAM_PTR(ppu, tp);
       NEXT_MAP();
