@@ -116,6 +116,11 @@ struct Snes {
    * SNES_ROMPAGE* offsets stay valid. Not in the savestate range. */
   bool pal;
   uint16_t vcount; /* 262 NTSC, 312 PAL */
+  /* $4210 was read in the last dots before vblank, inside an instruction
+   * whose read cycle falls after vblank starts (see snes_readReg): it saw
+   * the NMI flag set and cleared it, so the vblank event must not set it
+   * again. Lives a few dots at most; not in the savestate range. */
+  bool nmiReadEarly;
 };
 
 Snes* snes_init(uint8_t *ram);

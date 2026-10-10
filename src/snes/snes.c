@@ -239,6 +239,7 @@ void snes_reset(Snes* snes, bool hard) {
   snes->divideResult = 0x101;
   snes->fastMem = false;
   snes->openBus = 0;
+  snes->nmiReadEarly = false;
   snes_set_region(snes, snes->pal);
 }
 
@@ -264,7 +265,8 @@ void snes_handle_pos_stuff(Snes *snes) {
       // if we are starting vblank
       ppu_handleVblank(snes->ppu);
       snes->inVblank = true;
-      snes->inNmi = true;
+      snes->inNmi = !snes->nmiReadEarly;   /* already read and cleared: see $4210 */
+      snes->nmiReadEarly = false;
 #ifdef GNW_SNES_CORE
       /* Only if the game asked for it. Super Metroid always has NMI on, so its
        * reimplementation could take the shortcut of firing unconditionally — but
@@ -378,7 +380,8 @@ void snes_run_line(Snes *snes) {
   if (startingVblank) {
     ppu_handleVblank(snes->ppu);
     snes->inVblank = true;
-    snes->inNmi = true;
+    snes->inNmi = !snes->nmiReadEarly;   /* already read and cleared: see $4210 */
+    snes->nmiReadEarly = false;
 #ifdef SNES_IDLE_SKIP
     idle_nmi_sample(snes);   /* where the CPU waits: see idle_skip.h */
 #endif
@@ -537,7 +540,20 @@ static uint8_t snes_readReg(Snes* snes, uint16_t adr) {
                (unsigned)snes->cpu->k, (unsigned)snes->cpu->pc);
 #endif
       uint8_t val = 0x2; // CPU version (4 bit)
-      val |= snes->inNmi << 7;
+      bool nmi = snes->inNmi;
+      /* The read cycle is the LAST cycle of the instruction, but this core
+       * runs an instruction whole at its start. If vblank begins inside the
+       * instruction, real hardware reads the flag already set -- and that is
+       * the only way a main loop polling $4210 with NMI enabled ever sees it,
+       * because the NMI handler reads $4210 too and clears it first.
+       * Final Fantasy VI's event "play song" waits exactly like that and hung
+       * on a black screen. The read lands ~8 dots per cycle after the start. */
+      if (!nmi && !snes->inVblank &&
+          snes->vPos + 1 == ((snes->ppu && snes->ppu->overscan) ? 240 : 225)) {
+        const int read_at = snes->hPos + (snes->cpu->cyclesUsed ? (snes->cpu->cyclesUsed - 1) * 8 : 0);
+        if (read_at >= 1364) { nmi = true; snes->nmiReadEarly = true; }
+      }
+      val |= nmi << 7;
       /* RDNMI bit 7 clears on read (and at end of vblank). */
       snes->inNmi = false;
       return val | (snes->openBus & 0x70);
