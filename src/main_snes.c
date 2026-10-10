@@ -828,6 +828,23 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
   bool dma_active = dma->dmaBusy || dma->hdmaTimer > 0;
   while (dots > 0) {
     if (dma_active) {
+      /* HDMA stall: after a line's HDMA transfers the CPU waits out
+       * hdmaTimer, and dma_cycle() does nothing in that time but count it
+       * down 2 dots a call -- ~26,500 calls a frame in Final Fantasy VI, whose
+       * HDMA runs on every line, against ~2,000 bytes actually moved. Nothing
+       * else happens in those dots (no transfer, no bus access, apuDotsAccum
+       * and hPos are plain sums), so take the whole stall, or as much of it
+       * as the span holds, in one step. Same end state as the 2-dot calls. */
+      if (dma->hdmaTimer > 0 && !(dma->hdmaTimer & 1)) {
+        int k = dma->hdmaTimer >> 1, kd = (dots + 1) >> 1;
+        if (kd < k) k = kd;
+        dma->hdmaTimer = (uint16_t)(dma->hdmaTimer - 2 * k);
+        apud += (uint32_t)(2 * k);
+        hpos = (uint16_t)(hpos + 2 * k); dots -= 2 * k;
+        dma_active = dma->dmaBusy || dma->hdmaTimer > 0;
+        SNES_PERF_CPU_INC(snes_perf_cpu_dmaloop);
+        continue;
+      }
       s->hPos = hpos;
       s->apuDotsAccum = apud;
 #ifdef SNES_PERF
