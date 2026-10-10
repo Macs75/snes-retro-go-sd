@@ -26,7 +26,14 @@ SNES_THUMB2_CPU ?= 1
 SNES_THUMB2_SPC ?= 1
 # Match jshsakura shipping defaults (Makefile.common).
 SNES_SPIN_SKIP ?= 0
+# idle-loop skip found at each NMI (src/snes/idle_skip.h); it covers the bake's
+# LDA dp / BEQ shape, so the bake is off when it is on
+SNES_IDLE_SKIP ?= 1
+ifeq ($(SNES_IDLE_SKIP),1)
+SNES_SPIN_BAKE ?= 0
+else
 SNES_SPIN_BAKE ?= 1
+endif
 SNES_DSP_MONO ?= 0
 SNES_SPC_IDLE_SKIP ?= 1
 # silent DSP voices leave the per-sample loop, caught up when they wake (src/snes/dsp.c)
@@ -55,6 +62,7 @@ $(SNES)/snes_other.c \
 $(SNES)/spc.c \
 $(SNES)/spin_skip.c \
 $(SNES)/spin_bake.c \
+$(SNES)/idle_skip.c \
 $(SNES)/rc_dispatch.c \
 $(SNES)/tracing.c \
 src/snes_audio_stretch.c \
@@ -117,6 +125,9 @@ CORE_C_DEFS += -DSNES_SPIN_SKIP
 endif
 ifeq ($(SNES_SPIN_BAKE),1)
 CORE_C_DEFS += -DSNES_SPIN_BAKE
+endif
+ifeq ($(SNES_IDLE_SKIP),1)
+CORE_C_DEFS += -DSNES_IDLE_SKIP
 endif
 ifeq ($(SNES_DSP_MONO),1)
 CORE_C_DEFS += -DSNES_DSP_MONO

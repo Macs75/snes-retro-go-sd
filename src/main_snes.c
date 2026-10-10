@@ -86,6 +86,9 @@ static void snes_wait_button(void)
 #ifdef SNES_SPIN_BAKE
 #include "snes/spin_bake.h"
 #endif
+#ifdef SNES_IDLE_SKIP
+#include "snes/idle_skip.h"
+#endif
 #include "snes_audio_stretch.h"
 #include "snes_dsp_variant.h"
 #include "snes/rc_dispatch.h"
@@ -175,8 +178,13 @@ static int snes_audio_samples = SNES_AUDIO_SAMPLES_NTSC;
 /* ---- event loop (verbatim from tools/snes_harness/snes_main.c) ------------ */
 #ifdef SNES_BUS_IN_ITCM
 #define SNES_ITCM_SCHED __attribute__((section(".itcm_snes_interp.thumb2.bus")))
+/* the idle skip's per-span half: ITCM too, but AFTER the pinned engine
+ * (snes_core.ld's .itcm_snes_interp.thumb2.* catch-all), so run_frame_events
+ * keeps its fixed address at 0x564 */
+#define SNES_ITCM_IDLE  __attribute__((section(".itcm_snes_interp.thumb2.idle")))
 #else
 #define SNES_ITCM_SCHED
+#define SNES_ITCM_IDLE
 #endif
 
 /* Keep the scheduler in ITCM with cpu_runOpcode. At -O3 gcc already inlines
@@ -285,6 +293,20 @@ static void snes_perf_report(void)
          (unsigned long)(sp_phase[SP_FRAMECTL] / n));
   printf("PROF/pace: late=%lu of %lu frames (already behind the audio clock), wait_ms=%lu\n",
          (unsigned long)sp_late, (unsigned long)sp_frames, (unsigned long)sp_pace_ms);
+#ifdef SNES_IDLE_SKIP
+  /* idle-loop skip: the armed site, emulated dots it advanced without running
+   * (loop laps, and WAI), and how often a new site was armed or a NMI-time pc
+   * was refused. A frame is 1364*262 (NTSC) or 1364*312 (PAL) dots. */
+  printf("PROF/idle: site=%02x:%04x+%u mem=%u laps=%lu skipped_dots=%lu wai_dots=%lu per emulated frame, rearms=%lu rejects=%lu\n",
+         g_idle.bank, g_idle.head, g_idle.len, g_idle.nmem,
+         (unsigned long)(g_idle.laps / n), (unsigned long)(g_idle.ff_dots / n),
+         (unsigned long)(g_idle.wai_dots / n), (unsigned long)g_idle.rearms, (unsigned long)g_idle.rejects);
+  /* the span runner's own time (cycles, inside the cpu figure) and calls */
+  printf("PROF/idle: span_runner=%lu cycles in %lu calls per emulated frame\n",
+         (unsigned long)(g_idle.cyc / n), (unsigned long)(g_idle.calls / n));
+  g_idle.laps = g_idle.ff_dots = g_idle.wai_dots = 0;
+  g_idle.cyc = g_idle.calls = 0;
+#endif
   printf("PROF/audio: step_avg=%lu step_min=%lu (65536 = normal speed) underruns=%lu inserts=%lu fill=%u\n",
          (unsigned long)(sp_step_sum / n), (unsigned long)sp_step_min,
          (unsigned long)(snes_stretch_underruns() - sp_under0), (unsigned long)(g_stretch_ins - sp_ins0),
@@ -502,6 +524,244 @@ static inline uint32_t SNES_ITCM_SCHED run_one_opcode_charge(Snes *s) {
   return (uint32_t)cycles * 6 + (uint32_t)s->cpuMemOps * 2;
 }
 
+#ifdef SNES_IDLE_SKIP
+/* SNES_IDLE_WAI: the WAI fast-forward below run_dots' engine fallback, for a
+ * CPU that really halts (WAI with no interrupt pending). None of the eight
+ * host A/B runs reached it -- Donkey Kong Country's WAI always has a masked
+ * IRQ pending and is skipped as an idle loop instead -- so its first check is
+ * PROF/idle's wai_dots on the device. =0 builds without it. */
+#ifndef SNES_IDLE_WAI
+#define SNES_IDLE_WAI 1
+#endif
+/* The idle-loop span runner (see snes/idle_skip.h), called once per span when
+ * the pc is inside the armed loop. It never executes the loop's opcodes on the
+ * fast path; it only decides whether the rest of the span is a whole number of
+ * proven laps, advances those, and hands the span back to run_dots, whose
+ * engine runs whatever is left (the partial lap) at full speed.
+ *
+ * The proof is a lap observed once: from an instruction boundary in the loop,
+ * the CPU came back to the same boundary with the same registers, flags,
+ * pending-interrupt state and polled WRAM. The machine state recurred, the loop
+ * writes nothing (by decode) and nothing else can write inside a span (no DMA,
+ * no interrupt: both bail here), so from that state every lap is that lap
+ * again, charge included. The state at EVERY boundary of the observed lap is
+ * kept, so a span that starts anywhere in the loop is checked at once.
+ *
+ * Proving costs one interpreted lap, so it is tried at most twice a frame (the
+ * budget is refilled at the NMI) and only when the stored proof does not match;
+ * a waiting game's idle state is the same frame after frame, so in practice it
+ * is proven once per site.
+ *
+ * Exactness: k laps of L dots are one add of k*L to hPos and apuDotsAccum,
+ * which are plain sums until the next opcode reads them, and no opcode runs in
+ * the skipped laps. The span then continues from the same boundary in the same
+ * state, exactly where the opcode-by-opcode path would be after those laps. */
+/* Can apply_irq_match() raise the H-IRQ anywhere in the next `dots` from
+ * hPos? It matches only when hPos lands exactly on hTimer*4 (on the V-IRQ line
+ * if V-IRQ is on too), and dots_to_next_event ends every span at that
+ * position, so this is normally false -- but it is asked, not assumed. */
+static inline bool idle_hirq_in(const Snes *s, uint16_t hpos, int dots) {
+  if (!s->hIrqEnabled) return false;
+  if (s->vIrqEnabled && s->vPos != s->vTimer) return false;
+  return (unsigned)(s->hTimer * 4 - hpos) <= (unsigned)dots;
+}
+
+/* the CPU state that has to recur, at one boundary: see IdleState */
+static inline void idle_state(const Snes *s, IdleState *st) {
+  st->pc = s->cpu->pc;
+  memcpy(st->img, &s->cpu->a, IDLE_IMG_LEN);
+}
+/* Plain aligned loads, no memcpy: gcc turns a 4-byte memcpy from a pointer it
+ * cannot prove aligned into a CALL, and twelve of those (through a veneer out
+ * of ITCM) were ~600 of the 620 cycles this took per span on the device. Both
+ * images keep a..db halfword-aligned and the flags (from c) word-aligned --
+ * asserted in idle_skip.c. */
+typedef uint16_t __attribute__((may_alias)) idle_u16;
+typedef uint32_t __attribute__((may_alias)) idle_u32;
+static inline bool idle_img_eq(const uint8_t *p, const uint8_t *q) {
+  const idle_u16 *ph = (const idle_u16 *)p, *qh = (const idle_u16 *)q;
+  const idle_u32 *pw = (const idle_u32 *)(p + 14), *qw = (const idle_u32 *)(q + 14);
+  uint32_t d = (uint32_t)(ph[0] ^ qh[0]) | (uint32_t)(ph[1] ^ qh[1]) | (uint32_t)(ph[2] ^ qh[2]) |
+               (uint32_t)(ph[3] ^ qh[3]) | (uint32_t)(ph[4] ^ qh[4]) | (uint32_t)(ph[5] ^ qh[5]) |
+               (uint32_t)(ph[6] ^ qh[6]);
+  d |= (pw[0] ^ qw[0]) | (pw[1] ^ qw[1]) | (pw[2] ^ qw[2]) | (uint32_t)(p[26] ^ q[26]);
+  return d == 0;
+}
+/* Put a stored boundary image back into the CPU (the inverse of idle_state),
+ * with the same aligned halfword/word accesses as idle_img_eq. */
+static inline void idle_img_put(Cpu *cpu, const IdleState *st) {
+  idle_u16 *dh = (idle_u16 *)&cpu->a;
+  const idle_u16 *sh = (const idle_u16 *)st->img;
+  idle_u32 *dw = (idle_u32 *)((uint8_t *)&cpu->a + 14);
+  const idle_u32 *sw = (const idle_u32 *)(st->img + 14);
+  dh[0] = sh[0]; dh[1] = sh[1]; dh[2] = sh[2]; dh[3] = sh[3]; dh[4] = sh[4]; dh[5] = sh[5]; dh[6] = sh[6];
+  dw[0] = sw[0]; dw[1] = sw[1]; dw[2] = sw[2];
+  ((uint8_t *)&cpu->a)[26] = st->img[26];
+}
+static inline bool idle_state_eq(const IdleState *p, const IdleState *q) {
+  return p->pc == q->pc && idle_img_eq(p->img, q->img);
+}
+static inline bool idle_mem_eq(const Snes *s, const uint8_t *m) {
+  for (int i = 0; i < g_idle.nmem; i++) if (s->ram[g_idle.mem_off[i]] != m[i]) return false;
+  return true;
+}
+
+/* A boundary where the idle state can hold: nothing pending that the CPU would
+ * take, no real WAI halt (that is the scheduler's own skip), the decode
+ * environment unchanged, the pc in the loop. */
+static inline bool idle_boundary_ok(const Snes *s) {
+  const Cpu *cpu = s->cpu;
+  const IdleSkip *g = &g_idle;
+  if (cpu->nmiWanted || (cpu->irqWanted && !cpu->i) || cpu->stopped) return false;
+  if (cpu->waiting && !cpu->irqWanted) return false;
+  if (s->vIrqEnabled && s->vPos == s->vTimer) return false;
+  if (cpu->k != g->bank && cpu->k != g->bank_alt) return false;
+  if ((uint16_t)(cpu->pc - g->head) > g->len) return false;
+  if (cpu->e != g->e || cpu->mf != g->mf || cpu->xf != g->xf ||
+      cpu->db != g->db || cpu->dp != g->dp) return false;
+  return true;
+}
+
+/* run_dots' consume step, on the Snes fields */
+static inline void idle_consume(Snes *s, int *dots) {
+  int step;
+  if (s->cpuCyclesLeft >= 2) {
+    step = s->cpuCyclesLeft;
+    if (step > *dots) step = *dots;
+    s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft - step);
+  } else {
+    step = 2;
+    s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft - 2);
+  }
+  s->apuDotsAccum += step;
+  s->hPos += step; *dots -= step;
+}
+
+/* Observe one lap from the current boundary, opcode by opcode exactly as
+ * run_dots' ordinary path would run it. Returns true if it came back to the
+ * starting boundary in the starting state, filling the proof. On any other
+ * outcome the opcodes it ran are simply the span's own, already accounted. */
+static bool idle_prove(Snes *s, int *dots) {
+  IdleSkip *g = &g_idle;
+  IdleState start, cur;
+  uint8_t mem[IDLE_MAX_MEM];
+  idle_state(s, &start);
+  for (int i = 0; i < g->nmem; i++) mem[i] = s->ram[g->mem_off[i]];
+  IdleState seen[IDLE_MAX_STATES];
+  uint8_t seen_ch[IDLE_MAX_STATES];
+  int nseen = 0;
+  uint32_t lap = 0;
+  for (;;) {
+    if (nseen == IDLE_MAX_STATES) return false;
+    idle_state(s, &seen[nseen++]);
+    apply_irq_match(s);
+    const uint32_t c = run_one_opcode_charge(s);
+    s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
+    lap += c;
+    seen_ch[nseen - 1] = (uint8_t)c;
+    if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) {
+      /* run_dots' started_dma step; the burst is run_dots' to run */
+      s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft - 2);
+      s->apuDotsAccum += 2;
+      s->hPos += 2; *dots -= 2;
+      return false;
+    }
+    while (s->cpuCyclesLeft && *dots > 0) idle_consume(s, dots);
+    if (s->cpuCyclesLeft || *dots <= 0) return false;
+    if (!idle_boundary_ok(s) || lap > 4000) return false;
+    idle_state(s, &cur);
+    if (cur.pc == start.pc) {
+      if (!idle_state_eq(&cur, &start) || !idle_mem_eq(s, mem)) return false;
+      for (int i = 0; i < nseen; i++) { g->st[i] = seen[i]; g->ch[i] = seen_ch[i]; }
+      g->nst = (uint8_t)nseen;
+      for (int i = 0; i < g->nmem; i++) g->smem[i] = mem[i];
+      g->lap = lap;
+      g->snap_ok = true;
+      return true;
+    }
+  }
+}
+
+/* The cold half: prove a lap from here (one interpreted lap) and, if it
+ * proves, take the rest of the span in whole laps. In RAM: it runs at most
+ * twice a frame. */
+static int idle_skip_laps(Snes *s, int dots);
+__attribute__((noinline))
+static int idle_prove_span(Snes *s, int dots) {
+  IdleSkip *g = &g_idle;
+  if (g->proof_budget == 0 || !idle_boundary_ok(s)) return dots;
+  g->proof_budget--;
+  if (!idle_prove(s, &dots)) return dots;
+  return idle_skip_laps(s, dots);
+}
+
+/* The hot half, once per span while the pc is in the armed loop, so it lives
+ * in ITCM. In RAM it measured 418 cycles a call on the device
+ * (251K a frame of Zelda gameplay, more than the laps it skipped): ~60
+ * instructions, the rest fetch stalls, because the engine and the PPU evict it
+ * from the I-cache between spans. A stored boundary image was taken where the
+ * idle state held, so an equal image (bank, flags, M/X/E, DB, DP and the
+ * interrupt state included) is that state again: no separate boundary test. */
+/* Returns the dots left after the skipped laps, or -1-dots when no stored lap
+ * matches here (the caller may then try to prove one). */
+static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
+  IdleSkip *g = &g_idle;
+  if (!g->snap_ok) return dots;
+  for (int i = 0; i < g->nmem; i++) if (s->ram[g->mem_off[i]] != g->smem[i]) return -1 - dots;
+  Cpu *cpu = s->cpu;
+  const uint16_t pc = cpu->pc;
+  for (int i = 0; i < g->nst; i++) {
+    if (g->st[i].pc != pc) continue;
+    if (!idle_img_eq((const uint8_t *)&cpu->a, g->st[i].img)) return -1 - dots;
+    const int L = (int)g->lap;
+    const int k = dots / L;
+    uint32_t adv = (uint32_t)(k * L);
+    dots -= k * L;
+    g->laps += (uint32_t)k;
+    g->ff_dots += adv;
+    /* The partial lap that is left: step it boundary by boundary from the
+     * stored lap instead of handing it to the engine. An opcode takes effect
+     * when it starts and is then consumed, so starting the one at boundary i
+     * means the CPU becomes boundary i+1's state, charged ch[i], consumed as
+     * run_dots would (step = what is left of it, capped by the span). The
+     * loop reads no I/O and no H-IRQ can match in this span, so nothing
+     * observes the order. Ends with cpuCyclesLeft holding any part of the
+     * last opcode the span did not reach, exactly as the engine leaves it. */
+    uint32_t left = 0;
+    while (dots > 0) {
+      const int j = i + 1 == g->nst ? 0 : i + 1;
+      idle_img_put(cpu, &g->st[j]);
+      cpu->pc = g->st[j].pc;
+      left = g->ch[i];
+      uint32_t step = left < (uint32_t)dots ? left : (uint32_t)dots;
+      left -= step;
+      adv += step;
+      dots -= (int)step;
+      i = j;
+    }
+    s->hPos = (uint16_t)(s->hPos + adv);
+    s->apuDotsAccum += adv;
+    s->cpuCyclesLeft = (uint8_t)left;
+    return dots;
+  }
+  return -1 - dots;
+}
+
+__attribute__((noinline))
+static int SNES_ITCM_IDLE idle_run_span(Snes *s, int dots) {
+  if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) return dots;
+  if (idle_hirq_in(s, s->hPos, dots)) return dots;
+  /* the opcode in flight finishes first: pure arithmetic, as run_dots does */
+  while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
+  if (dots <= 0) return dots;
+  if (s->vIrqEnabled && s->vPos == s->vTimer) return dots;
+  if (!g_idle.snap_ok) return idle_prove_span(s, dots);
+  const int r = idle_skip_laps(s, dots);
+  if (r >= 0) return r;
+  return idle_prove_span(s, -1 - r);      /* a stored lap exists but not here */
+}
+#endif
+
 /* The dot loop with the scheduler's state in registers. Per opcode it used to
  * load and store cpuCyclesLeft up to three times, load and store hPos and
  * apuDotsAccum, and reach the DMA flags through s->dma. Now:
@@ -523,6 +783,27 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
     uint32_t pb_t0 = snes_perf_now(), pb_d0 = snes_perf_dma;
 #endif
     dots = spin_bake_run_span(s, s->cpu, dots);
+#ifdef SNES_PERF_CPU
+    snes_perf_cpu_bake += snes_perf_now() - pb_t0 - (snes_perf_dma - pb_d0);
+#endif
+  }
+#endif
+#ifdef SNES_IDLE_SKIP
+  /* One test per SPAN: is the CPU in the armed idle loop? */
+  if ((uint16_t)(s->cpu->pc - g_idle.head) <= g_idle.len &&
+      !(s->dma->dmaBusy || s->dma->hdmaTimer > 0))
+  {
+#ifdef SNES_PERF_CPU
+    uint32_t pb_t0 = snes_perf_now(), pb_d0 = snes_perf_dma;
+#endif
+#if defined(SNES_PERF) && !defined(SNES_PERF_CPU)
+    uint32_t pi_t0 = snes_perf_now();
+#endif
+    dots = idle_run_span(s, dots);
+#if defined(SNES_PERF) && !defined(SNES_PERF_CPU)
+    g_idle.cyc += snes_perf_now() - pi_t0;
+    g_idle.calls++;
+#endif
 #ifdef SNES_PERF_CPU
     snes_perf_cpu_bake += snes_perf_now() - pb_t0 - (snes_perf_dma - pb_d0);
 #endif
@@ -567,6 +848,27 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
         apply_irq_match(s);
         left = (uint8_t)(left + run_one_opcode_charge(s));
         apud = s->apuDotsAccum;          /* the opcode's APU catch-up may have zeroed it */
+#if defined(SNES_IDLE_SKIP) && SNES_IDLE_WAI
+        /* WAI: until an interrupt is pending every call is the same no-op
+         * charged 6 dots, and none can become pending inside the span (NMI and
+         * V-IRQ are span-boundary events; an H-IRQ matches only on its exact
+         * dot, which idle_hirq_in rules out of the span; DMA is excluded). Advance all but the last whole
+         * call in one add -- at least one call stays for the real path, so the
+         * CPU is left exactly as the calls would leave it. This branch is the
+         * engine's fallback path only, so a game that never waits never
+         * reaches it. */
+        if (s->cpu->waiting && !s->cpu->nmiWanted && !s->cpu->irqWanted && !s->cpu->stopped &&
+            !idle_hirq_in(s, hpos, dots) && !(dma->dmaBusy || dma->hdmaTimer > 0)) {
+          const int rem = dots - left;
+          if (rem >= 12) {
+            const int k6 = (rem / 6 - 1) * 6;
+            apud += (uint32_t)k6;
+            hpos = (uint16_t)(hpos + k6);
+            dots -= k6;
+            g_idle.wai_dots += (uint32_t)k6;
+          }
+        }
+#endif
       }
       started_dma = dma->dmaBusy || dma->hdmaTimer > 0;
     }
@@ -1574,6 +1876,9 @@ static void rec_power_on(void)
   spin_bake_reset();
   spin_bake_scan(snes);
 #endif
+#ifdef SNES_IDLE_SKIP
+  idle_reset();
+#endif
   spin_reset();
   rec_sram_blocked = true;
   rec_frame = 0;
@@ -1974,6 +2279,9 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 
   printf("snes: snes_init\n");
   snes = snes_init(snes_wram);
+#ifdef SNES_IDLE_SKIP
+  idle_alloc();   /* the idle-skip state to DTCM, before any reset uses it */
+#endif
   g_the_snes = snes;
   if (!snes || !snes->apu || !snes->apu->spc || !snes->apu->dsp ||
       !snes->cpu || !snes->ppu || !snes->cart || !snes->dma ||
@@ -2045,6 +2353,9 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
   spin_bake_scan(snes);
   printf("snes: bake on=%d sites=%lu pc=%02x:%04x dp=$%02x\n", (int)g_bake.on,
          (unsigned long)g_bake.sites, g_bake.bank, g_bake.pc_load, g_bake.dp_off);
+#endif
+#ifdef SNES_IDLE_SKIP
+  idle_reset();
 #endif
   snes_SramLoad();
   snes_fps = snes->pal ? SNES_FPS_PAL : SNES_FPS_NTSC;
@@ -2454,6 +2765,19 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
       if (st < sp_step_min) sp_step_min = st;
     }
     if (sp_frames >= SNES_PERF_FRAMES) snes_perf_report();
+#endif
+#if defined(HOST_BUILD) && defined(SNES_IDLE_SKIP)
+    {   /* IDLE_STATS=1: the idle-skip counters every 600 frames, on stderr */
+      static int on = -1; static long fr;
+      if (on < 0) on = getenv("IDLE_STATS") != NULL;
+      if (on && ++fr % 600 == 0) {
+        fprintf(stderr, "IDLE f=%ld site=%02x:%04x+%u mem=%u snap=%d laps=%lu ff=%lu wai=%lu rearms=%lu rejects=%lu\n",
+                fr, g_idle.bank, g_idle.head, g_idle.len, g_idle.nmem, g_idle.snap_ok,
+                (unsigned long)g_idle.laps, (unsigned long)g_idle.ff_dots, (unsigned long)g_idle.wai_dots,
+                (unsigned long)g_idle.rearms, (unsigned long)g_idle.rejects);
+        g_idle.laps = g_idle.ff_dots = g_idle.wai_dots = 0;
+      }
+    }
 #endif
     rec_frame_done();
 #ifdef HOST_BUILD

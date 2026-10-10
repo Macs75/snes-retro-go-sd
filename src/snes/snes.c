@@ -8,6 +8,9 @@
 #include <stddef.h>
 #include <assert.h>
 #include "snes.h"
+#ifdef SNES_IDLE_SKIP
+#include "idle_skip.h"
+#endif
 #include "cpu.h"
 #include "apu.h"
 #include "dma.h"
@@ -267,6 +270,9 @@ void snes_handle_pos_stuff(Snes *snes) {
        * reimplementation could take the shortcut of firing unconditionally — but
        * an arbitrary game gets an NMI before it has set up its vector, and dies.
        * (This alone was 100 of 125 games booting to a black screen.) */
+#ifdef SNES_IDLE_SKIP
+      idle_nmi_sample(snes);   /* where the CPU waits: see idle_skip.h */
+#endif
       if (snes->nmiEnabled)
         snes->cpu->nmiWanted = true;
 #else
@@ -373,6 +379,9 @@ void snes_run_line(Snes *snes) {
     ppu_handleVblank(snes->ppu);
     snes->inVblank = true;
     snes->inNmi = true;
+#ifdef SNES_IDLE_SKIP
+    idle_nmi_sample(snes);   /* where the CPU waits: see idle_skip.h */
+#endif
     if (snes->nmiEnabled)
       snes->cpu->nmiWanted = true;
     if (snes->autoJoyRead) {
