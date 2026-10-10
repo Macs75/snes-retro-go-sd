@@ -2387,6 +2387,8 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
   idle_reset();
 #endif
   snes_SramLoad();
+  printf("snes: mem free pool=%lu ahb=%lu (sram %d B)\n", (unsigned long)ram_get_free_size(),
+         (unsigned long)ahb_get_free_size(), snes->cart->ram ? snes->cart->ramSize : 0);
   snes_fps = snes->pal ? SNES_FPS_PAL : SNES_FPS_NTSC;
   snes_audio_samples = SNES_AUDIO_RATE / snes_fps;
   snes_apply_frame_time();

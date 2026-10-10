@@ -810,6 +810,10 @@ void *core_ahb_calloc(size_t count, size_t size)
 {
     return (void *)gw_firmware_abi()->mem_ctl(GW_MEM_OP_ALLOC, GW_MEM_AHB, count, size);
 }
+size_t core_ahb_get_free_size(void)
+{
+    return (size_t)gw_firmware_abi()->mem_ctl(GW_MEM_OP_FREE_SIZE, GW_MEM_AHB, 0, 0);
+}
 
 uint8_t core_odroid_settings_cpu_oc_level_get(void) { return gw_firmware_abi()->odroid_settings_cpu_oc_level_get(); }
 void    core_SystemClock_Config(uint8_t new_oc_level) { gw_firmware_abi()->SystemClock_Config(new_oc_level); }

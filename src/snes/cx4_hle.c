@@ -889,8 +889,13 @@ uint8_t cx4_read(Cx4* cx4, uint16_t addr) {
 }
 
 #ifdef TARGET_GNW
-static Cx4 gnw_cx4;
-Cx4* cx4_alloc(void) { return &gnw_cx4; }
+#include "gw_malloc.h"
+/* Only Cx4 carts allocate it, so the other games keep the 8 KB. AHB first:
+ * the RAM_EMU pool is left to the hot data. */
+Cx4* cx4_alloc(void) {
+  Cx4 *c = (Cx4*)ahb_calloc(1, sizeof(Cx4));
+  return c ? c : (Cx4*)ram_calloc(1, sizeof(Cx4));
+}
 #else
 Cx4* cx4_alloc(void) { return (Cx4*)calloc(1, sizeof(Cx4)); }
 #endif

@@ -29,12 +29,23 @@ enum {
   RTCS_Write = 3
 };
 
-static uint32_t morton16[2][256];
-static uint32_t morton32[4][256];
+/* 6 KB, only for SPC7110 carts: allocated by spc7110_alloc (AHB first on
+ * the device, so the RAM_EMU pool is left to the hot data). */
+static uint32_t (*morton16)[256];
+static uint32_t (*morton32)[256];
 static int morton_ready;
 
-static void morton_init(void) {
-  if (morton_ready) return;
+static int morton_init(void) {
+  if (morton_ready) return 1;
+  const size_t n = sizeof(uint32_t) * 256 * (2 + 4);
+#ifdef TARGET_GNW
+  uint32_t (*t)[256] = (uint32_t (*)[256])ahb_calloc(1, n);
+  if (!t) t = (uint32_t (*)[256])ram_calloc(1, n);
+#else
+  uint32_t (*t)[256] = (uint32_t (*)[256])snes_zalloc(n);
+#endif
+  if (!t) return 0;
+  morton16 = t; morton32 = t + 2;
   for (unsigned i = 0; i < 256; i++) {
 #define MAP(x, y) (((i >> (x)) & 1u) << (y))
     morton16[1][i] = MAP(7, 15) + MAP(6, 7) + MAP(5, 14) + MAP(4, 6)
@@ -52,6 +63,7 @@ static void morton_init(void) {
 #undef MAP
   }
   morton_ready = 1;
+  return 1;
 }
 
 #ifdef HOST_BUILD
@@ -486,7 +498,7 @@ static void set_data_adjust(Spc7110 *s, uint32_t addr) {
 /* ========== Lifecycle ========== */
 
 Spc7110 *spc7110_alloc(void) {
-  morton_init();
+  if (!morton_init()) return NULL;
 #ifdef TARGET_GNW
   return (Spc7110 *)ram_calloc(1, sizeof(Spc7110));
 #else

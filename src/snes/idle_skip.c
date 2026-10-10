@@ -5,20 +5,34 @@
 #include "idle_skip.h"
 #include "cart.h"
 
+#ifdef TARGET_GNW
+/* allocated by idle_alloc() before anything reads them */
+IdleSkip *g_idle_sites;
+IdleSkip *g_idlep;
+#else
 static IdleSkip s_sites_static[IDLE_SITES];
 IdleSkip *g_idle_sites = s_sites_static;
 IdleSkip *g_idlep = &s_sites_static[0];
+#endif
 IdleStats g_idle_stats;
 uint8_t g_idle_budget;
 static uint32_t s_frame;
 
 #ifdef TARGET_GNW
+#include <assert.h>
+#include <stdio.h>
 #include "gw_malloc.h"
 #endif
 void idle_alloc(void) {
 #ifdef TARGET_GNW
-  void *p = dtc_malloc(sizeof(IdleSkip) * IDLE_SITES);
-  if (p && p != (void *)-1) { g_idle_sites = (IdleSkip *)p; g_idlep = &g_idle_sites[0]; }
+  /* DTCM: the span runner reads the active site on every span. AHB, then the
+   * RAM_EMU pool, only if DTCM is full. */
+  const size_t n = sizeof(IdleSkip) * IDLE_SITES;
+  void *p = dtc_malloc(n);
+  if (!p || p == (void *)-1) { printf("idle: sites in AHB (DTCM full)\n"); p = ahb_calloc(1, n); }
+  if (!p) p = ram_calloc(1, n);
+  assert(p);
+  g_idle_sites = (IdleSkip *)p; g_idlep = &g_idle_sites[0];
 #endif
 }
 

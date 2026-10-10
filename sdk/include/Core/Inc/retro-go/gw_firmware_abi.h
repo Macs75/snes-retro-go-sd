@@ -87,7 +87,7 @@ typedef enum {
 typedef enum {
     GW_MEM_OP_ALLOC     = 0,  /* calloc from pool; count=1 → malloc(size)+zero */
     GW_MEM_OP_INIT      = 1,  /* reset pool bump (ITC/RAM/DTCM only) */
-    GW_MEM_OP_FREE_SIZE = 2,  /* free bytes in pool (RAM only today) */
+    GW_MEM_OP_FREE_SIZE = 2,  /* largest allocatable bytes in this pool */
 } gw_mem_op_t;
 
 typedef struct {

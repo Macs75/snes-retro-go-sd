@@ -152,6 +152,7 @@ common_emu_clear_dwt_cycles core_common_emu_clear_dwt_cycles
 # --- v1 append: Mega Drive / gwenesis porting surface ---
 ahb_malloc core_ahb_malloc
 ahb_calloc core_ahb_calloc
+ahb_get_free_size core_ahb_get_free_size
 odroid_audio_init core_odroid_audio_init
 odroid_audio_sample_rate_get core_odroid_audio_sample_rate_get
 audio_start_playing_full_length core_audio_start_playing_full_length

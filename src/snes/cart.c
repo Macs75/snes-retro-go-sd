@@ -60,13 +60,16 @@ __attribute__((weak)) uint32_t spc7110_size(void) { return 0; }
 
 #ifdef GNW_SNES_CORE
 #include <assert.h>
-/* Device save-RAM. Writable, so it can't be XIP'd from flash like the ROM is —
- * but the ~81 KB DTCM heap can't malloc a 32 KB SRAM either. Park it in a static
- * buffer, which lands in .overlay_snes_bss (RAM_EMU, 724 KB — the roomy region
- * where WRAM already lives), not the heap. 0x8000 is the largest SRAM a plain
- * LoROM/HiROM cart declares; coprocessor carts (which can want more) are rejected
- * at load, and the assert in cart_load() catches anything that slips past. */
-static uint8_t gnw_cart_sram[0x8000];
+#include "gw_malloc.h"
+/* Device save-RAM. Writable, so it can't be XIP'd from flash like the ROM is,
+ * and the ~81 KB DTCM heap is full. Games touch it rarely (save slots), so it
+ * lives on the AHB heap, sized to what the header declares (most games 0-8 KB),
+ * leaving the RAM_EMU pool to the hot data. The RAM_EMU pool is the fallback
+ * when AHB is short. Allocated once (the core exits by switching app, nothing
+ * is freed); a later cart_load reuses it. */
+enum { kGnwCartSramMax = 0x8000 };
+static uint8_t *gnw_cart_sram;
+static int gnw_cart_sram_size;
 #endif
 
 
@@ -257,8 +260,8 @@ void cart_load(Cart* cart, int type, uint8_t* rom, int romSize, int ramSize) {
   cart->type = type;
 #ifdef GNW_SNES_CORE
   // Device: neither the ROM nor the SRAM touches the ~81 KB heap. `rom` is the
-  // flash-mapped image used in place (never freed); the SRAM lives in a static
-  // RAM_EMU buffer, not malloc. Nothing here is heap-owned, so nothing is freed.
+  // flash-mapped image used in place (never freed); the SRAM comes from the
+  // AHB heap (see gnw_cart_sram) and is kept for the core's lifetime.
   cart->rom = rom;
   cart_setRomSize(cart, romSize);
   if(ramSize > 0) {
@@ -267,9 +270,21 @@ void cart_load(Cart* cart, int type, uint8_t* rom, int romSize, int ramSize) {
      * every `& (ramSize-1)` mask valid, so oversized carts see a mirrored
      * 32 KB -- degraded but running, exactly what an undersized SRAM chip
      * does on a repro board. */
-    if(ramSize > (int)sizeof(gnw_cart_sram)) ramSize = (int)sizeof(gnw_cart_sram);
+    if(ramSize > kGnwCartSramMax) ramSize = kGnwCartSramMax;
+    if (!gnw_cart_sram || gnw_cart_sram_size < ramSize) {
+      gnw_cart_sram = (uint8_t *)ahb_calloc(1, (size_t)ramSize);
+      if (!gnw_cart_sram) {
+        printf("cart: SRAM %d bytes from the RAM_EMU pool (AHB full)\n", ramSize);
+        gnw_cart_sram = (uint8_t *)ram_calloc(1, (size_t)ramSize);
+      }
+      gnw_cart_sram_size = gnw_cart_sram ? ramSize : 0;
+    }
+    if (!gnw_cart_sram) {
+      printf("cart: no room for %d bytes of SRAM, running without it\n", ramSize);
+      ramSize = 0;
+    }
     cart->ram = gnw_cart_sram;
-    memset(cart->ram, 0, ramSize);
+    if (cart->ram) memset(cart->ram, 0, ramSize);
   } else {
     cart->ram = NULL;
   }
