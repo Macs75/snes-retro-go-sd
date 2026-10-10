@@ -56,39 +56,57 @@ typedef struct {
   uint8_t  img[IDLE_IMG_LEN + 1];   /* at offset 2: img+14 (the flags) is word-aligned */
 } __attribute__((aligned(4))) IdleState;
 
+#define IDLE_SITES 4
+#define IDLE_MAX_IDX 4
+
 typedef struct {
-  /* the armed site; head 0xffff with len 0 when nothing is armed */
+  /* the site; head 0xffff with len 0 when the slot is empty */
   uint16_t head;          /* pc of the loop head                              */
   uint16_t len;           /* bytes from head to the closing branch's last byte */
   uint8_t  bank, bank_alt;
-  /* the decode environment the loop was checked under */
+  /* the decode environment, and which parts of it the loop depends on */
   bool     e, mf, xf;
+  bool     uses_db, uses_dp;
   uint8_t  db;
   uint16_t dp;
-  /* WRAM bytes the loop reads (offsets into Snes.ram) */
+  /* reads: fixed WRAM bytes found at decode, and indexed operands whose
+   * address the proof fixes (the loop never changes that index register) */
   uint8_t  nmem;
   uint32_t mem_off[IDLE_MAX_MEM];
-  uint8_t  mem_w[IDLE_MAX_MEM];
+  uint8_t  nidx;
+  struct { uint8_t bank, reg, w, dpmode; uint16_t base; } idx[IDLE_MAX_IDX];
+  bool     rdnmi;         /* reads $4210: idle only while the NMI flag is clear */
+  bool     code_ram;      /* the loop's code is in WRAM: compared every span    */
+  uint8_t  ncode;
+  uint8_t  code[IDLE_MAX_LEN];
+  uint32_t used;          /* frame it was last made active (LRU)                */
   /* the proven lap: the CPU state at each of its instruction boundaries, the
-   * polled WRAM (the same all lap: the loop writes nothing), and its charge */
+   * WRAM it reads (the same all lap: the loop writes nothing), and its charge */
   bool     snap_ok;
   uint8_t  nst;
   IdleState st[IDLE_MAX_STATES];
   uint8_t  ch[IDLE_MAX_STATES];   /* charge of the opcode at each boundary */
-  uint8_t  smem[IDLE_MAX_MEM];
+  uint8_t  npmem;
+  uint32_t pmem_off[IDLE_MAX_MEM + IDLE_MAX_IDX * 2];
+  uint8_t  smem[IDLE_MAX_MEM + IDLE_MAX_IDX * 2];
   uint32_t lap;
-  uint8_t  proof_budget;  /* proving laps left this frame, refilled at the NMI */
-  /* statistics, per report window */
-  uint32_t laps, ff_dots, wai_dots, rearms, rejects;
-  uint32_t cyc, calls;    /* PERF: the span runner's own cycles and calls */
 } IdleSkip;
 
-/* The state lives in DTCM on the device (idle_alloc): the span runner reads it
- * up to ~600 times a frame between PPU lines that sweep the 16 KB D-cache, and
- * in cached RAM that measured 422 cycles a call, mostly misses. Until
- * idle_alloc runs, and on the host, it is a static. */
+typedef struct {
+  uint32_t laps, ff_dots, wai_dots, rearms, rejects;
+  uint32_t cyc, calls;    /* PERF: the span runner's own cycles and calls */
+} IdleStats;
+
+/* The sites live in DTCM on the device (idle_alloc): the span runner reads
+ * the active one up to ~600 times a frame between PPU lines that sweep the
+ * 16 KB D-cache. Until idle_alloc runs, and on the host, they are static.
+ * g_idle is the ACTIVE site: the one the last NMI landed in. Several are kept
+ * because some games alternate between two identical wait loops. */
+extern IdleSkip *g_idle_sites;
 extern IdleSkip *g_idlep;
 #define g_idle (*g_idlep)
+extern IdleStats g_idle_stats;
+extern uint8_t g_idle_budget;   /* proving laps left this frame, refilled at the NMI */
 
 /* once, after snes_init: move the state to DTCM (no-op off the device) */
 void idle_alloc(void);
@@ -96,5 +114,22 @@ void idle_alloc(void);
 void idle_reset(void);
 /* at the NMI request: examine the interrupted pc, arm a site if it passes */
 void idle_nmi_sample(Snes *s);
+/* before proving: resolve the read set (indexed operands with the current
+ * X/Y) into pmem_off; false if any of it is not WRAM or ROM */
+bool idle_prepare_reads(Snes *s, IdleSkip *g);
+
+/* the decode environment still holds (only what the loop depends on) */
+static inline bool idle_env_ok(const Cpu *cpu, const IdleSkip *g) {
+  return cpu->e == g->e && cpu->mf == g->mf && cpu->xf == g->xf &&
+         (!g->uses_db || cpu->db == g->db) && (!g->uses_dp || cpu->dp == g->dp);
+}
+/* a WRAM-resident loop's code is still the code that was decoded */
+static inline bool idle_code_ok(const Snes *s, const IdleSkip *g) {
+  if (!g->code_ram) return true;
+  const uint8_t *ram = s->ram;
+  uint32_t base = (g->bank == 0x7e || g->bank == 0x7f) ? ((uint32_t)(g->bank & 1) << 16) | g->head : g->head;
+  for (int i = 0; i < g->ncode; i++) if (ram[(base + i) & 0x1ffff] != g->code[i]) return false;
+  return true;
+}
 
 #endif

@@ -5,16 +5,20 @@
 #include "idle_skip.h"
 #include "cart.h"
 
-static IdleSkip s_idle_static;
-IdleSkip *g_idlep = &s_idle_static;
+static IdleSkip s_sites_static[IDLE_SITES];
+IdleSkip *g_idle_sites = s_sites_static;
+IdleSkip *g_idlep = &s_sites_static[0];
+IdleStats g_idle_stats;
+uint8_t g_idle_budget;
+static uint32_t s_frame;
 
 #ifdef TARGET_GNW
 #include "gw_malloc.h"
 #endif
 void idle_alloc(void) {
 #ifdef TARGET_GNW
-  void *p = dtc_malloc(sizeof(IdleSkip));
-  if (p && p != (void *)-1) g_idlep = (IdleSkip *)p;
+  void *p = dtc_malloc(sizeof(IdleSkip) * IDLE_SITES);
+  if (p && p != (void *)-1) { g_idle_sites = (IdleSkip *)p; g_idlep = &g_idle_sites[0]; }
 #endif
 }
 
@@ -31,10 +35,18 @@ _Static_assert(offsetof(IdleState, img) == 2, "IdleState: img+14 must be word-al
 static uint32_t s_reject[4];
 static uint8_t  s_reject_i;
 
+static void site_clear(IdleSkip *g) {
+  *g = (IdleSkip){0};
+  g->head = 0xffff;
+  g->len = 0;
+}
+
 void idle_reset(void) {
-  g_idle = (IdleSkip){0};
-  g_idle.head = 0xffff;
-  g_idle.len = 0;
+  for (int i = 0; i < IDLE_SITES; i++) site_clear(&g_idle_sites[i]);
+  g_idlep = &g_idle_sites[0];
+  g_idle_stats = (IdleStats){0};
+  g_idle_budget = 0;
+  s_frame = 0;
   for (int i = 0; i < 4; i++) s_reject[i] = 0xffffffffu;
   s_reject_i = 0;
 }
@@ -45,15 +57,20 @@ static uint8_t mirror_bank(uint8_t bank) {
   return (uint8_t)(bank ^ 0x80);
 }
 
-enum { MEM_NO = 0, MEM_WRAM, MEM_ROM };
+enum { MEM_NO = 0, MEM_WRAM, MEM_ROM, MEM_RDNMI };
 
 /* What a read at bank:off reaches. WRAM gives its offset into Snes.ram. ROM is
- * accepted only for the two plain mappings, where it is constant; anything else
- * -- I/O registers, SRAM, a coprocessor window -- is refused. */
+ * accepted only for the two plain mappings, where it is constant. $4210 is
+ * RDNMI: in this core it reads 0x02 | NMI-flag << 7 (the open bus is never
+ * updated after reset) and clearing the flag is its only side effect, so while
+ * the flag is clear it is a constant read -- and the flag is only set at the
+ * vblank event, a span boundary. Anything else -- other I/O registers, SRAM, a
+ * coprocessor window -- is refused. */
 static int classify(const Snes *s, uint8_t bank, uint16_t off, uint32_t *ram_off) {
   uint8_t b = bank & 0x7f;
   if (bank == 0x7e || bank == 0x7f) { *ram_off = ((uint32_t)(bank & 1) << 16) | off; return MEM_WRAM; }
   if (b < 0x40 && off < 0x2000)      { *ram_off = off; return MEM_WRAM; }
+  if (b < 0x40 && off == 0x4210)     return MEM_RDNMI;
   uint8_t type = s->cart ? s->cart->type : 0;
   if (type == 1) {                          /* LoROM */
     if (b < 0x7e && off >= 0x8000) return MEM_ROM;
@@ -65,59 +82,91 @@ static int classify(const Snes *s, uint8_t bank, uint16_t off, uint32_t *ram_off
 }
 
 /* The whitelist. Every entry writes nothing to memory and leaves the stack,
- * the program bank, DB, DP and the M/X/E/I flags alone. */
-enum { K_NO = 0, K_IMP, K_IMM, K_DP, K_ABS, K_LONG, K_BRC, K_BRA, K_JMP };
+ * the program bank, DB, DP and the E/I flags alone. SEP/REP change M/X: the
+ * decoder follows them, and the lap must come back with the widths it started
+ * with. Indexed reads are allowed when the loop never changes that index
+ * register, so the proof fixes their address. */
+enum { K_NO = 0, K_IMP, K_IMM, K_IMM8, K_DP, K_ABS, K_LONG, K_BRC, K_BRA, K_JMP };
 enum { W_8 = 0, W_M, W_X };
-typedef struct { uint8_t kind, width; } OpInfo;
+enum { IX_NONE = 0, IX_X, IX_Y };
+typedef struct { uint8_t kind, width, ix, modx, mody; } OpInfo;
 
 static OpInfo op_info(uint8_t op) {
   switch (op) {
-    /* implied: nop, carry/overflow flags, transfers, register inc/dec, A shifts */
     /* WAI: with a masked IRQ pending it returns at once, and otherwise the
      * span runner stops at it (a real wait is the scheduler's WAI skip) */
     case 0xcb:
     case 0xea: case 0x18: case 0x38: case 0xb8:
-    case 0xaa: case 0xa8: case 0x8a: case 0x98: case 0x9b: case 0xbb: case 0xba:
-    case 0x7b: case 0x3b: case 0xeb:
-    case 0xe8: case 0xc8: case 0xca: case 0x88: case 0x1a: case 0x3a:
-    case 0x0a: case 0x4a: case 0x2a: case 0x6a:
-      return (OpInfo){K_IMP, W_8};
+    case 0x8a: case 0x98: case 0x7b: case 0x3b: case 0xeb:
+    case 0x1a: case 0x3a: case 0x0a: case 0x4a: case 0x2a: case 0x6a:
+      return (OpInfo){K_IMP, W_8, IX_NONE, 0, 0};
+    /* implied, writing X or Y */
+    case 0xaa: case 0xba: case 0xbb: case 0xe8: case 0xca:   return (OpInfo){K_IMP, W_8, IX_NONE, 1, 0};
+    case 0xa8: case 0x9b: case 0xc8: case 0x88:              return (OpInfo){K_IMP, W_8, IX_NONE, 0, 1};
+    /* SEP / REP */
+    case 0xe2: case 0xc2:                                    return (OpInfo){K_IMM8, W_8, IX_NONE, 0, 0};
     /* immediate */
-    case 0xa9: case 0xc9: case 0x89: case 0x29: case 0x09: case 0x49: return (OpInfo){K_IMM, W_M};
-    case 0xa2: case 0xa0: case 0xe0: case 0xc0:                       return (OpInfo){K_IMM, W_X};
+    case 0xa9: case 0xc9: case 0x89: case 0x29: case 0x09: case 0x49: return (OpInfo){K_IMM, W_M, IX_NONE, 0, 0};
+    case 0xe0: case 0xc0:                                    return (OpInfo){K_IMM, W_X, IX_NONE, 0, 0};
+    case 0xa2:                                               return (OpInfo){K_IMM, W_X, IX_NONE, 1, 0};
+    case 0xa0:                                               return (OpInfo){K_IMM, W_X, IX_NONE, 0, 1};
     /* direct page */
-    case 0xa5: case 0xc5: case 0x24: case 0x25: case 0x05: case 0x45: return (OpInfo){K_DP, W_M};
-    case 0xa6: case 0xa4: case 0xe4: case 0xc4:                       return (OpInfo){K_DP, W_X};
+    case 0xa5: case 0xc5: case 0x24: case 0x25: case 0x05: case 0x45: return (OpInfo){K_DP, W_M, IX_NONE, 0, 0};
+    case 0xe4: case 0xc4:                                    return (OpInfo){K_DP, W_X, IX_NONE, 0, 0};
+    case 0xa6:                                               return (OpInfo){K_DP, W_X, IX_NONE, 1, 0};
+    case 0xa4:                                               return (OpInfo){K_DP, W_X, IX_NONE, 0, 1};
+    case 0xb5: case 0xd5: case 0x34: case 0x35: case 0x15: case 0x55: return (OpInfo){K_DP, W_M, IX_X, 0, 0};
+    case 0xb4:                                               return (OpInfo){K_DP, W_X, IX_X, 0, 1};
+    case 0xb6:                                               return (OpInfo){K_DP, W_X, IX_Y, 1, 0};
     /* absolute (DB:addr) */
-    case 0xad: case 0xcd: case 0x2c: case 0x2d: case 0x0d: case 0x4d: return (OpInfo){K_ABS, W_M};
-    case 0xae: case 0xac: case 0xec: case 0xcc:                       return (OpInfo){K_ABS, W_X};
+    case 0xad: case 0xcd: case 0x2c: case 0x2d: case 0x0d: case 0x4d: return (OpInfo){K_ABS, W_M, IX_NONE, 0, 0};
+    case 0xec: case 0xcc:                                    return (OpInfo){K_ABS, W_X, IX_NONE, 0, 0};
+    case 0xae:                                               return (OpInfo){K_ABS, W_X, IX_NONE, 1, 0};
+    case 0xac:                                               return (OpInfo){K_ABS, W_X, IX_NONE, 0, 1};
+    case 0xbd: case 0xdd: case 0x3c: case 0x3d: case 0x1d: case 0x5d: return (OpInfo){K_ABS, W_M, IX_X, 0, 0};
+    case 0xb9: case 0xd9: case 0x39: case 0x19: case 0x59:   return (OpInfo){K_ABS, W_M, IX_Y, 0, 0};
+    case 0xbc:                                               return (OpInfo){K_ABS, W_X, IX_X, 0, 1};
+    case 0xbe:                                               return (OpInfo){K_ABS, W_X, IX_Y, 1, 0};
     /* long */
-    case 0xaf: case 0xcf: case 0x2f: case 0x0f: case 0x4f:            return (OpInfo){K_LONG, W_M};
+    case 0xaf: case 0xcf: case 0x2f: case 0x0f: case 0x4f:   return (OpInfo){K_LONG, W_M, IX_NONE, 0, 0};
+    case 0xbf: case 0xdf: case 0x3f: case 0x1f: case 0x5f:   return (OpInfo){K_LONG, W_M, IX_X, 0, 0};
     /* branches */
     case 0x10: case 0x30: case 0x50: case 0x70:
-    case 0x90: case 0xb0: case 0xd0: case 0xf0:                       return (OpInfo){K_BRC, W_8};
-    case 0x80:                                                        return (OpInfo){K_BRA, W_8};
-    case 0x4c:                                                        return (OpInfo){K_JMP, W_8};
+    case 0x90: case 0xb0: case 0xd0: case 0xf0:              return (OpInfo){K_BRC, W_8, IX_NONE, 0, 0};
+    case 0x80:                                               return (OpInfo){K_BRA, W_8, IX_NONE, 0, 0};
+    case 0x4c:                                               return (OpInfo){K_JMP, W_8, IX_NONE, 0, 0};
   }
-  return (OpInfo){K_NO, W_8};
+  return (OpInfo){K_NO, W_8, IX_NONE, 0, 0};
 }
 
-static uint8_t code_at(Snes *s, uint8_t bank, uint16_t pc) { return cart_read(s->cart, bank, pc); }
+/* Code bytes: from the cartridge, or from WRAM for a loop that runs there. */
+static bool s_code_ram;
+static uint8_t code_at(Snes *s, uint8_t bank, uint16_t pc) {
+  if (s_code_ram) {
+    uint32_t off = (bank == 0x7e || bank == 0x7f) ? ((uint32_t)(bank & 1) << 16) | pc : pc;
+    return s->ram[off & 0x1ffff];
+  }
+  return cart_read(s->cart, bank, pc);
+}
 
 /* Try `head` as the loop head for an interrupted `pc`. On success fill `out`. */
 static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip *out) {
   Cpu *cpu = s->cpu;
-  const bool m8 = cpu->mf || cpu->e, x8 = cpu->xf || cpu->e;
+  const bool m8_0 = cpu->mf || cpu->e, x8_0 = cpu->xf || cpu->e;
+  bool m8 = m8_0, x8 = x8_0;
   uint16_t bound[IDLE_MAX_LEN + 1];      /* instruction starts, for branch targets */
   uint16_t fwd[IDLE_MAX_LEN];            /* forward branch targets to check */
   int nb = 0, nf = 0;
-  bool saw_pc = false;
-  out->nmem = 0;
+  bool saw_pc = false, modx = false, mody = false, sep_rep = false;
+  out->nmem = 0; out->nidx = 0; out->rdnmi = false; out->uses_db = false; out->uses_dp = false;
+  uint32_t ro;
+  const int ccls = classify(s, bank, head, &ro);
+  if (ccls != MEM_ROM && ccls != MEM_WRAM) return false;
+  s_code_ram = ccls == MEM_WRAM;
   uint16_t q = head;
   for (;;) {
     if ((uint16_t)(q - head) >= IDLE_MAX_LEN) return false;
-    uint32_t ro;
-    if (classify(s, bank, q, &ro) != MEM_ROM) return false;   /* code must be ROM */
+    if (classify(s, bank, q, &ro) != ccls) return false;       /* code stays in one kind of memory */
     if (q == pc) saw_pc = true;
     bound[nb++] = q;
     uint8_t op = code_at(s, bank, q);
@@ -127,12 +176,22 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
     switch (in.kind) {
       case K_IMP:  len = 1; break;
       case K_IMM:  len = 1 + w; break;
+      case K_IMM8: len = 2; break;
       case K_DP:   len = 2; break;
       case K_ABS:  len = 3; break;
       case K_LONG: len = 4; break;
       case K_BRC: case K_BRA: len = 2; break;
       case K_JMP:  len = 3; break;
       default: return false;
+    }
+    modx |= in.modx; mody |= in.mody;
+    if (in.kind == K_IMM8) {                                   /* SEP/REP */
+      if (cpu->e) return false;
+      uint8_t v = code_at(s, bank, (uint16_t)(q + 1));
+      if (v & ~0x30) return false;                             /* only M and X */
+      if (op == 0xe2) { if (v & 0x20) m8 = true;  if (v & 0x10) x8 = true; }
+      else            { if (v & 0x20) m8 = false; if (v & 0x10) x8 = false; }
+      sep_rep = true;
     }
     /* the memory operand */
     if (in.kind == K_DP || in.kind == K_ABS || in.kind == K_LONG) {
@@ -141,23 +200,38 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
       if (in.kind == K_DP) {
         if (cpu->e && (cpu->dp & 0xff)) return false;          /* page-wrapping dp */
         mb = 0; ma = (uint16_t)(cpu->dp + code_at(s, bank, (uint16_t)(q + 1)));
+        out->uses_dp = true;
       } else {
         ma = (uint16_t)(code_at(s, bank, (uint16_t)(q + 1)) | code_at(s, bank, (uint16_t)(q + 2)) << 8);
-        mb = in.kind == K_LONG ? code_at(s, bank, (uint16_t)(q + 3)) : cpu->db;
+        if (in.kind == K_LONG) mb = code_at(s, bank, (uint16_t)(q + 3));
+        else { mb = cpu->db; out->uses_db = true; }
       }
-      for (int k = 0; k < w; k++) {
-        uint32_t off;
-        int c = classify(s, mb, (uint16_t)(ma + k), &off);
-        if ((uint16_t)(ma + k) < ma) return false;               /* wraps the bank */
-        if (c == MEM_NO) return false;
-        if (c == MEM_WRAM) {
-          int j;
-          for (j = 0; j < out->nmem; j++) if (out->mem_off[j] == off) break;
-          if (j == out->nmem) {
-            if (out->nmem == IDLE_MAX_MEM) return false;
-            out->mem_off[out->nmem] = off;
-            out->mem_w[out->nmem] = 1;
-            out->nmem++;
+      if (in.ix != IX_NONE) {
+        /* resolved by the proof with the lap's X/Y; recorded relative */
+        if (out->nidx == IDLE_MAX_IDX) return false;
+        out->idx[out->nidx].bank = mb;
+        out->idx[out->nidx].base = in.kind == K_DP ? code_at(s, bank, (uint16_t)(q + 1)) : ma;
+        out->idx[out->nidx].dpmode = in.kind == K_DP;
+        out->idx[out->nidx].reg = in.ix;
+        out->idx[out->nidx].w = (uint8_t)w;
+        out->nidx++;
+      } else {
+        for (int k = 0; k < w; k++) {
+          uint32_t off;
+          int c = classify(s, mb, (uint16_t)(ma + k), &off);
+          if ((uint16_t)(ma + k) < ma) return false;             /* wraps the bank */
+          if (c == MEM_NO) return false;
+          if (c == MEM_RDNMI) {
+            if (w != 1) return false;                            /* a 16-bit read takes $4211 too */
+            out->rdnmi = true;
+          }
+          if (c == MEM_WRAM) {
+            int j;
+            for (j = 0; j < out->nmem; j++) if (out->mem_off[j] == off) break;
+            if (j == out->nmem) {
+              if (out->nmem == IDLE_MAX_MEM) return false;
+              out->mem_off[out->nmem++] = off;
+            }
           }
         }
       }
@@ -172,18 +246,25 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
         if (!saw_pc) return false;
         uint16_t end = (uint16_t)(q + len - 1);
         if (end < head) return false;
+        if (m8 != m8_0 || x8 != x8_0) return false;              /* widths must come back */
         for (int i = 0; i < nf; i++) {
           if (fwd[i] > end) continue;                            /* leaves the loop */
           int j;
           for (j = 0; j < nb; j++) if (bound[j] == fwd[i]) break;
           if (j == nb) return false;                             /* into an operand */
         }
+        for (int i = 0; i < out->nidx; i++)                      /* index registers held */
+          if ((out->idx[i].reg == IX_X && modx) || (out->idx[i].reg == IX_Y && mody)) return false;
+        (void)sep_rep;
         out->head = head;
         out->len = (uint16_t)(end - head);
         out->bank = bank;
-        out->bank_alt = mirror_bank(bank);
+        out->bank_alt = s_code_ram ? bank : mirror_bank(bank);
         out->e = cpu->e; out->mf = cpu->mf; out->xf = cpu->xf;
         out->db = cpu->db; out->dp = cpu->dp;
+        out->code_ram = s_code_ram;
+        out->ncode = (uint8_t)(out->len + 1);
+        for (int i = 0; i < out->ncode; i++) out->code[i] = code_at(s, bank, (uint16_t)(head + i));
         return true;
       }
       if (in.kind != K_BRC) return false;                        /* jumps elsewhere */
@@ -194,32 +275,84 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
   }
 }
 
+bool idle_prepare_reads(Snes *s, IdleSkip *g) {
+  Cpu *cpu = s->cpu;
+  int n = 0;
+  for (int i = 0; i < g->nmem; i++) g->pmem_off[n++] = g->mem_off[i];
+  for (int i = 0; i < g->nidx; i++) {
+    uint16_t ix = g->idx[i].reg == IX_X ? cpu->x : cpu->y;
+    if (cpu->xf || cpu->e) ix &= 0xff;
+    uint8_t mb = g->idx[i].bank;
+    uint32_t ea;
+    if (g->idx[i].dpmode) {
+      if (cpu->e && (cpu->dp & 0xff)) return false;
+      ea = (uint16_t)(cpu->dp + g->idx[i].base + ix);            /* bank 0, wraps in it */
+      mb = 0;
+    } else {
+      ea = (uint32_t)g->idx[i].base + ix;                        /* may carry into the next bank */
+      mb = (uint8_t)(mb + (ea >> 16));
+      ea &= 0xffff;
+    }
+    for (int k = 0; k < g->idx[i].w; k++) {
+      uint32_t off;
+      uint16_t a = (uint16_t)(ea + k);
+      if (a < ea) return false;
+      int c = classify(s, mb, a, &off);
+      if (c == MEM_NO || c == MEM_RDNMI) return false;
+      if (c == MEM_WRAM) {
+        if (n == (int)(sizeof g->pmem_off / sizeof g->pmem_off[0])) return false;
+        g->pmem_off[n++] = off;
+      }
+    }
+  }
+  g->npmem = (uint8_t)n;
+  return true;
+}
+
+static bool site_has(const IdleSkip *g, uint8_t bank, uint16_t pc) {
+  return (bank == g->bank || bank == g->bank_alt) && (uint16_t)(pc - g->head) <= g->len;
+}
+
 void idle_nmi_sample(Snes *s) {
   Cpu *cpu = s->cpu;
-  g_idle.proof_budget = 2;
+  g_idle_budget = 2;
+  s_frame++;
   if (cpu->stopped) return;
   const uint8_t bank = cpu->k;
   const uint16_t pc = cpu->pc;
-  /* still in the armed loop: nothing to do */
-  if ((bank == g_idle.bank || bank == g_idle.bank_alt) && (uint16_t)(pc - g_idle.head) <= g_idle.len)
-    return;
+  /* the pc is in a known site: make it the active one, unless its decode
+   * environment changed (then it is decoded again, in the same slot) */
+  int slot = -1;
+  for (int i = 0; i < IDLE_SITES; i++) {
+    IdleSkip *g = &g_idle_sites[i];
+    if (g->len == 0 && g->head == 0xffff) continue;
+    if (!site_has(g, bank, pc)) continue;
+    if (idle_env_ok(cpu, g) && idle_code_ok(s, g)) { g->used = s_frame; g_idlep = g; return; }
+    slot = i;
+    break;
+  }
   const uint32_t pc24 = ((uint32_t)bank << 16) | pc;
-  for (int i = 0; i < 4; i++) if (s_reject[i] == pc24) return;
+  if (slot < 0) for (int i = 0; i < 4; i++) if (s_reject[i] == pc24) return;
   IdleSkip cand;
   for (int back = 0; back < IDLE_MAX_LEN; back++) {
     uint16_t head = (uint16_t)(pc - back);
     if (head > pc) break;                                        /* wrapped below $0000 */
-    cand = g_idle;
+    site_clear(&cand);
     if (try_head(s, bank, head, pc, &cand)) {
-      uint32_t laps = g_idle.laps, ff = g_idle.ff_dots, wai = g_idle.wai_dots;
-      uint32_t rearms = g_idle.rearms + 1, rejects = g_idle.rejects;
-      g_idle = cand;
-      g_idle.snap_ok = false;
-      g_idle.laps = laps; g_idle.ff_dots = ff; g_idle.wai_dots = wai;
-      g_idle.rearms = rearms; g_idle.rejects = rejects;
+      if (slot < 0) {                                            /* an empty slot, else the oldest */
+        slot = 0;
+        for (int i = 0; i < IDLE_SITES; i++) {
+          if (g_idle_sites[i].len == 0 && g_idle_sites[i].head == 0xffff) { slot = i; break; }
+          if (g_idle_sites[i].used < g_idle_sites[slot].used) slot = i;
+        }
+      }
+      cand.used = s_frame;
+      g_idle_sites[slot] = cand;
+      g_idlep = &g_idle_sites[slot];
+      g_idle_stats.rearms++;
       return;
     }
   }
-  g_idle.rejects++;
+  g_idle_stats.rejects++;
   s_reject[s_reject_i++ & 3] = pc24;
 }

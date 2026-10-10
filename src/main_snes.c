@@ -298,14 +298,14 @@ static void snes_perf_report(void)
    * (loop laps, and WAI), and how often a new site was armed or a NMI-time pc
    * was refused. A frame is 1364*262 (NTSC) or 1364*312 (PAL) dots. */
   printf("PROF/idle: site=%02x:%04x+%u mem=%u laps=%lu skipped_dots=%lu wai_dots=%lu per emulated frame, rearms=%lu rejects=%lu\n",
-         g_idle.bank, g_idle.head, g_idle.len, g_idle.nmem,
-         (unsigned long)(g_idle.laps / n), (unsigned long)(g_idle.ff_dots / n),
-         (unsigned long)(g_idle.wai_dots / n), (unsigned long)g_idle.rearms, (unsigned long)g_idle.rejects);
+         g_idle.bank, g_idle.head, g_idle.len, g_idle.npmem,
+         (unsigned long)(g_idle_stats.laps / n), (unsigned long)(g_idle_stats.ff_dots / n),
+         (unsigned long)(g_idle_stats.wai_dots / n), (unsigned long)g_idle_stats.rearms, (unsigned long)g_idle_stats.rejects);
   /* the span runner's own time (cycles, inside the cpu figure) and calls */
   printf("PROF/idle: span_runner=%lu cycles in %lu calls per emulated frame\n",
-         (unsigned long)(g_idle.cyc / n), (unsigned long)(g_idle.calls / n));
-  g_idle.laps = g_idle.ff_dots = g_idle.wai_dots = 0;
-  g_idle.cyc = g_idle.calls = 0;
+         (unsigned long)(g_idle_stats.cyc / n), (unsigned long)(g_idle_stats.calls / n));
+  g_idle_stats.laps = g_idle_stats.ff_dots = g_idle_stats.wai_dots = 0;
+  g_idle_stats.cyc = g_idle_stats.calls = 0;
 #endif
   printf("PROF/audio: step_avg=%lu step_min=%lu (65536 = normal speed) underruns=%lu inserts=%lu fill=%u\n",
          (unsigned long)(sp_step_sum / n), (unsigned long)sp_step_min,
@@ -602,8 +602,15 @@ static inline bool idle_state_eq(const IdleState *p, const IdleState *q) {
   return p->pc == q->pc && idle_img_eq(p->img, q->img);
 }
 static inline bool idle_mem_eq(const Snes *s, const uint8_t *m) {
-  for (int i = 0; i < g_idle.nmem; i++) if (s->ram[g_idle.mem_off[i]] != m[i]) return false;
+  for (int i = 0; i < g_idle.npmem; i++) if (s->ram[g_idle.pmem_off[i]] != m[i]) return false;
   return true;
+}
+
+/* A $4210 read is constant only while the NMI flag is clear AND not on the
+ * line before vblank, where a read late in its instruction sees the flag
+ * (snes_readReg models that). */
+static inline bool idle_rdnmi_live(const Snes *s) {
+  return s->inNmi || s->vPos + 1 == ((s->ppu && s->ppu->overscan) ? 240 : 225);
 }
 
 /* A boundary where the idle state can hold: nothing pending that the CPU would
@@ -617,8 +624,8 @@ static inline bool idle_boundary_ok(const Snes *s) {
   if (s->vIrqEnabled && s->vPos == s->vTimer) return false;
   if (cpu->k != g->bank && cpu->k != g->bank_alt) return false;
   if ((uint16_t)(cpu->pc - g->head) > g->len) return false;
-  if (cpu->e != g->e || cpu->mf != g->mf || cpu->xf != g->xf ||
-      cpu->db != g->db || cpu->dp != g->dp) return false;
+  if (!idle_env_ok(cpu, g)) return false;
+  if (g->rdnmi && idle_rdnmi_live(s)) return false;   /* $4210 not constant here */
   return true;
 }
 
@@ -644,9 +651,10 @@ static inline void idle_consume(Snes *s, int *dots) {
 static bool idle_prove(Snes *s, int *dots) {
   IdleSkip *g = &g_idle;
   IdleState start, cur;
-  uint8_t mem[IDLE_MAX_MEM];
+  uint8_t mem[IDLE_MAX_MEM + IDLE_MAX_IDX * 2];
+  if (!idle_code_ok(s, g) || !idle_prepare_reads(s, g)) return false;
   idle_state(s, &start);
-  for (int i = 0; i < g->nmem; i++) mem[i] = s->ram[g->mem_off[i]];
+  for (int i = 0; i < g->npmem; i++) mem[i] = s->ram[g->pmem_off[i]];
   IdleState seen[IDLE_MAX_STATES];
   uint8_t seen_ch[IDLE_MAX_STATES];
   int nseen = 0;
@@ -674,7 +682,7 @@ static bool idle_prove(Snes *s, int *dots) {
       if (!idle_state_eq(&cur, &start) || !idle_mem_eq(s, mem)) return false;
       for (int i = 0; i < nseen; i++) { g->st[i] = seen[i]; g->ch[i] = seen_ch[i]; }
       g->nst = (uint8_t)nseen;
-      for (int i = 0; i < g->nmem; i++) g->smem[i] = mem[i];
+      for (int i = 0; i < g->npmem; i++) g->smem[i] = mem[i];
       g->lap = lap;
       g->snap_ok = true;
       return true;
@@ -688,9 +696,8 @@ static bool idle_prove(Snes *s, int *dots) {
 static int idle_skip_laps(Snes *s, int dots);
 __attribute__((noinline))
 static int idle_prove_span(Snes *s, int dots) {
-  IdleSkip *g = &g_idle;
-  if (g->proof_budget == 0 || !idle_boundary_ok(s)) return dots;
-  g->proof_budget--;
+  if (g_idle_budget == 0 || !idle_boundary_ok(s)) return dots;
+  g_idle_budget--;
   if (!idle_prove(s, &dots)) return dots;
   return idle_skip_laps(s, dots);
 }
@@ -707,7 +714,12 @@ static int idle_prove_span(Snes *s, int dots) {
 static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
   IdleSkip *g = &g_idle;
   if (!g->snap_ok) return dots;
-  for (int i = 0; i < g->nmem; i++) if (s->ram[g->mem_off[i]] != g->smem[i]) return -1 - dots;
+  if (g->rdnmi && idle_rdnmi_live(s)) return dots; /* the loop is about to see the flag */
+  if (g->code_ram && !idle_code_ok(s, g)) {        /* its code was overwritten: drop it */
+    g->snap_ok = false; g->head = 0xffff; g->len = 0;
+    return dots;
+  }
+  for (int i = 0; i < g->npmem; i++) if (s->ram[g->pmem_off[i]] != g->smem[i]) return -1 - dots;
   Cpu *cpu = s->cpu;
   const uint16_t pc = cpu->pc;
   for (int i = 0; i < g->nst; i++) {
@@ -717,8 +729,8 @@ static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
     const int k = dots / L;
     uint32_t adv = (uint32_t)(k * L);
     dots -= k * L;
-    g->laps += (uint32_t)k;
-    g->ff_dots += adv;
+    g_idle_stats.laps += (uint32_t)k;
+    g_idle_stats.ff_dots += adv;
     /* The partial lap that is left: step it boundary by boundary from the
      * stored lap instead of handing it to the engine. An opcode takes effect
      * when it starts and is then consumed, so starting the one at boundary i
@@ -801,8 +813,8 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
 #endif
     dots = idle_run_span(s, dots);
 #if defined(SNES_PERF) && !defined(SNES_PERF_CPU)
-    g_idle.cyc += snes_perf_now() - pi_t0;
-    g_idle.calls++;
+    g_idle_stats.cyc += snes_perf_now() - pi_t0;
+    g_idle_stats.calls++;
 #endif
 #ifdef SNES_PERF_CPU
     snes_perf_cpu_bake += snes_perf_now() - pb_t0 - (snes_perf_dma - pb_d0);
@@ -865,7 +877,7 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
             apud += (uint32_t)k6;
             hpos = (uint16_t)(hpos + k6);
             dots -= k6;
-            g_idle.wai_dots += (uint32_t)k6;
+            g_idle_stats.wai_dots += (uint32_t)k6;
           }
         }
 #endif
@@ -2772,10 +2784,10 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
       if (on < 0) on = getenv("IDLE_STATS") != NULL;
       if (on && ++fr % 600 == 0) {
         fprintf(stderr, "IDLE f=%ld site=%02x:%04x+%u mem=%u snap=%d laps=%lu ff=%lu wai=%lu rearms=%lu rejects=%lu\n",
-                fr, g_idle.bank, g_idle.head, g_idle.len, g_idle.nmem, g_idle.snap_ok,
-                (unsigned long)g_idle.laps, (unsigned long)g_idle.ff_dots, (unsigned long)g_idle.wai_dots,
-                (unsigned long)g_idle.rearms, (unsigned long)g_idle.rejects);
-        g_idle.laps = g_idle.ff_dots = g_idle.wai_dots = 0;
+                fr, g_idle.bank, g_idle.head, g_idle.len, g_idle.npmem, g_idle.snap_ok,
+                (unsigned long)g_idle_stats.laps, (unsigned long)g_idle_stats.ff_dots, (unsigned long)g_idle_stats.wai_dots,
+                (unsigned long)g_idle_stats.rearms, (unsigned long)g_idle_stats.rejects);
+        g_idle_stats.laps = g_idle_stats.ff_dots = g_idle_stats.wai_dots = 0;
       }
     }
 #endif
