@@ -103,6 +103,13 @@ CORE_C_DEFS := \
 ifeq ($(SNES_BUS_IN_ITCM),1)
 CORE_C_DEFS += -DSNES_BUS_IN_ITCM
 endif
+# PROFLITE=1: keep only the cheap per-frame tracking (frame skips + audio step)
+# and print a two-line PROFLITE report; no per-line/per-opcode DWT probes. For
+# a low-overhead "how does it fare" check. Implies SNES_PERF (the cheap
+# counters live there); leave PERF_PPU/PERF_CPU off.
+ifeq ($(PROFLITE),1)
+CORE_C_DEFS += -DSNES_PERF -DSNES_PROFLITE
+endif
 ifeq ($(PERF),1)
 CORE_C_DEFS += -DSNES_PERF
 # PERF_PPU=1 adds the PPU split (probes on every drawn line, a few K a frame)

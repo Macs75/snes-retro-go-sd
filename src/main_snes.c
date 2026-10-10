@@ -264,6 +264,23 @@ static void snes_perf_report(void)
   unsigned sm = (unsigned)odroid_display_get_scaling_mode();
   uint32_t n = sp_frames ? sp_frames : 1;
   uint32_t wall = HAL_GetTick() - sp_t0_ms;
+#ifdef SNES_PROFLITE
+  /* Minimal report: frame pacing (skips) and the audio playback step, the
+   * latter only when the stretcher dropped below 1.0x (sound slowed to follow
+   * a slow emulation). No per-component DWT probes are compiled in (PERF_PPU /
+   * PERF_CPU off), so this adds almost nothing to the frame. */
+  {
+    uint32_t avg_step = (uint32_t)(sp_step_sum / n);
+    printf("PROFLITE: frames=%lu shown=%lu late=%lu of %lu wall_ms=%lu\n",
+           (unsigned long)sp_frames, (unsigned long)sp_shown,
+           (unsigned long)sp_late, (unsigned long)sp_frames, (unsigned long)wall);
+    if (sp_step_min < 65536u || avg_step < 65536u)
+      printf("PROFLITE: audio SLOWED step_avg=%lu step_min=%lu (65536 = 1.0x)\n",
+             (unsigned long)avg_step, (unsigned long)sp_step_min);
+    snes_perf_reset();
+    return;
+  }
+#endif
   /* the frame budget at the PCB rate: 60.0988 Hz NTSC, 50.0070 Hz PAL */
   uint32_t budget = (uint32_t)((uint64_t)sp_mhz * 1000000u * 10000u / (snes_fps == SNES_FPS_PAL ? 500070u : 600988u));
   uint32_t ppu = snes_perf_ppu / n, apu_e = sp_apu_emu / n, dma = snes_perf_dma / n;
@@ -759,6 +776,80 @@ static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
   return -1 - dots;
 }
 
+#if SNES_IDLE_ACCUM
+/* The accumulator skip (idle_skip.h, kind == IDLE_KIND_ACCUM). The loop is
+ *   LDA #0 / TCD / LDA x / ADC y / STA x / BRA
+ * spinning x += y (16-bit WRAM) until the NMI; the recurrence path rejects it
+ * because x changes every lap. Here: run opcodes for real up to and through
+ * one full lap from the head, which both aligns to a boundary and measures the
+ * lap's exact charge L (lap 1 is therefore the interpreter's own, bit-exact);
+ * then apply the remaining whole laps that fit the span natively, reproducing
+ * the 16-bit binary ADC and its N/Z/C/V (cpu_adc in cpu.c), and charging k*L
+ * with the same hPos/apuDotsAccum accounting idle_skip_laps uses. Any boundary
+ * not modelled (DMA, a pending interrupt, running out of span, decimal mode)
+ * returns the remaining dots and run_dots runs the span as usual. */
+static int SNES_ITCM_IDLE idle_accum_span(Snes *s, int dots) {
+  Cpu *cpu = s->cpu;
+  IdleSkip *g = &g_idle;
+  if (cpu->e || cpu->mf || cpu->d) return dots;      /* native laps assume 16-bit binary */
+  if (!idle_code_ok(s, g)) { g->head = 0xffff; g->len = 0; g->snap_ok = false; return dots; }
+  if (!idle_boundary_ok(s)) return dots;
+  /* L (the lap's exact charge) is measured once by running a full real lap from
+   * the head, then cached in g->lap so later spans only align to the head and
+   * skip natively -- the same amortisation the recurrence path gets from its
+   * stored proof. The measuring lap is itself the interpreter's, so it is exact. */
+  uint32_t L = g->snap_ok ? g->lap : 0;
+  int phase = L ? 2 : (cpu->pc == g->head ? 1 : 0);  /* 0 align+measure, 1 measure, 2 align only */
+  int cap = 32;
+  while (phase != 2 || cpu->pc != g->head) {
+    if (--cap < 0) return dots;
+    apply_irq_match(s);
+    const uint32_t c = run_one_opcode_charge(s);
+    s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
+    if (phase == 1) L += c;
+    if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) {
+      s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft - 2);
+      s->apuDotsAccum += 2; s->hPos += 2; dots -= 2;
+      return dots;
+    }
+    while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
+    if (s->cpuCyclesLeft || dots <= 0) return dots;
+    if (!idle_boundary_ok(s)) return dots;
+    if (cpu->pc == g->head) {
+      if (phase == 0) { phase = 1; continue; }        /* now measure one lap */
+      if (phase == 1) { g->lap = L; g->snap_ok = true; break; }
+      break;                                           /* phase 2: aligned */
+    }
+  }
+  if (L == 0) return dots;
+  const int k = dots / (int)L;
+  if (k <= 0) return dots;
+  const uint32_t m = 0x1ffffu;
+  uint32_t R = (uint32_t)s->ram[g->acc_dest & m] | (uint32_t)s->ram[(g->acc_dest + 1) & m] << 8;
+  uint32_t M = (uint32_t)s->ram[g->acc_add  & m] | (uint32_t)s->ram[(g->acc_add  + 1) & m] << 8;
+  uint32_t C = cpu->c ? 1u : 0u;
+  bool v = cpu->v;
+  for (int j = 0; j < k; j++) {
+    uint32_t res = R + M + C;                          /* cpu_adc 16-bit binary path */
+    v = ((R & 0x8000u) == (M & 0x8000u)) && ((M & 0x8000u) != (res & 0x8000u));
+    C = res > 0xffffu ? 1u : 0u;
+    R = res & 0xffffu;
+  }
+  s->ram[g->acc_dest & m]       = (uint8_t)R;
+  s->ram[(g->acc_dest + 1) & m] = (uint8_t)(R >> 8);
+  cpu->a = (uint16_t)R;
+  cpu->c = C != 0; cpu->v = v;
+  cpu->z = R == 0; cpu->n = (R & 0x8000u) != 0;        /* cpu_setZN, 16-bit */
+  const uint32_t adv = (uint32_t)k * L;
+  s->hPos = (uint16_t)(s->hPos + adv);
+  s->apuDotsAccum += adv;
+  dots -= (int)adv;
+  g_idle_stats.laps += (uint32_t)k;
+  g_idle_stats.ff_dots += adv;
+  return dots;
+}
+#endif
+
 __attribute__((noinline))
 static int SNES_ITCM_IDLE idle_run_span(Snes *s, int dots) {
   if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) return dots;
@@ -767,6 +858,9 @@ static int SNES_ITCM_IDLE idle_run_span(Snes *s, int dots) {
   while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
   if (dots <= 0) return dots;
   if (s->vIrqEnabled && s->vPos == s->vTimer) return dots;
+#if SNES_IDLE_ACCUM
+  if (g_idle.kind == IDLE_KIND_ACCUM) return idle_accum_span(s, dots);
+#endif
   if (!g_idle.snap_ok) return idle_prove_span(s, dots);
   const int r = idle_skip_laps(s, dots);
   if (r >= 0) return r;

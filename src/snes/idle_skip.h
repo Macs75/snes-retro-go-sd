@@ -90,7 +90,27 @@ typedef struct {
   uint32_t pmem_off[IDLE_MAX_MEM + IDLE_MAX_IDX * 2];
   uint8_t  smem[IDLE_MAX_MEM + IDLE_MAX_IDX * 2];
   uint32_t lap;
+  /* kind: 0 = generic recurrence loop (everything above); 1 = accumulator loop
+   * matched from the per-game template table (idle_skip.c). An accumulator is
+   * LDA #0 / TCD / LDA x / ADC y / STA x / BRA: each lap does x += y + carry in
+   * WRAM, so it never recurs and the recurrence path rejects it. The accum path
+   * (idle_accum_span) runs one lap for real to measure its charge, then applies
+   * the remaining whole laps natively. acc_dest/acc_add are WRAM byte offsets
+   * (DP forced to 0 by the loop's TCD), acc_w the operand width in bytes. */
+  uint8_t  kind;
+  uint16_t acc_dest, acc_add;
+  uint8_t  acc_w;
 } IdleSkip;
+
+enum { IDLE_KIND_RECUR = 0, IDLE_KIND_ACCUM = 1 };
+
+#ifndef SNES_IDLE_ACCUM
+#define SNES_IDLE_ACCUM 1
+#endif
+
+/* after try_head fails: match the interrupted pc against the accumulator
+ * template table (guard-byte verified). Fills `out` and returns true on a hit. */
+bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out);
 
 typedef struct {
   uint32_t laps, ff_dots, wai_dots, rearms, rejects;

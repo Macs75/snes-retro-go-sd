@@ -327,6 +327,65 @@ static bool site_has(const IdleSkip *g, uint8_t bank, uint16_t pc) {
   return (bank == g->bank || bank == g->bank_alt) && (uint16_t)(pc - g->head) <= g->len;
 }
 
+#if SNES_IDLE_ACCUM
+/* Accumulator templates. An accumulator wait loop spins x += y in WRAM until
+ * the NMI; the generic decoder rejects it on the STA. Each template is matched
+ * by bank + head + the exact loop bytes (the guard), so it can only ever fire
+ * on the one ROM that contains that code -- a different game, revision or hack
+ * will not have these bytes at this address. acc_dest/acc_add are the WRAM byte
+ * offsets the loop reads/writes (its TCD forces DP = 0), w the width in bytes. */
+typedef struct {
+  uint8_t  bank;
+  uint16_t head;
+  uint8_t  len;             /* bytes head..last byte of the BRA              */
+  uint16_t acc_dest, acc_add;
+  uint8_t  acc_w;
+  uint8_t  nguard;
+  uint8_t  guard[16];
+} AccumTemplate;
+
+static const AccumTemplate s_accum_tpl[] = {
+  /* Castlevania - Vampire's Kiss (E) / Dracula X. 80:80c4:
+   *   A9 00 00 LDA #$0000 / 5B TCD / A5 46 LDA $46 / 65 42 ADC $42 /
+   *   85 46 STA $46 / 80 F4 BRA $80C4.  16-bit M (REP #$20 before), DP=0. */
+  { 0x80, 0x80c4, 12, 0x46, 0x42, 2, 12,
+    { 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x46, 0x65, 0x42, 0x85, 0x46, 0x80, 0xf4 } },
+};
+
+bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
+  for (unsigned t = 0; t < sizeof s_accum_tpl / sizeof s_accum_tpl[0]; t++) {
+    const AccumTemplate *tp = &s_accum_tpl[t];
+    if (bank != tp->bank && bank != mirror_bank(tp->bank)) continue;
+    if ((uint16_t)(pc - tp->head) >= tp->len) continue;          /* pc inside the loop */
+    /* guard: the loop's bytes must be exactly this code (read from ROM) */
+    uint32_t ro;
+    if (classify(s, tp->bank, tp->head, &ro) != MEM_ROM) continue;
+    bool ok = true;
+    for (int i = 0; i < tp->nguard; i++)
+      if (cart_read(s->cart, tp->bank, (uint16_t)(tp->head + i)) != tp->guard[i]) { ok = false; break; }
+    if (!ok) continue;
+    /* the environment the native laps assume: 16-bit A, not emulation mode,
+     * binary (not decimal) add. Checked again before each skip. */
+    Cpu *cpu = s->cpu;
+    if (cpu->e || cpu->mf || cpu->d) continue;
+    site_clear(out);
+    out->kind    = IDLE_KIND_ACCUM;
+    out->head    = tp->head;
+    out->len     = tp->len;
+    out->bank    = tp->bank;
+    out->bank_alt = mirror_bank(tp->bank);
+    out->e = cpu->e; out->mf = cpu->mf; out->xf = cpu->xf;
+    out->uses_db = false; out->uses_dp = false;
+    out->acc_dest = tp->acc_dest;
+    out->acc_add  = tp->acc_add;
+    out->acc_w    = tp->acc_w;
+    out->snap_ok  = false;
+    return true;
+  }
+  return false;
+}
+#endif
+
 void idle_nmi_sample(Snes *s) {
   Cpu *cpu = s->cpu;
   g_idle_budget = 2;
@@ -367,6 +426,23 @@ void idle_nmi_sample(Snes *s) {
       return;
     }
   }
+#if SNES_IDLE_ACCUM
+  /* generic decode failed: try the accumulator templates (guard-verified) */
+  if (idle_accum_match(s, bank, pc, &cand)) {
+    if (slot < 0) {
+      slot = 0;
+      for (int i = 0; i < IDLE_SITES; i++) {
+        if (g_idle_sites[i].len == 0 && g_idle_sites[i].head == 0xffff) { slot = i; break; }
+        if (g_idle_sites[i].used < g_idle_sites[slot].used) slot = i;
+      }
+    }
+    cand.used = s_frame;
+    g_idle_sites[slot] = cand;
+    g_idlep = &g_idle_sites[slot];
+    g_idle_stats.rearms++;
+    return;
+  }
+#endif
   g_idle_stats.rejects++;
   s_reject[s_reject_i++ & 3] = pc24;
 }
