@@ -425,6 +425,20 @@ void audio_clear_buffers(void)
     memset(audio_half_bufs, 0, sizeof(audio_half_bufs));
 }
 
+/* Unthrottle for headless verification: a frame-capped batch (SNES_FRAMES) runs
+ * flat out instead of pacing to the audio clock, the way the arcade harness
+ * does. SNES_FAST=0/1 overrides. Interactive/windowed replays stay real-time.
+ * It only skips the wall-clock waits; the emulated audio hash is unaffected. */
+int host_fast(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *f = getenv("SNES_FAST");
+        v = f ? atoi(f) : (getenv("SNES_FRAMES") ? 1 : 0);
+    }
+    return v;
+}
+
 void common_emu_sound_sync(bool use_nops)
 {
     (void)use_nops;
@@ -434,7 +448,7 @@ void common_emu_sound_sync(bool use_nops)
         uint16_t len = audio_get_buffer_length();
         host_platform_audio_queue(buf, (int)len);
         /* Pace roughly to one half-buffer. */
-        while (host_platform_audio_queued_samples() > (int)len * 3) {
+        while (!host_fast() && host_platform_audio_queued_samples() > (int)len * 3) {
             host_platform_delay_ms(1);
             host_poll_events();
             host_maybe_quit();
@@ -485,12 +499,14 @@ static void host_pcm_service(void)
     if (audio_half_len == 0)
         return;
 
-    now = host_platform_ticks_ms();
-    if (pcm_next_half_ms == 0)
-        pcm_next_half_ms = now;
+    /* Real-time gate: advance one DMA half only once its wall-clock period has
+     * elapsed. Unthrottled runs skip it and drain every call (flat out). */
+    if (!host_fast()) {
+        now = host_platform_ticks_ms();
+        if (pcm_next_half_ms == 0)
+            pcm_next_half_ms = now;
 
-    /* One DMA half ≈ length / sample_rate seconds. */
-    {
+        /* One DMA half ≈ length / sample_rate seconds. */
         uint32_t period_ms = (uint32_t)((audio_half_len * 1000u) /
                                        (host_sample_rate > 0 ? (uint32_t)host_sample_rate : 16000u));
         if (period_ms == 0)
@@ -612,7 +628,7 @@ bool common_emu_frame_loop(void)
         target_ms = 16;
 
     now = host_platform_ticks_ms();
-    if (now < frame_start_ms + target_ms) {
+    if (!host_fast() && now < frame_start_ms + target_ms) {
         host_platform_delay_ms(frame_start_ms + target_ms - now);
     }
     frame_start_ms = host_platform_ticks_ms();
@@ -643,7 +659,8 @@ void common_emu_clear_dwt_cycles(void) {}
 void cpumon_sleep(void)
 {
     host_pcm_service();
-    host_platform_delay_ms(1);
+    if (!host_fast())
+        host_platform_delay_ms(1);
 }
 
 void cpumon_busy(void) {}
