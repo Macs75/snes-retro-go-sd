@@ -304,10 +304,29 @@ void dma_doDma(Dma* dma) {
     } while(size != 0);
   } else if (cart_fast) {
     Cart* cart = sn->cart;
-    do {
-      snes_writeBBus(sn, bAdr + off[oi & 3], cart_read(cart, aBank, aAdr));
-      oi++; aAdr += step; size--;
-    } while(size != 0);
+    /* Hoist the ROM mapping out of the per-byte loop. The source bank is fixed,
+     * so when it is a plain HiROM bank that maps flat (no fold, no coprocessor,
+     * no SRAM), cart_read's fold + chip-dispatch ladder collapses to one base
+     * pointer indexed by aAdr -- bit-identical to cart_read for that case. The
+     * base is cart->bankBase[bank&0x3f] (already fold-baked at load); the flat
+     * check (whole 64K bank below romSize) guarantees base[aAdr] == cart_read
+     * across the full 16-bit wrap. Anything else keeps the per-byte cart_read. */
+    const uint8_t* base = NULL;
+    if (cart->romDmaDirect &&
+        ((((uint32_t)(aBank & 0x3f)) << 16) + 0x10000u) <= cart->romSize) {
+      base = cart->bankBase[aBank & 0x3f];   /* run-fixed preconditions in romDmaDirect */
+    }
+    if (base) {
+      do {
+        snes_writeBBus(sn, bAdr + off[oi & 3], base[aAdr]);
+        oi++; aAdr += step; size--;
+      } while(size != 0);
+    } else {
+      do {
+        snes_writeBBus(sn, bAdr + off[oi & 3], cart_read(cart, aBank, aAdr));
+        oi++; aAdr += step; size--;
+      } while(size != 0);
+    }
   } else
   do {
     dma_transferByte(dma, aAdr, aBank, bAdr + off[oi & 3], false);

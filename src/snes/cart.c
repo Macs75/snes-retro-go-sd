@@ -243,6 +243,10 @@ void cart_reset(Cart* cart) {
   if (cart->cx4) cx4_init(cart->cx4);
   if (cart->sdd1) sdd1_reset(cart->sdd1);
   if (cart->spc7110) spc7110_reset(cart->spc7110);
+  /* Fold the DMA ROM fast path's run-fixed conditions now that coprocessors
+   * (if any) are attached. */
+  cart->romDmaDirect = (cart->type == 2 && cart->romPageOk &&
+                        !cart->dsp1 && !cart->cx4 && !cart->sdd1 && !cart->spc7110);
 }
 
 void cart_saveload(Cart *cart, SaveLoadFunc *func, void *ctx) {

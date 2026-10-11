@@ -27,6 +27,12 @@ struct Cart {
   /* Whether snes_cpuRead's fetch-page cache can serve this cart at all.
    * Decided once at load so the hot path never re-asks; see cart_setRomSize. */
   uint8_t romPageOk;
+  /* The DMA ROM-source fast path's run-fixed precondition, folded to one byte:
+   * HiROM, fetch-cache-eligible, and no coprocessor intercepting the A-bus.
+   * None of these change during a run, so cart_reset sets it once (after any
+   * coprocessor is attached) and the per-transfer path adds only the flat-bank
+   * check. See dma_doDma. */
+  uint8_t romDmaDirect;
   /* Host base of each mapped bank: LoROM indexes it by bank&0x7f in 32 KB
    * steps, HiROM by bank&0x3f in 64 KB. Built once at load so the page install
    * in snes_cpuRead is a table load and an add. */
