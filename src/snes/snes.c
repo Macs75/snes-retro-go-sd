@@ -61,6 +61,20 @@ static uint8_t *snes_pagemap_base(Snes *snes, uint32_t adr) {
     return cart->rom + (pidx & cart->romMask);
 #endif
   }
+  /* HiROM low half ($40-$7D/$C0-$FF, $0000-$7FFF) is ROM too: cart_readHirom
+   * serves `adr>=0x8000 || (bank&0x7f)>=0x40` from cart_romIndex, so the whole
+   * of those banks maps flat through the same fold-baked bankBase the high half
+   * uses. The $8000 gate above (correct for LoROM, where the low half is
+   * WRAM/SRAM/MMIO) left this on the slow path -- the bulk of a HiROM game's ROM
+   * data reads. romDmaDirect is exactly "plain HiROM, romPageOk, no coprocessor
+   * intercepting" (spc7110 $40-4F/$C0-FF, sdd1 $C0-FF, cx4 $70-77), so it is the
+   * right guard; bit 6 of the raw bank selects the $40-7F/$C0-FF window. */
+#if SNES_ROMPAGE_FOLD
+  if (cart && cart->romDmaDirect && off < 0x8000 && (bank & 0x40)) {
+    uint32_t page = adr & ~(uint32_t)0x1fff;
+    return cart->bankBase[bank & 0x3f] + (page & 0xffff);
+  }
+#endif
   return NULL;
 }
 
