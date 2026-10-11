@@ -18,6 +18,12 @@ QEMU_CFLAGS := $(MCU) -O2 -g -ffunction-sections -fdata-sections -std=gnu11 \
 	-include host/stubs/config.h \
 	$(HOST_DEFS) -DSNES_THUMB2_CPU -DSPC_THUMB2_SPC -DQEMU_BUILD \
 	$(HOST_INCLUDES) -I$(SNES)/thumb2
+# PERF_CPU=1: enable the opcode census + bus counters on the real Thumb-2 engine.
+# QEMU is not cycle-accurate, so the cycle split is meaningless here, but the
+# COUNTS (opcodes, c_fallback, rom_page_refills) are deterministic and exact.
+ifeq ($(PERF_CPU),1)
+QEMU_CFLAGS += -DSNES_PERF -DSNES_PERF_CPU -DSNES_OP_CENSUS=1
+endif
 
 QEMU_SRCS := $(CORE_C_SOURCES) host/host_emu.c host/host_i18n.c \
 	host/qemu/qemu_platform.c host/qemu/qemu_main.c host/qemu/startup.c
