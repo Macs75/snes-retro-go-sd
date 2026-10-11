@@ -3379,6 +3379,42 @@ static void PpuDrawBackground_8bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
 #undef LOAD_8BPP
 }
 
+#if !defined(SNES_LINE_CACHE) && !defined(SNES_LINE_REUSE_PROBE)
+/* Rotated / large-field Mode 7 fallback, split out with an explicit noinline so
+ * its tile-cell cache state (cur_cell/tilebase) is confined to this frame and
+ * does NOT raise register pressure on the sibling Mode 7 loops (dy==0 fast path,
+ * mosaic) it would otherwise share an inlined frame with -- the inline version
+ * re-solved allocation for the whole blob and spilled the hot path harder. The
+ * cache re-fetches the tile map only when the 8x8 cell (xpos>>11, ypos>>11)
+ * changes, breaking the per-pixel dependent map->char load that dominates Mode 7
+ * on the in-order M7. Bit-identical to the per-pixel loop: a cached tile equals
+ * a re-read (VRAM is stable across the line); the outside / char_fill cases are
+ * reproduced exactly. (types.h's NOINLINE is a no-op under gcc, so spell the
+ * attribute out.) */
+static __attribute__((noinline)) void PpuDrawMode7Fallback(Ppu *ppu,
+    PpuZbufType *dstz, PpuZbufType *dstz_end, uint32 xpos, uint32 ypos,
+    uint32 dx, uint32 dy, uint32 outside_value, bool char_fill, PpuZbufType z) {
+  uint32 cur_cell = (uint32)-1;
+  int tilebase = 0;
+  do {
+    if ((uint32)(xpos | ypos) > outside_value) {
+      if (!char_fill)
+        continue;
+      tilebase = 0; cur_cell = (uint32)-2;   /* char fill: tile 0 */
+    } else {
+      uint32 cell = (ypos >> 11 & 0x7f) * 128 + (xpos >> 11 & 0x7f);
+      if (cell != cur_cell) {
+        cur_cell = cell;
+        tilebase = (PPU_PROBE_VRAM_PTR(ppu, &ppu->vram[cell]) & 0xff) * 64;
+      }
+    }
+    uint8 pixel = PPU_PROBE_VRAM_PTR(ppu, &ppu->vram[tilebase + (ypos >> 8 & 7) * 8 + (xpos >> 8 & 7)]) >> 8;
+    if (pixel)
+      dstz[0] = pixel + z;
+  } while (xpos += dx, ypos += dy, ++dstz != dstz_end);
+}
+#endif
+
 // Assumes it's drawn on an empty backdrop
 static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
   int layer = 0;
@@ -3500,6 +3536,13 @@ static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
         }
       } while (xpos += dx * w, ypos += dy * w, dstz += w, w = ppu->mosaicSize, dstz_end - dstz != 0);
     } else {
+#if !defined(SNES_LINE_CACHE) && !defined(SNES_LINE_REUSE_PROBE)
+      /* Rotated / large-field fallback with a tile-cell cache. Split into its
+       * own noinline function (PpuDrawMode7Fallback) so the cache state does not
+       * reshuffle register allocation across the other inlined Mode 7 loops. */
+      PpuDrawMode7Fallback(ppu, dstz, dstz_end, xpos, ypos, dx, dy,
+                           outside_value, char_fill, z);
+#else
       do {
         if ((uint32)(xpos | ypos) > outside_value) {
           if (!char_fill)
@@ -3513,6 +3556,7 @@ static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
         if (pixel)
           dstz[0] = pixel + z;
       } while (xpos += dx, ypos += dy, ++dstz != dstz_end);
+#endif
     }
   }
 }
