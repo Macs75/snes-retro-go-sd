@@ -9,6 +9,7 @@
 
 #include "dma.h"
 #include "snes.h"
+#include "cart.h"
 #include "snes_gnw_alloc.h"
 
 static const int bAdrOffsets[8][4] = {
@@ -64,6 +65,7 @@ void dma_reset(Dma* dma) {
   dma->hdmaTimer = 0;
   dma->dmaTimer = 0;
   dma->dmaBusy = false;
+  dma->hdmaEnabled = 0;
 }
 
 void dma_saveload(Dma *dma, SaveLoadFunc *func, void *ctx) {
@@ -266,6 +268,47 @@ void dma_doDma(Dma* dma) {
   unsigned oi = ch->offIndex;
   uint16_t size = ch->size;   // 0 means 0x10000, matching the old size-- wrap
 
+  /* The A-bus source bank is invariant across the transfer; only aAdr steps
+   * (16-bit wrap). When the source is plain memory, read it directly instead of
+   * re-running snes_read's full classification ladder per byte. The value is
+   * byte-identical to snes_read for the ranges selected:
+   *   WRAM $7E/$7F        -> snes->ram[((bank&1)<<16)|aAdr]  (flat 64K, wrap-safe)
+   *   non-mirror banks    -> cart_read (snes_read routes $40-7D/$C0-FF straight
+   *                          to cart_read for every adr, wrap included)
+   *   mirror $00-3F/$80-BF-> cart_read ONLY if the whole run stays >= $8000 and
+   *                          does not 16-bit-wrap (else it could hit the WRAM
+   *                          mirror / MMIO ladder); otherwise fall back.
+   * Dest stays snes_writeBBus (VRAM/CGRAM/OAM side effects). */
+  Snes* sn = dma->snes;
+  const uint32_t n = size ? size : 0x10000u;
+  const uint8_t* wram = NULL;
+  bool cart_fast = false;
+  if (aBank == 0x7e || aBank == 0x7f) {
+    wram = &sn->ram[(aBank & 1) << 16];
+  } else {
+    const bool mirror = aBank < 0x40 || (aBank >= 0x80 && aBank < 0xc0);
+    if (!mirror) {
+      cart_fast = true;                 /* every adr in the bank is cart */
+    } else if (step == 0) {
+      cart_fast = (aAdr >= 0x8000);
+    } else if (step == 1) {
+      cart_fast = (aAdr >= 0x8000) && ((uint32_t)aAdr + (n - 1) <= 0xffffu);
+    } else { /* step == -1 */
+      cart_fast = ((int32_t)aAdr - (int32_t)(n - 1) >= 0x8000);
+    }
+  }
+  if (wram) {
+    do {
+      snes_writeBBus(sn, bAdr + off[oi & 3], wram[aAdr]);
+      oi++; aAdr += step; size--;
+    } while(size != 0);
+  } else if (cart_fast) {
+    Cart* cart = sn->cart;
+    do {
+      snes_writeBBus(sn, bAdr + off[oi & 3], cart_read(cart, aBank, aAdr));
+      oi++; aAdr += step; size--;
+    } while(size != 0);
+  } else
   do {
     dma_transferByte(dma, aAdr, aBank, bAdr + off[oi & 3], false);
     oi++;
@@ -406,6 +449,7 @@ void dma_startDma(Dma* dma, uint8_t val, bool hdma) {
       dma->channel[i].dmaActive = val & (1 << i);
     }
   }
+  if(hdma) dma->hdmaEnabled = val;   /* skip the per-line 8-scan when no HDMA armed */
   if(!hdma) {
     dma->dmaBusy = val;
     dma->dmaTimer += dma->dmaBusy ? 16 : 0; // 12-24 cycle overhead for entire dma transfer

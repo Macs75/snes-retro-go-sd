@@ -302,7 +302,7 @@ void snes_handle_pos_stuff(Snes *snes) {
     }
   } else if (snes->hPos == 1024) {
     // start of hblank
-    if (!snes->inVblank)
+    if (!snes->inVblank && snes->dma->hdmaEnabled)   /* no HDMA armed -> skip the 8-channel scan */
       dma_doHdma(snes->dma);
   }
 #ifdef GNW_SNES_CORE
@@ -741,7 +741,7 @@ uint8_t snes_read(Snes* snes, uint32_t adr) {
       return input_read(snes->input1) | (snes->openBus & 0xfc);
     if (adr == 0x4017)
       return input_read(snes->input2) | 0x1c;
-    if(adr >= 0x4200 && adr < 0x4220 || adr >= 0x4218 && adr < 0x4220) {
+    if(adr >= 0x4200 && adr < 0x4220) {
       return snes_readReg(snes, adr); // internal registers
     }
     if(adr >= 0x4300 && adr < 0x4380) {
@@ -777,44 +777,52 @@ void LogWrite(Snes *snes, uint32_t adr, uint8_t val) {
 void snes_write(Snes* snes, uint32_t adr, uint8_t val) {
   uint8_t bank = adr >> 16;
   adr &= 0xffff;
+  /* Early-return after each matched region: the ranges are disjoint and none of
+   * them also needs the trailing cart_write (WRAM, B-bus, pads, internal regs,
+   * DMA regs, sdd1/spc7110 MMIO are never cart targets), so a matched write
+   * stops re-testing the rest and skips the no-op cart_write dispatch. The
+   * $2000-20ff / $4220-42ff / $4380-47ff gaps still fall through to cart_write. */
   if(bank == 0x7e || bank == 0x7f) {
     uint32_t addr = ((bank & 1) << 16) | adr;
     snes->ram[addr] = val; // ram
-    if (IS_ADR(addr)) {
-      LogWrite(snes, adr, val);
-    }
+    if (IS_ADR(addr)) LogWrite(snes, adr, val);
+    return;
   }
   if(bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) {
     if(adr < 0x2000) {
       snes->ram[adr] = val; // ram mirror
-      if (IS_ADR(adr)) {
-        LogWrite(snes, adr, val);
-      }
+      if (IS_ADR(adr)) LogWrite(snes, adr, val);
+      return;
     }
     if(adr >= 0x2100 && adr < 0x2200) {
       if (adr == 0x2100) HOST_BOOT_MMIO_LOG(adr, val);
       snes_writeBBus(snes, adr & 0xff, val); // B-bus
+      return;
     }
     if(adr == 0x4016) {
-      input_latch(snes->input1, val & 1); // strobe both controller ports
+      input_latch(snes->input1, val & 1);
       input_latch(snes->input2, val & 1);
+      return;
     }
     if(adr >= 0x4200 && adr < 0x4220) {
       snes_writeReg(snes, adr, val); // internal registers
+      return;
     }
     if(adr >= 0x4300 && adr < 0x4380) {
       dma_write(snes->dma, adr, val); // dma registers
       if(snes->cart->sdd1)
         sdd1_mmio_write(snes->cart->sdd1, adr, val);
+      return;
     }
     if(snes->cart->sdd1 && adr >= 0x4800 && adr < 0x4808) {
       sdd1_mmio_write(snes->cart->sdd1, adr, val);
+      return;
     }
     if(snes->cart->spc7110 && adr >= 0x4800 && adr <= 0x4842) {
       spc7110_mmio_write(snes->cart->spc7110, adr, val, snes->cart->rom, snes->cart->romSize);
+      return;
     }
   }
-  // write to cart
   cart_write(snes->cart, bank, adr, val);
 }
 

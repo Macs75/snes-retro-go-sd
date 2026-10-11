@@ -192,6 +192,9 @@ struct Ppu {
   // pixel buffer (xbgr)
   // times 2 for even and odd frame
   uint8_t pixelbuffer_placeholder;
+  /* OR of mathEnabled[i]<<i, maintained at CGADSUB write; after
+   * pixelbuffer_placeholder so it is never serialized (rebuilt on load). */
+  uint8_t mathEnabledMask;
 
   uint32_t windowsel;
   uint8_t extraLeftCur, extraRightCur, extraLeftRight;

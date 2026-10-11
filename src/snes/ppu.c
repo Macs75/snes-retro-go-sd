@@ -281,6 +281,7 @@ void ppu_reset(Ppu* ppu) {
   ppu->subtractColor = false;
   ppu->halfColor = false;
   memset(ppu->mathEnabled, 0, sizeof(ppu->mathEnabled));
+  ppu->mathEnabledMask = 0;
   ppu->fixedColorR = 0;
   ppu->fixedColorG = 0;
   ppu->fixedColorB = 0;
@@ -392,6 +393,10 @@ void ppu_saveload(Ppu *ppu, SaveLoadFunc *func, void *ctx) {
    * recomputes the values it already had — the two copies agree by construction,
    * ppu_write() writes both — so it is a no-op there rather than a special case. */
   ppu_rebuild_packed_registers(ppu);
+  ppu->mathEnabledMask = (uint8_t)(
+      (ppu->mathEnabled[0]      ) | (ppu->mathEnabled[1] << 1) |
+      (ppu->mathEnabled[2] << 2) | (ppu->mathEnabled[3] << 3) |
+      (ppu->mathEnabled[4] << 4) | (ppu->mathEnabled[5] << 5));
 #ifdef SNES_LINE_CACHE
   /* The framebuffer is not part of the savestate stream.  Whether this call
    * saved or loaded, stop trusting its pixels until every line is redrawn. */
@@ -3707,8 +3712,7 @@ static uint32_t PpuMathFixedKey(Ppu *ppu) {
   key |= (uint32_t)ppu->subtractColor << 15;
   key |= (uint32_t)ppu->halfColor << 16;
   key |= (uint32_t)ppu->addSubscreen << 17;
-  for (int layer = 0; layer < 6; layer++)
-    key |= (uint32_t)ppu->mathEnabled[layer] << (18 + layer);
+  key |= (uint32_t)ppu->mathEnabledMask << 18;   /* == OR mathEnabled[l]<<(18+l) */
   return key;
 }
 
@@ -3973,9 +3977,7 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
   SNES_PERF_PPU_END(SNES_PERF_PPU_MAIN, perf_m);
 
   // The 6:th bit is automatically zero, math is never applied to the first half of the sprites.
-  uint32 math_enabled = 0;
-  for(int i = 0; i < 6; i++)
-    math_enabled |= ppu->mathEnabled[i] << i;
+  uint32 math_enabled = ppu->mathEnabledMask;      /* maintained; == the fold */
 
   // Render also the subscreen?
   bool rendered_subscreen = false;
@@ -5303,6 +5305,7 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
       for(int i = 0; i < 6; i++) {
         ppu->mathEnabled[i] = val & (1 << i);
       }
+      ppu->mathEnabledMask = (uint8_t)(val & 0x3f);   /* bit i == mathEnabled[i] */
       break;
     }
     case 0x32: {

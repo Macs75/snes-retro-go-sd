@@ -40,7 +40,8 @@ struct Dma {
   uint16_t hdmaTimer;
   uint32_t dmaTimer;
   bool dmaBusy;
-  uint8_t pad[7];
+  uint8_t hdmaEnabled;   /* $420C mask: nonzero if any HDMA channel armed (empty-scan guard) */
+  uint8_t pad[6];
 };
 
 Dma* dma_init(Snes* snes);
