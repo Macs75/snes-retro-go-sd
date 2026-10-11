@@ -3452,6 +3452,35 @@ static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
     uint32 dy = ppu->m7xFlip ? -ppu->m7matrix[2] : ppu->m7matrix[2];
     uint32 outside_value = ppu->m7largeField ? 0x3ffff : 0xffffffff;
     bool char_fill = ppu->m7charFill;
+#if !defined(SNES_LINE_CACHE) && !defined(SNES_LINE_REUSE_PROBE)
+    if (!mosaic_enabled && dy == 0 && !ppu->m7largeField) {
+      /* Fast path for an axis-aligned scaled line (no rotation): dy==0 means
+       * ypos is constant for the whole line, and !m7largeField means the field
+       * is never "outside" (outside_value is 0xffffffff), so the tile-map row
+       * and in-tile row are fixed. This is the F-Zero / FF6-snowfield ground-
+       * plane class. Fetch the tile index only when the tile column changes
+       * (every 8+ screen pixels at this scale) and keep the char-row base, so
+       * the per-pixel char fetch no longer waits on a just-issued map fetch --
+       * the dependent load that dominates Mode 7 on the in-order M7. Bit-
+       * identical to the general loop below for this case: ypos is fixed so
+       * every derived index matches, and a cached tile equals a re-read (VRAM
+       * does not change during the line). Compiled out of the line-cache /
+       * reuse-probe builds, which must see every per-pixel VRAM access. */
+      uint32 ymap = (ypos >> 11 & 0x7f) * 128;
+      uint32 ychar = (ypos >> 8 & 7) * 8;
+      uint32 cur_col = (uint32)-1, charbase = 0;
+      do {
+        uint32 col = xpos >> 11 & 0x7f;
+        if (col != cur_col) {
+          cur_col = col;
+          charbase = ((PPU_PROBE_VRAM_PTR(ppu, &ppu->vram[ymap + col]) & 0xff) * 64) + ychar;
+        }
+        uint8 pixel = PPU_PROBE_VRAM_PTR(ppu, &ppu->vram[charbase + (xpos >> 8 & 7)]) >> 8;
+        if (pixel)
+          dstz[0] = pixel + z;
+      } while (xpos += dx, ++dstz != dstz_end);
+    } else
+#endif
     if (mosaic_enabled) {
       int w = ppu->mosaicSize - (x % ppu->mosaicSize);
       do {
