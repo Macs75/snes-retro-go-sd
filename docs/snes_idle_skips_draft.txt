@@ -1,0 +1,14 @@
+# Idle-skip table, DRAFT (overnight survey 2026-10-10, title/attract, no input).
+# Only the games whose wait loop changes state every lap (category D).
+# crc32 = CRC32 of the ROM without copier header. guard = the ROM bytes at bank:pc, checked before arming.
+# crc32    kind    bank:pc  params                       guard                                  title
+7c4887e1  ACCUM   80:80c4  x=46 y=42 dp=0000            a900005ba5466542854680f4c23048da       Dracula X
+49627238  ACCUM   80:80ef  x=78 y=3a dp=0000            a900005ba578653a857880f4c23048da       International SuperStar Soccer
+0a20e602  ACCUM   80:80d4  x=78 y=3a dp=0000            a900005ba578653a857880f4c23048da       International Superstar Soccer Deluxe
+e9b4bd73  HVPOLL  80:80d6  reg=$4212                    85229c0b42e220a9802c1242f0fb2c12       Ken Griffey Jr.'s Winning Run
+82479d6a  ACCUM   00:80b4  x=94 y=3a dp=0000            22279d00a900005ba594653a859480f0       Legend of the Mystical Ninja
+6291ee08  HVPOLL  c0:b927  reg=$4212                    2c1242d0fb2c1242f0fb60a9802c1242       Live-a-Live
+5940bd99  ACCUM   00:8154  x=94 y=3a dp=0000            22169d00a900005ba594653a859480f0       Teenage Mutant Ninja Turtles IV: Turtles in Time
+6c852ef3  ACCUM   80:8dad  see code                     c220a59e0a0a18659e18691371859ee2       Tetris & Dr. Mario
+b3ef81f5  ACCUM   80:80ed  x=88 y=3a                    a588653a858880f8c23048da5a0b8ba9       The Adventures of Batman & Robin [SNES]
+ab48d27a  ACCUM   80:80c1  x=98 y=3a dp=0000            22a99a80a900005ba598653a859880f0       Tiny Toon Adventures: Buster Busts Loose

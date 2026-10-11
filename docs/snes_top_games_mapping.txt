@@ -1,0 +1,190 @@
+PER LIST
+  snesIGNtop100.txt: 100 | USA 98 | EUR 2 | other 0 | Japan-only 0 | missing 0 | not SNES 0
+  top100snes.txt: 107 | USA 99 | EUR 3 | other 1 | Japan-only 2 | missing 0 | not SNES 2
+  top_snes_games.md: 100 | USA 89 | EUR 1 | other 1 | Japan-only 9 | missing 0 | not SNES 0
+
+UNIQUE GAMES 142
+
+[01 EUR PAL] 4
+   Another World                                    01 EUR PAL/Another World (Europe).sfc
+   Stunt Race FX                                    01 EUR PAL/Stunt Race FX (Europe).sfc
+   Super Bomberman 3                                01 EUR PAL/Super Bomberman 3 (Europe).sfc
+   Terranigma                                       01 EUR PAL/Terranigma (Europe).sfc
+
+[other] 1
+   Star Ocean                                       S-DD1 Chip Games/Star Ocean (J) [T+Eng1.0_DeJap].smc
+
+[03 Japan NTSC] 9
+   Dragon Quest V                                   03 Japan NTSC/Dragon Quest V - Tenkuu no Hanayome (Japan).sfc
+   Final Fantasy V                                  03 Japan NTSC/Final Fantasy V (Japan).sfc
+   Fire Emblem: Genealogy of the Holy War           03 Japan NTSC/Fire Emblem - Seisen no Keifu (Japan).sfc
+   Front Mission                                    03 Japan NTSC/Front Mission (Japan).sfc
+   Front Mission: Gun Hazard                        03 Japan NTSC/Front Mission Series - Gun Hazard (Japan).sfc
+   Live-a-Live                                      03 Japan NTSC/Live A Live (Japan).sfc
+   Tactics Ogre                                     03 Japan NTSC/Tactics Ogre - Let Us Cling Together (Japan).sfc
+   Tetris Battle Gaiden                             03 Japan NTSC/Tetris Battle Gaiden (Japan).sfc
+   Trials of Mana                                   03 Japan NTSC/Seiken Densetsu 3 (Japan).sfc
+
+[None] 0
+
+[notsnes] 2
+   Final Fantasy Adventure                          Game Boy
+   International Superstar Soccer 64                N64
+
+COPROCESSOR
+   Kirby Super Star                                 SA-1           02 USA NTSC/Kirby Super Star (USA).sfc
+   Kirby's Dream Land 3                             SA-1           02 USA NTSC/Kirby's Dream Land 3 (USA).sfc
+   Mega Man X2                                      Cx4/SPC7110/ST 02 USA NTSC/Mega Man X2 (USA).sfc
+   Mega Man X3                                      Cx4/SPC7110/ST 02 USA NTSC/Mega Man X3 (USA).sfc
+   Pilotwings                                       DSP            02 USA NTSC/Pilotwings (USA).sfc
+   Star Fox                                         SuperFX        02 USA NTSC/Star Fox (USA).sfc
+   Star Ocean                                       S-DD1          S-DD1 Chip Games/Star Ocean (J) [T+Eng1.0_DeJap].smc
+   Street Fighter Alpha 2                           S-DD1          02 USA NTSC/Street Fighter Alpha 2 (USA).sfc
+   Stunt Race FX                                    SuperFX        01 EUR PAL/Stunt Race FX (Europe).sfc
+   Super Mario Kart                                 DSP            02 USA NTSC/Super Mario Kart (USA).sfc
+   Super Mario RPG: Legend of the Seven Stars       SA-1           02 USA NTSC/Super Mario RPG - Legend of the Seven Stars (USA).sfc
+   Super Mario World 2: Yoshi's Island              SuperFX        02 USA NTSC/Super Mario World 2 - Yoshi's Island (USA).sfc
+
+ALL MATCHES (title -> file)
+   ActRaiser                                        -> 02 USA NTSC/ActRaiser (USA).sfc
+   Alien 3                                          -> 02 USA NTSC/Alien 3 (USA).sfc
+   Another World                                    -> 01 EUR PAL/Another World (Europe).sfc
+   Axelay                                           -> 02 USA NTSC/Axelay (USA).sfc
+   Blackthorne                                      -> 02 USA NTSC/Blackthorne (USA).sfc
+   Breath of Fire                                   -> 02 USA NTSC/Breath of Fire (USA).sfc
+   Breath of Fire II                                -> 02 USA NTSC/Breath of Fire II (USA).sfc
+   Bust-A-Move                                      -> 02 USA NTSC/Bust-A-Move (USA).sfc
+   Chrono Trigger                                   -> 02 USA NTSC/Chrono Trigger (USA).sfc
+   Contra III: The Alien Wars                       -> 02 USA NTSC/Contra III - The Alien Wars (USA).sfc
+   Cybernator                                       -> 02 USA NTSC/Cybernator (USA).sfc
+   Demon's Crest                                    -> 02 USA NTSC/Demon's Crest (USA).sfc
+   Disney's Aladdin                                 -> 02 USA NTSC/Aladdin (USA).sfc
+   Donkey Kong Country                              -> 02 USA NTSC/Donkey Kong Country (USA).sfc
+   Donkey Kong Country 2: Diddy's Kong Quest        -> 02 USA NTSC/Donkey Kong Country 2 - Diddy's Kong Quest (USA) (En,Fr).sfc
+   Donkey Kong Country 3                            -> 02 USA NTSC/Donkey Kong Country 3 - Dixie Kong's Double Trouble! (USA) (En,Fr).sfc
+   Dracula X                                        -> 02 USA NTSC/Castlevania - Dracula X (USA).sfc
+   Dragon Quest V                                   -> 03 Japan NTSC/Dragon Quest V - Tenkuu no Hanayome (Japan).sfc
+   EVO: Search for Eden                             -> 02 USA NTSC/E.V.O. - Search for Eden (USA).sfc
+   EarthBound                                       -> 02 USA NTSC/EarthBound (USA).sfc
+   Earthworm Jim                                    -> 02 USA NTSC/Earthworm Jim (USA).sfc
+   Earthworm Jim 2                                  -> 02 USA NTSC/Earthworm Jim 2 (USA).sfc
+   F-Zero                                           -> 02 USA NTSC/F-Zero (USA).sfc
+   Fatal Fury 2                                     -> 02 USA NTSC/Fatal Fury 2 (USA).sfc
+   Final Fantasy Adventure                          -> Game Boy
+   Final Fantasy IV                                 -> 02 USA NTSC/Final Fantasy II (USA).sfc
+   Final Fantasy Mystic Quest                       -> 02 USA NTSC/Final Fantasy - Mystic Quest (USA).sfc
+   Final Fantasy V                                  -> 03 Japan NTSC/Final Fantasy V (Japan).sfc
+   Final Fantasy VI                                 -> 02 USA NTSC/Final Fantasy III (USA).sfc
+   Final Fight                                      -> 02 USA NTSC/Final Fight (USA).sfc
+   Fire Emblem: Genealogy of the Holy War           -> 03 Japan NTSC/Fire Emblem - Seisen no Keifu (Japan).sfc
+   Flashback: The Quest for Identity                -> 02 USA NTSC/Flashback - The Quest for Identity (USA) (En,Fr,De).sfc
+   Front Mission                                    -> 03 Japan NTSC/Front Mission (Japan).sfc
+   Front Mission: Gun Hazard                        -> 03 Japan NTSC/Front Mission Series - Gun Hazard (Japan).sfc
+   Goof Troop                                       -> 02 USA NTSC/Goof Troop (USA).sfc
+   Gradius III                                      -> 02 USA NTSC/Gradius III (USA).sfc
+   Hagane                                           -> 02 USA NTSC/Hagane - The Final Conflict (USA).sfc
+   Harvest Moon                                     -> 02 USA NTSC/Harvest Moon (USA).sfc
+   Illusion of Gaia                                 -> 02 USA NTSC/Illusion of Gaia (USA).sfc
+   International SuperStar Soccer                   -> 02 USA NTSC/International Superstar Soccer (USA).sfc
+   International Superstar Soccer 64                -> N64
+   International Superstar Soccer Deluxe            -> 02 USA NTSC/International Superstar Soccer Deluxe (USA).sfc
+   Joe & Mac 2: Lost in the Tropics                 -> 02 USA NTSC/Joe & Mac 2 - Lost in the Tropics (USA).sfc
+   Jungle Strike                                    -> 02 USA NTSC/Jungle Strike (USA).sfc
+   Ken Griffey Jr. Presents                         -> 02 USA NTSC/Ken Griffey Jr. Presents Major League Baseball (USA).sfc
+   Ken Griffey Jr.'s Winning Run                    -> 02 USA NTSC/Ken Griffey Jr.'s Winning Run (USA).sfc
+   Killer Instinct (1994)                           -> 02 USA NTSC/Killer Instinct (USA).sfc
+   Kirby Super Star                                 -> 02 USA NTSC/Kirby Super Star (USA).sfc
+   Kirby's Avalanche                                -> 02 USA NTSC/Kirby's Avalanche (USA).sfc
+   Kirby's Dream Course                             -> 02 USA NTSC/Kirby's Dream Course (USA).sfc
+   Kirby's Dream Land 3                             -> 02 USA NTSC/Kirby's Dream Land 3 (USA).sfc
+   Legend of the Mystical Ninja                     -> 02 USA NTSC/Legend of the Mystical Ninja, The (USA).sfc
+   Live-a-Live                                      -> 03 Japan NTSC/Live A Live (Japan).sfc
+   Lost Vikings 2                                   -> 02 USA NTSC/Lost Vikings 2 (USA).sfc
+   Lufia & the Fortress of Doom                     -> 02 USA NTSC/Lufia & The Fortress of Doom (USA).sfc
+   Lufia II: Rise of the Sinistrals                 -> 02 USA NTSC/Lufia II - Rise of the Sinistrals (USA).sfc
+   Madden NFL '94                                   -> 02 USA NTSC/Madden NFL '94 (USA).sfc
+   Mario Paint                                      -> 02 USA NTSC/Mario Paint (Japan, USA).sfc
+   Mega Man 7                                       -> 02 USA NTSC/Mega Man 7 (USA).sfc
+   Mega Man X                                       -> 02 USA NTSC/Mega Man X (USA).sfc
+   Mega Man X2                                      -> 02 USA NTSC/Mega Man X2 (USA).sfc
+   Mega Man X3                                      -> 02 USA NTSC/Mega Man X3 (USA).sfc
+   Metal Marines                                    -> 02 USA NTSC/Metal Marines (USA).sfc
+   Metal Warriors                                   -> 02 USA NTSC/Metal Warriors (USA).sfc
+   Mortal Kombat                                    -> 02 USA NTSC/Mortal Kombat (USA).sfc
+   Mortal Kombat 3                                  -> 02 USA NTSC/Mortal Kombat 3 (USA).sfc
+   Mortal Kombat II                                 -> 02 USA NTSC/Mortal Kombat II (USA).sfc
+   NBA Jam [1993]                                   -> 02 USA NTSC/NBA Jam (USA).sfc
+   NHL '94                                          -> 02 USA NTSC/NHL '94 (USA).sfc
+   Ninja Warriors                                   -> 02 USA NTSC/Ninjawarriors (USA).sfc
+   Ogre Battle: The March of the Black Queen        -> 02 USA NTSC/Ogre Battle - The March of the Black Queen (USA).sfc
+   Out of This World                                -> 02 USA NTSC/Out of this World (USA).sfc
+   Panel de Pon                                     -> 02 USA NTSC/Tetris Attack (USA) (En,Ja).sfc
+   Pilotwings                                       -> 02 USA NTSC/Pilotwings (USA).sfc
+   Pocky & Rocky                                    -> 02 USA NTSC/Pocky & Rocky (USA).sfc
+   Pocky & Rocky 2                                  -> 02 USA NTSC/Pocky & Rocky 2 (USA).sfc
+   Populous                                         -> 02 USA NTSC/Populous (USA).sfc
+   R-Type III: The Third Lightning                  -> 02 USA NTSC/R-Type III (USA).sfc
+   Rock 'n Roll Racing                              -> 02 USA NTSC/Rock n' Roll Racing (USA).sfc
+   Secret of Evermore                               -> 02 USA NTSC/Secret of Evermore (USA).sfc
+   Secret of Mana [1993]                            -> 02 USA NTSC/Secret of Mana (USA).sfc
+   Shadowrun [SNES]                                 -> 02 USA NTSC/Shadowrun (USA).sfc
+   SimCity (Nintendo)                               -> 02 USA NTSC/SimCity (USA).sfc
+   SimCity 2000                                     -> 02 USA NTSC/SimCity 2000 - The Ultimate City Simulator (USA).sfc
+   Soul Blazer                                      -> 02 USA NTSC/Soul Blazer (USA).sfc
+   Space Megaforce                                  -> 02 USA NTSC/Space Megaforce (USA).sfc
+   Sparkster                                        -> 02 USA NTSC/Sparkster (USA).sfc
+   Spider-Man -- Venom: Maximum Carnage             -> 02 USA NTSC/Spider-Man-Venom - Maximum Carnage (USA).sfc
+   Star Fox                                         -> 02 USA NTSC/Star Fox (USA).sfc
+   Star Ocean                                       -> S-DD1 Chip Games/Star Ocean (J) [T+Eng1.0_DeJap].smc
+   Street Fighter Alpha 2                           -> 02 USA NTSC/Street Fighter Alpha 2 (USA).sfc
+   Street Fighter II                                -> 02 USA NTSC/Street Fighter II (USA).sfc
+   Street Fighter II Turbo                          -> 02 USA NTSC/Street Fighter II Turbo (USA).sfc
+   Stunt Race FX                                    -> 01 EUR PAL/Stunt Race FX (Europe).sfc
+   Sunset Riders                                    -> 02 USA NTSC/Sunset Riders (USA).sfc
+   Super Bomberman                                  -> 02 USA NTSC/Super Bomberman (USA).sfc
+   Super Bomberman 2                                -> 02 USA NTSC/Super Bomberman 2 (USA).sfc
+   Super Bomberman 3                                -> 01 EUR PAL/Super Bomberman 3 (Europe).sfc
+   Super Castlevania IV                             -> 02 USA NTSC/Super Castlevania IV (USA).sfc
+   Super Double Dragon                              -> 02 USA NTSC/Super Double Dragon (USA).sfc
+   Super Ghouls 'N Ghosts                           -> 02 USA NTSC/Super Ghouls'n Ghosts (USA).sfc
+   Super Mario All-Stars                            -> 02 USA NTSC/Super Mario All-Stars (USA).sfc
+   Super Mario Kart                                 -> 02 USA NTSC/Super Mario Kart (USA).sfc
+   Super Mario RPG: Legend of the Seven Stars       -> 02 USA NTSC/Super Mario RPG - Legend of the Seven Stars (USA).sfc
+   Super Mario World                                -> 02 USA NTSC/Super Mario World (USA).sfc
+   Super Mario World 2: Yoshi's Island              -> 02 USA NTSC/Super Mario World 2 - Yoshi's Island (USA).sfc
+   Super Metroid                                    -> 02 USA NTSC/Super Metroid (Japan, USA) (En,Ja).sfc
+   Super Punch-Out!!                                -> 02 USA NTSC/Super Punch-Out!! (USA).sfc
+   Super Smash TV                                   -> 02 USA NTSC/Super Smash T.V. (USA).sfc
+   Super Star Wars                                  -> 02 USA NTSC/Super Star Wars (USA).sfc
+   Super Star Wars: Return of the Jedi              -> 02 USA NTSC/Super Star Wars - Return of the Jedi (USA).sfc
+   Super Star Wars: The Empire Strikes Back         -> 02 USA NTSC/Super Star Wars - The Empire Strikes Back (USA).sfc
+   Super Street Fighter II: The New Challengers     -> 02 USA NTSC/Super Street Fighter II (USA).sfc
+   Super Tennis                                     -> 02 USA NTSC/Super Tennis (USA).sfc
+   Super Turrican                                   -> 02 USA NTSC/Super Turrican (USA).sfc
+   Super Turrican 2                                 -> 02 USA NTSC/Super Turrican 2 (USA).sfc
+   Tactics Ogre                                     -> 03 Japan NTSC/Tactics Ogre - Let Us Cling Together (Japan).sfc
+   Tecmo Super Bowl                                 -> 02 USA NTSC/Tecmo Super Bowl (USA).sfc
+   Tecmo Super Bowl III                             -> 02 USA NTSC/Tecmo Super Bowl III - Final Edition (USA).sfc
+   Teenage Mutant Ninja Turtles IV: Turtles in Time -> 02 USA NTSC/Teenage Mutant Ninja Turtles IV - Turtles in Time (USA).sfc
+   Terranigma                                       -> 01 EUR PAL/Terranigma (Europe).sfc
+   Tetris & Dr. Mario                               -> 02 USA NTSC/Tetris & Dr. Mario (USA).sfc
+   Tetris Battle Gaiden                             -> 03 Japan NTSC/Tetris Battle Gaiden (Japan).sfc
+   The Adventures of Batman & Robin [SNES]          -> 02 USA NTSC/Adventures of Batman & Robin, The (USA).sfc
+   The Death and Return of Superman                 -> 02 USA NTSC/Death and Return of Superman, The (USA).sfc
+   The Legend of Zelda: A Link to the Past          -> 02 USA NTSC/Legend of Zelda, The - A Link to the Past (USA).sfc
+   The Lion King                                    -> 02 USA NTSC/Lion King, The (USA).sfc
+   The Lost Vikings                                 -> 02 USA NTSC/Lost Vikings, The (USA).sfc
+   The Magical Quest starring Mickey Mouse          -> 02 USA NTSC/Magical Quest Starring Mickey Mouse, The (USA).sfc
+   Tiny Toon Adventures: Buster Busts Loose         -> 02 USA NTSC/Tiny Toon Adventures - Buster Busts Loose! (USA).sfc
+   Top Gear                                         -> 02 USA NTSC/Top Gear (USA).sfc
+   Top Gear 2                                       -> 02 USA NTSC/Top Gear 2 (USA).sfc
+   Trials of Mana                                   -> 03 Japan NTSC/Seiken Densetsu 3 (Japan).sfc
+   U.N. Squadron                                    -> 02 USA NTSC/U.N. Squadron (USA).sfc
+   Ultimate Mortal Kombat 3                         -> 02 USA NTSC/Ultimate Mortal Kombat 3 (USA).sfc
+   Uncharted Waters New Horizons                    -> 02 USA NTSC/New Horizons (USA).sfc
+   Uniracers                                        -> 02 USA NTSC/Uniracers (USA).sfc
+   Wario's Woods                                    -> 02 USA NTSC/Wario's Woods (USA).sfc
+   Wild Guns                                        -> 02 USA NTSC/Wild Guns (USA).sfc
+   X-Men: Mutant Apocalypse                         -> 02 USA NTSC/X-Men - Mutant Apocalypse (USA).sfc
+   Yoshi's Cookie                                   -> 02 USA NTSC/Yoshi's Cookie (USA).sfc
+   Zombies Ate My Neighbors                         -> 02 USA NTSC/Zombies Ate My Neighbors (USA).sfc

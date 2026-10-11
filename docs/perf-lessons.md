@@ -213,6 +213,72 @@ frame-identically on the device (pause-menu Replay), giving a deterministic A/B.
 The `.rec` path is the ROM path with the extension replaced. A button remap
 breaks old recordings (they store the post-mapping pad).
 
+### 5.5 Code placement and alignment are measured variables — pin hot code in fixed, aligned windows
+
+The M7's instruction cache is **2-way, 8 KB per way (16 KB total)**; a line's
+cache set is decided by its **address modulo 8 KB**. So *where* a hot function
+lands — not only what it compiles to — changes what it evicts and how often it
+hits. On this core that was not a rounding error:
+
+- With the hot code placed after everything else, **any** change anywhere in the
+  core moved the 14 KB SPC700 engine and changed what it evicted from the
+  I-cache. The *same* SPC700 code measured **~25,000 cycles/frame apart between
+  two builds that differed only in `dsp.c`.** A measurement was untrustworthy —
+  the delta could be the change or just code motion.
+
+The fix lives in `snes_core.ld`: each hot group — the SPC700 engine, DSP, the
+PPU line renderer, the 65816 bus, the 65816 C fallback — is pinned in a **fixed
+window at a fixed offset, padded to a fixed size**, with each function
+**32-byte (cache-line) aligned** (64 at a window start), and the Thumb-2 65816
+engine pinned in ITCM via `__SNES_ITCM_ENGINE_AT`. Then a change that grows one
+group moves nothing in the others: their cache sets stay put, and a measured
+difference belongs to the change, not to placement. Because sets repeat every
+8 KB, a window that must keep its sets is moved in whole 8 KB steps.
+
+Set-aliasing between windows is real and sweepable:
+- DSP is placed **3.5 KB into the 8 KB way** so it does not share sets with the
+  start of the SPC700 engine. When it sat at +32 KB (same sets), it cost DSP
+  +5K and the SPC700 engine +3.5K cycles/frame.
+- The bus runs on **every** CPU memory access; when it shared the PPU window,
+  **1.7 KB of renderer growth moved it and cost the CPU +67,000 cycles/frame.**
+
+Takeaways:
+- Treat code placement as a variable you control, not noise. A device delta from
+  a change that never touched a function can be that function moving in the
+  I-cache. Pad the windows so builds stay comparable.
+- Align hot functions to the 32-byte cache line; keep the function whose size
+  tracks the work (here `ppu_runLine`) *last* in its window so its growth moves
+  nothing after it.
+- This is the cross-function cousin of §5.1 (register allocation *within* a
+  function) and of section-anchor effects (a static's offset from its anchor
+  turning a 1-instruction indexed load into 2). All three say the same thing:
+  on the M7 the compiler's and linker's incidental choices have first-order
+  cost — measure, and remove the degree of freedom when you can.
+
+### 5.6 Moving data out of the hot pool speeds up what *stays* — measure the phases you didn't change
+
+The 65816's hot working set lives in the RAM_EMU pool. Cart save-RAM and the
+coprocessor / idle-skip buffers (~48 KB) sat there too, even though the CPU
+barely touches them (saves are rare). Moving them to the cached AHB heap did two
+things:
+
+1. **Direct:** the DMA that writes cart SRAM now targets cached SRAM (~-20% DMA
+   on steady frames), and CPU reads of it hit cache.
+2. **Second-order, and bigger here:** the 65816 CPU work that *stayed* in the
+   pool got faster — **Zelda cpu -3.8% against busy -2.6%** — although that code
+   never touches the moved buffers. Handing the pool back to the hot data (and
+   taking the rarely-useful DMA traffic out of it) left more of the cache and bus
+   for the accesses that matter.
+
+The tell is that **the CPU figure moved more than the thing that was
+"optimised."** When you remove data or memory traffic from a hot region, measure
+the phases you did *not* change — the win is often there, not in the moved data.
+(Same pattern on the arcade core: moving a per-pixel flash gather out of a hot
+loop dropped a completely untouched blit ~-25%.) Corollary: scarce fast memory
+(DTCM) spent on data that only *fits* the D-cache buys nothing — spend the move
+on an access pattern the cache can't hold, or on evicting traffic from a hot
+region, not on "it's hot."
+
 ---
 
 ## 6. Tooling quick reference
