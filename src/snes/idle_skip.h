@@ -100,6 +100,17 @@ typedef struct {
   uint8_t  kind;
   uint16_t acc_dest, acc_add;
   uint8_t  acc_w;
+  /* optional WRAM precondition: the native fast-skip engages only while the
+   * value at acc_pre_off (width acc_pre_w, 1 or 2) equals acc_pre_val. Disabled
+   * when acc_pre_w == 0. Used when the loop body calls a subroutine that is idle
+   * only in one state -- e.g. TMNT's per-lap JSL, which falls straight through
+   * to an RTL (no writes, no I/O) iff [$001e2c] == 0, and does real work
+   * otherwise. Re-checked each span; it cannot change mid-span (no NMI, and the
+   * idle path writes nothing). acc_dest/acc_add stay the pure x += y the native
+   * laps apply, so the precondition is what proves those laps are the whole lap. */
+  uint32_t acc_pre_off;
+  uint16_t acc_pre_val;
+  uint8_t  acc_pre_w;
 } IdleSkip;
 
 enum { IDLE_KIND_RECUR = 0, IDLE_KIND_ACCUM = 1 };

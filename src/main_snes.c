@@ -646,6 +646,20 @@ static inline bool idle_boundary_ok(const Snes *s) {
   return true;
 }
 
+/* A boundary check for the accumulator measuring/align lap only: keeps the
+ * interrupt / halt / vIRQ guards, but drops the pc-in-loop-range test, because
+ * an accumulator body may call a subroutine (TMNT's per-lap JSL) that leaves
+ * the [head,head+len] window and returns. The lap is still bounded by `cap`
+ * and only counts once it returns to head, and the WRAM precondition proves the
+ * call is on its idle (no-write, no-I/O) path, so roaming out of range is safe. */
+static inline bool idle_accum_lap_ok(const Snes *s) {
+  const Cpu *cpu = s->cpu;
+  if (cpu->nmiWanted || (cpu->irqWanted && !cpu->i) || cpu->stopped) return false;
+  if (cpu->waiting && !cpu->irqWanted) return false;
+  if (s->vIrqEnabled && s->vPos == s->vTimer) return false;
+  return true;
+}
+
 /* run_dots' consume step, on the Snes fields */
 static inline void idle_consume(Snes *s, int *dots) {
   int step;
@@ -794,6 +808,16 @@ static int SNES_ITCM_IDLE idle_accum_span(Snes *s, int dots) {
   if (cpu->e || cpu->mf || cpu->d) return dots;      /* native laps assume 16-bit binary */
   if (!idle_code_ok(s, g)) { g->head = 0xffff; g->len = 0; g->snap_ok = false; return dots; }
   if (!idle_boundary_ok(s)) return dots;
+  /* WRAM precondition: when the loop body calls a per-lap subroutine that is
+   * idle only in one state, skip natively only while that state holds (it is
+   * constant across a span: no NMI, and the idle path writes nothing). When it
+   * does not hold, the lap is doing real work -- do not skip, run it normally. */
+  if (g->acc_pre_w) {
+    const uint32_t m = 0x1ffffu;
+    uint32_t v = s->ram[g->acc_pre_off & m];
+    if (g->acc_pre_w >= 2) v |= (uint32_t)s->ram[(g->acc_pre_off + 1) & m] << 8;
+    if (v != g->acc_pre_val) return dots;
+  }
   /* L (the lap's exact charge) is measured once by running a full real lap from
    * the head, then cached in g->lap so later spans only align to the head and
    * skip natively -- the same amortisation the recurrence path gets from its
@@ -814,7 +838,7 @@ static int SNES_ITCM_IDLE idle_accum_span(Snes *s, int dots) {
     }
     while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
     if (s->cpuCyclesLeft || dots <= 0) return dots;
-    if (!idle_boundary_ok(s)) return dots;
+    if (!idle_accum_lap_ok(s)) return dots;
     if (cpu->pc == g->head) {
       if (phase == 0) { phase = 1; continue; }        /* now measure one lap */
       if (phase == 1) { g->lap = L; g->snap_ok = true; break; }

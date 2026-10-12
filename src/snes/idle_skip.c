@@ -340,6 +340,9 @@ typedef struct {
   uint8_t  len;             /* bytes head..last byte of the BRA              */
   uint16_t acc_dest, acc_add;
   uint8_t  acc_w;
+  uint32_t pre_off;         /* WRAM precondition (0/pre_w==0 = none): see IdleSkip */
+  uint16_t pre_val;
+  uint8_t  pre_w;
   uint8_t  nguard;
   uint8_t  guard[16];
 } AccumTemplate;
@@ -348,8 +351,26 @@ static const AccumTemplate s_accum_tpl[] = {
   /* Castlevania - Vampire's Kiss (E) / Dracula X. 80:80c4:
    *   A9 00 00 LDA #$0000 / 5B TCD / A5 46 LDA $46 / 65 42 ADC $42 /
    *   85 46 STA $46 / 80 F4 BRA $80C4.  16-bit M (REP #$20 before), DP=0. */
-  { 0x80, 0x80c4, 12, 0x46, 0x42, 2, 12,
+  { 0x80, 0x80c4, 12, 0x46, 0x42, 2, 0, 0, 0, 12,
     { 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x46, 0x65, 0x42, 0x85, 0x46, 0x80, 0xf4 } },
+
+  /* Teenage Mutant Ninja Turtles IV: Turtles in Time. 00:8154, a 16-byte loop
+   * whose body calls a per-lap subroutine before the accumulator:
+   *   22 .. 9d 00 JSL $009dXX / A9 00 00 LDA #$0000 / 5B TCD / A5 94 LDA $94 /
+   *   65 3A ADC $3A / 85 94 STA $94 / 80 F0 BRA $8154.  DP=0 after the TCD.
+   * The JSL (009d16 USA/EU, 009d0b JP) is LDA #$1e00 / TCD / LDX $2c /
+   * BEQ ->RTL: it writes nothing and reads no I/O when [$001e2c]==0, which is
+   * its state throughout the vsync wait (verified over a full gameplay replay:
+   * 100% of laps took the BEQ). The precondition gates the native skip on that,
+   * so a lap is only ever skipped while it really is the pure accumulator.
+   * Three regions share the loop and the accumulator. USA (crc 5940bd99) and
+   * EUR (crc b0a3441e) are byte-identical here (JSL $009d16), so one guard
+   * covers both; JP (crc bdba1b55) differs only in the JSL target ($009d0b,
+   * guard[1]=0x0b) and gets its own guard-verified entry. */
+  { 0x00, 0x8154, 16, 0x94, 0x3a, 2, 0x001e2c, 0, 2, 16,   /* USA 5940bd99 + EUR b0a3441e */
+    { 0x22, 0x16, 0x9d, 0x00, 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x94, 0x65, 0x3a, 0x85, 0x94, 0x80, 0xf0 } },
+  { 0x00, 0x8154, 16, 0x94, 0x3a, 2, 0x001e2c, 0, 2, 16,   /* JPN bdba1b55 */
+    { 0x22, 0x0b, 0x9d, 0x00, 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x94, 0x65, 0x3a, 0x85, 0x94, 0x80, 0xf0 } },
 };
 
 bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
@@ -379,6 +400,9 @@ bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
     out->acc_dest = tp->acc_dest;
     out->acc_add  = tp->acc_add;
     out->acc_w    = tp->acc_w;
+    out->acc_pre_off = tp->pre_off;
+    out->acc_pre_val = tp->pre_val;
+    out->acc_pre_w   = tp->pre_w;
     out->snap_ok  = false;
     return true;
   }
