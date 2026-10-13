@@ -233,7 +233,7 @@ void snes_reset(Snes* snes, bool hard) {
   snes->frames = 0;
   snes->cpuCyclesLeft = 52; // 5 reads (8) + 2 IntOp (6)
   snes->cpuMemOps = 0;
-  snes->apuCatchupCycles = 0.0;
+  snes->apuCycleAcc = 0;
   snes->apuDotsAccum = 0;
   snes->hIrqEnabled = false;
   snes->vIrqEnabled = false;
@@ -441,9 +441,13 @@ void snes_run_line(Snes *snes) {
 
 #define IS_ADR(x) (x == 0xfffff)
 
-/* NTSC: (32040*32)/(1364*262*60). PAL: same APU clock over 312 lines at 50 Hz. */
-#define APU_CYCLES_PER_MASTER_NTSC ((32040.0 * 32.0) / (1364.0 * 262.0 * 60.0))
-#define APU_CYCLES_PER_MASTER_PAL  ((32040.0 * 32.0) / (1364.0 * 312.0 * 50.0))
+/* APU cycles per master dot. NTSC: (32040*32)/(1364*262*60), PAL: over 312
+ * lines at 50 Hz. Both reduce to exact fractions -- NTSC 2136/44671, PAL
+ * 1068/22165 -- pre-scaled here to a Q32 fixed-point multiplier so the catch-up
+ * can accumulate in integers. */
+#define APU_CYC_SHIFT 32
+#define APU_CYC_MUL_NTSC ((((uint64_t)2136u << APU_CYC_SHIFT) + 44671u / 2) / 44671u)
+#define APU_CYC_MUL_PAL  ((((uint64_t)1068u << APU_CYC_SHIFT) + 22165u / 2) / 22165u)
 
 void snes_set_region(Snes *snes, bool pal) {
   snes->pal = pal;
@@ -452,26 +456,29 @@ void snes_set_region(Snes *snes, bool pal) {
     snes->apu->dsp->frameSamples = pal ? DSP_SAMPLES_PAL : DSP_SAMPLES_NTSC;
 }
 
+/* Integer accumulation is associative, so the APU cycles run depend only on the
+ * cumulative dot count, not on how the dots were split across catch-ups. The
+ * old double accumulator did not have this property: x86 (host) and ARM (device
+ * Thumb-2) round the double differently, so the same inputs could land on
+ * opposite sides of the (int) truncation -- host and device then emulated
+ * divergent state, and neither could be used to debug the other. apuCycleAcc
+ * holds owed APU cycles in Q32 fixed point, identical on every platform. */
 void snes_catchupApu(Snes* snes) {
   if (snes->apu == NULL)
     return;
-  /* Flush accumulated integer dots to double. By distributivity this is
-   * mathematically identical to per-dot accumulation; the <1 ULP rounding
-   * difference is far below the integer truncation below. snes_run_line (sm
-   * core) still accumulates apuCatchupCycles directly — its apuDotsAccum is
-   * always 0, so this is a no-op for sm. */
   if (snes->apuDotsAccum) {
-    double ratio = snes->pal ? APU_CYCLES_PER_MASTER_PAL : APU_CYCLES_PER_MASTER_NTSC;
-    snes->apuCatchupCycles += (double)snes->apuDotsAccum * ratio;
+    uint64_t mul = snes->pal ? APU_CYC_MUL_PAL : APU_CYC_MUL_NTSC;
+    snes->apuCycleAcc += (uint64_t)snes->apuDotsAccum * mul;
     snes->apuDotsAccum = 0;
   }
-  if (snes->apuCatchupCycles > 10000)
-    snes->apuCatchupCycles = 10000;
-
-  int catchupCycles = (int) snes->apuCatchupCycles;
-
+  int catchupCycles = (int)(snes->apuCycleAcc >> APU_CYC_SHIFT);
+  if (catchupCycles > 10000) {            /* runaway guard: run 10000, drop the rest */
+    catchupCycles = 10000;
+    snes->apuCycleAcc = 0;
+  } else {
+    snes->apuCycleAcc -= (uint64_t)catchupCycles << APU_CYC_SHIFT;   /* keep the fraction */
+  }
   apu_run(snes->apu, catchupCycles);
-  snes->apuCatchupCycles -= (double) catchupCycles;
 }
 
 uint8_t snes_readBBus(Snes* snes, uint8_t adr) {
