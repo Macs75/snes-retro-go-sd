@@ -3892,6 +3892,20 @@ static void PpuUpdateCgramEntries(Ppu *ppu, bool math_too) {
 
 #endif
 
+/* Does any main-screen pixel on this line sit on a colour-math-enabled layer?
+ * If not, the blend never reads the sub-screen, so it need not be built. Scans
+ * the just-rendered main z-buffer (layer = bits 8-11) against the math mask and
+ * early-exits on the first hit -- so a full-screen-math line pays ~one iteration
+ * and always builds, while a line whose only sprites are non-math palettes
+ * (layer 6, exempt) scans out and skips. NOINLINE so the scan's registers do not
+ * perturb the big inlined PpuDrawWholeLine/ppu_runLine. */
+static NOINLINE bool PpuLineReadsSubscreen(const PpuZbufType *mrow, uint32 math_enabled) {
+  for (uint x = 0; x < kPpuXPixels; x++)
+    if ((math_enabled >> ((mrow[x] >> 8) & 0xf)) & 1u)
+      return true;
+  return false;
+}
+
 PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
   SNES_PERF_PPU_BEGIN(perf_p);
   SNES_PERF_COUNT(snes_perf_ppu_drawn);
@@ -4061,7 +4075,18 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
 #else
     PPU_BUF_MARK(1);
 #endif
-    if (ppu->screenEnabled[1] != 0) {
+    /* The sub-screen is read by the blend only where a main pixel is on a
+     * colour-math-enabled layer. If no such pixel exists this line, nothing
+     * reads the sub-screen, so skip building it -- ClearBackdrop above left
+     * bgBuffers[1] a valid empty buffer, so the composite is byte-identical.
+     * Generic over any mask: PpuLineReadsSubscreen early-exits on the first
+     * math pixel, so a full-screen-math line always builds (unchanged) and
+     * only sparse-math lines skip (e.g. Batman, whose visible sprites are
+     * non-math palettes, layer 6). Supersedes the earlier !lineHasSprites
+     * gate: that only caught sprite-free lines, this also catches lines whose
+     * sprites never reach a math-enabled main pixel. */
+    if (ppu->screenEnabled[1] != 0 &&
+        PpuLineReadsSubscreen(ppu->bgBuffers[0].data, math_enabled)) {
 #if SNES_RENDER_CENSUS
       g_sub_lines++;
 #endif
