@@ -333,13 +333,17 @@ static bool site_has(const IdleSkip *g, uint8_t bank, uint16_t pc) {
  * by bank + head + the exact loop bytes (the guard), so it can only ever fire
  * on the one ROM that contains that code -- a different game, revision or hack
  * will not have these bytes at this address. acc_dest/acc_add are the WRAM byte
- * offsets the loop reads/writes (its TCD forces DP = 0), w the width in bytes. */
+ * offsets the loop reads/writes, w the width in bytes. The offsets assume
+ * DP == dp: most loops hold an in-loop TCD that forces DP = 0, but a loop that
+ * does not (its DP is ambient) is only safe while DP is what the offsets were
+ * taken at, so the skip is gated on cpu->dp == dp and re-checked every frame. */
 typedef struct {
   uint8_t  bank;
   uint16_t head;
   uint8_t  len;             /* bytes head..last byte of the BRA              */
   uint16_t acc_dest, acc_add;
   uint8_t  acc_w;
+  uint16_t dp;              /* DP the acc_dest/acc_add offsets were taken at  */
   uint32_t pre_off;         /* WRAM precondition (0/pre_w==0 = none): see IdleSkip */
   uint16_t pre_val;
   uint8_t  pre_w;
@@ -351,7 +355,7 @@ static const AccumTemplate s_accum_tpl[] = {
   /* Castlevania - Vampire's Kiss (E) / Dracula X. 80:80c4:
    *   A9 00 00 LDA #$0000 / 5B TCD / A5 46 LDA $46 / 65 42 ADC $42 /
    *   85 46 STA $46 / 80 F4 BRA $80C4.  16-bit M (REP #$20 before), DP=0. */
-  { 0x80, 0x80c4, 12, 0x46, 0x42, 2, 0, 0, 0, 12,
+  { 0x80, 0x80c4, 12, 0x46, 0x42, 2, 0, 0, 0, 0, 12,
     { 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x46, 0x65, 0x42, 0x85, 0x46, 0x80, 0xf4 } },
 
   /* Teenage Mutant Ninja Turtles IV: Turtles in Time. 00:8154, a 16-byte loop
@@ -367,10 +371,19 @@ static const AccumTemplate s_accum_tpl[] = {
    * EUR (crc b0a3441e) are byte-identical here (JSL $009d16), so one guard
    * covers both; JP (crc bdba1b55) differs only in the JSL target ($009d0b,
    * guard[1]=0x0b) and gets its own guard-verified entry. */
-  { 0x00, 0x8154, 16, 0x94, 0x3a, 2, 0x001e2c, 0, 2, 16,   /* USA 5940bd99 + EUR b0a3441e */
+  { 0x00, 0x8154, 16, 0x94, 0x3a, 2, 0, 0x001e2c, 0, 2, 16,   /* USA 5940bd99 + EUR b0a3441e */
     { 0x22, 0x16, 0x9d, 0x00, 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x94, 0x65, 0x3a, 0x85, 0x94, 0x80, 0xf0 } },
-  { 0x00, 0x8154, 16, 0x94, 0x3a, 2, 0x001e2c, 0, 2, 16,   /* JPN bdba1b55 */
+  { 0x00, 0x8154, 16, 0x94, 0x3a, 2, 0, 0x001e2c, 0, 2, 16,   /* JPN bdba1b55 */
     { 0x22, 0x0b, 0x9d, 0x00, 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x94, 0x65, 0x3a, 0x85, 0x94, 0x80, 0xf0 } },
+
+  /* The Adventures of Batman & Robin (USA, crc b3ef81f5). 80:80ed, an 8-byte
+   * bare accumulator with no setup in the loop:
+   *   A5 88 LDA $88 / 65 3A ADC $3A / 85 88 STA $88 / 80 F8 BRA $80ED.
+   * 16-bit M (traced mf=0), binary, native. Unlike Dracula/TMNT there is no
+   * in-loop TCD, so DP is ambient 0 here, not forced: the dp=0 gate keeps the
+   * skip to the context the $88/$3a offsets were taken at. No precondition. */
+  { 0x80, 0x80ed, 8, 0x88, 0x3a, 2, 0, 0, 0, 0, 8,
+    { 0xa5, 0x88, 0x65, 0x3a, 0x85, 0x88, 0x80, 0xf8 } },
 };
 
 bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
@@ -389,6 +402,7 @@ bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
      * binary (not decimal) add. Checked again before each skip. */
     Cpu *cpu = s->cpu;
     if (cpu->e || cpu->mf || cpu->d) continue;
+    if (cpu->dp != tp->dp) continue;                             /* offsets assume this DP */
     site_clear(out);
     out->kind    = IDLE_KIND_ACCUM;
     out->head    = tp->head;
@@ -396,7 +410,7 @@ bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
     out->bank    = tp->bank;
     out->bank_alt = mirror_bank(tp->bank);
     out->e = cpu->e; out->mf = cpu->mf; out->xf = cpu->xf;
-    out->uses_db = false; out->uses_dp = false;
+    out->uses_db = false; out->uses_dp = true; out->dp = tp->dp;  /* re-check DP each frame */
     out->acc_dest = tp->acc_dest;
     out->acc_add  = tp->acc_add;
     out->acc_w    = tp->acc_w;
