@@ -136,6 +136,47 @@ FF6 intro stayed flat (~1128 → 1131) — its path is untouched. See §5.1 for 
 the same mechanism went from a 2.3× *regression* to a −53% *win* purely on the
 inline/noinline choice. This is the commit this doc was written for.
 
+### 4.4 PPU sub-screen compositing skip — committed `97f6566`
+
+When colour math is active the renderer builds a second ("sub") screen every
+line and the blend reads it — but **only** where a main-screen pixel sits on a
+colour-math-enabled layer. On a line with no such pixel the whole sub-screen
+build is unobservable. Gate it: scan the just-drawn main z-buffer
+(`PpuLineReadsSubscreen`, layer = bits 8–11) against the math mask and skip the
+build when nothing matches. `ClearBackdrop` has already left the sub buffer a
+valid empty buffer, so those lines take the composite's no-math fast path and the
+output is bit-identical.
+
+Self-gating and generic: the scan runs only when colour math is already active
+(the lines that would build the sub anyway) and early-exits on the first match —
+so a plain scene never runs it, a full-screen-translucency scene pays ~one
+iteration, and only a sparse-coverage scene pays the full scan, which is exactly
+the scene that then skips the whole build.
+
+| scene | sub-screen usage | PPU/frame | result |
+| --- | --- | --- | --- |
+| Batman & Robin (heavy) | built, never read (OBJ-only math, sprites are non-math palettes) | 2.05M → **1.39M** | **−32 %**; replay late 37.4 % → 32.5 % |
+| TMNT IV | partly read | 1.13M → 1.11M | −2 % |
+| Super Punch-Out | genuinely read (600K spikes) | 1.89M → 1.89M | neutral |
+| Zelda (rain) | read in the effect | ~1.05M | neutral |
+
+The win was **found by measurement, not guessed** (§5.7). The first cut skipped
+only sprite-free lines (`!lineHasSprites`); a throwaway ceiling probe then showed
+the sub-screen was ~100 % *unread even on the sprite lines*, because Batman's
+visible sprites are non-math palettes (layer 6, exempt). So the correct gate is
+"is any main pixel on a math-enabled layer?", which removes almost the entire
+build — not the x-range clipping of the tile renderers that was originally
+planned (more code, more risk, smaller win). Output bit-identical across Batman,
+TMNT, Castlevania and Zelda.
+
+Footnote to §5.1: the scan lives in a helper tagged `NOINLINE`, but that macro is
+a gcc no-op here so it inlined anyway (+32 bytes in `ppu_runLine`). Harmless
+*this* time — the scan carries no loop-carried per-pixel state, so it added a
+self-contained loop without reshuffling the hot pixel loops; the disasm diff
+confirmed those stayed byte-identical. The §5.1 blow-up only happens when the
+inlined code carries *loop-carried* state that competes for the hot loop's
+registers.
+
 ---
 
 ## 5. Cross-cutting lessons
@@ -279,6 +320,29 @@ loop dropped a completely untouched blit ~-25%.) Corollary: scarce fast memory
 on an access pattern the cache can't hold, or on evicting traffic from a hot
 region, not on "it's hot."
 
+### 5.7 Size the wasted-work ceiling first — the measurement can hand you a better change
+
+Before touching the (very regression-prone) sub-screen renderer for §4.4, a
+throwaway host probe measured how much of each built sub-screen line the blend
+actually *reads*. The answer reframed the task: the sub-screen was ~100% unread
+on the exact lines we were about to clip, so the right move was not "render less
+of the sub" (thread an x-range through two shared tile renderers — more code,
+more risk) but "don't build it at all on those lines" (a one-line gate). Cheaper,
+safer, bigger win.
+
+- **Measure the ceiling before you build.** "How much of this work is provably
+  unobservable?" is a cheap host probe, and it both justifies the effort and
+  often points at a simpler mechanism than the one you set out to write. The
+  first `!lineHasSprites` gate was a guess that caught a third of the waste; the
+  probe showed the real figure was ~all of it, and a different predicate.
+- **Diff the codegen before the device, every time.** Build the same `.o` both
+  ways with the Docker toolchain, disassemble, normalise out addresses and branch
+  targets (they shift when the function changes size), and diff the mnemonic
+  stream — confirm the hot loops are byte-identical and only the intended gate
+  moved, *before* spending a device round-trip. This is what proved §4.4's scan
+  didn't perturb the pixel loops, the same lens that caught §5.1's spill blow-up.
+  See §6 for the one-liner.
+
 ---
 
 ## 6. Tooling quick reference
@@ -298,9 +362,17 @@ docker run --rm -u $(id -u):$(id -g) -v "$PWD:/opt/workdir" -w /opt/workdir \
   sylverb/retro-go-sd-builder:v1.5 make -j$(nproc) PROFLITE=1
 # -> sdpush snes.bin /cores/snes.bin ; replay on device ; sum the `late=` frames
 
-# Disassembly diff of one object (prove a codegen claim). Build the SAME .o
-# with the Docker toolchain for both sides, then:
-arm-none-eabi-objdump -d --no-show-raw-insn build/core/ppu.o
+# Disassembly diff of one object (prove a codegen claim, e.g. "the hot loop is
+# unchanged"). Build the SAME .o with the Docker toolchain for both sides, then
+# diff one function's mnemonic stream with addresses/branch targets normalised
+# out (they shift whenever the function changes size, else every line "differs"):
+norm() { arm-none-eabi-objdump -d --no-show-raw-insn "$1" |
+  awk "/<$2>:/{p=1} p{print} p&&/^\$/{exit}" |
+  sed -E 's/^ *[0-9a-f]+:\t//; s/;.*$//; s/0x[0-9a-f]+//g; s/<[^>]*>//g'; }
+diff <(norm before/ppu.o ppu_runLine) <(norm after/ppu.o ppu_runLine)
+# What's left after normalising is real: added/removed instructions, register
+# reallocation, spills (new str/ldr [sp,...] inside the loop). Benign: operand-
+# order swaps on commutative ops, literal-pool offset shifts.
 ```
 
 PROFLITE (`PROFLITE=1`) is the cheap "how does it fare" build: per-frame skip +

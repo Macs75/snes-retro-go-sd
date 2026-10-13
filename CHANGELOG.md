@@ -1,5 +1,56 @@
 # Changelog
 
+## [v0.0.7]
+
+A targeted follow-up: a generic sub-screen compositing skip that cuts
+colour-math-heavy scenes, a platform-invariant APU catch-up so host and device
+replays stay bit-for-bit identical, one more idle-skip template, and two
+record/replay and host-input fixes.
+
+### Performance
+
+- **PPU sub-screen skip.** The sub-screen is composited every line while colour
+  math is on, but the blend reads it only where a main-screen pixel sits on a
+  colour-math-enabled layer. A per-line scan of the main z-buffer
+  (`PpuLineReadsSubscreen`) skips building the sub-screen when no such pixel
+  exists — `ClearBackdrop` has already left it a valid empty buffer, so those
+  lines take the no-math fast composite and the output is byte-identical. The
+  scan is gated behind active colour math and early-exits on the first match, so
+  a plain scene never runs it and a full-screen-translucency scene pays about one
+  iteration. The Adventures of Batman & Robin enables OBJ-only colour math but
+  its visible sprites are non-math palettes, so the sub-screen is built and never
+  read: sub build ~855K -> ~0 cycles/frame, the blend span goes with it, PPU
+  total 2.05M -> 1.39M (-32%), the heavy frame off the budget ceiling (96% ->
+  79%). Neutral where the sub-screen is genuinely read — Super Punch-Out's 600K
+  spikes and Zelda's rain are unchanged. Device-verified; output byte-identical
+  across Batman, TMNT, Castlevania and Zelda.
+
+### Added
+
+- **The Adventures of Batman & Robin idle-skip template.** An 80:80ed bare
+  accumulator. Unlike the earlier templates it has no in-loop TCD, so the direct
+  page is ambient rather than forced; a new per-template DP-guard field gates the
+  skip on `cpu->dp` (re-checked each frame) so its WRAM offsets apply only in the
+  context they were measured in.
+
+### Changed
+
+- **Deterministic APU catch-up.** The owed-APU-cycle accumulation in
+  `snes_catchupApu` moved from a `double` — which x86 (host) and ARM (device
+  Thumb-2) rounded differently, occasionally tipping the truncation by one cycle
+  and desyncing the SPC700 between the two — to an integer Q32 fixed-point
+  accumulator with an exact rational cycles-per-master-dot (NTSC 2136/44671, PAL
+  1068/22165). Byte-identical rate, platform-invariant: host and device replays
+  now match bit-for-bit, which every A/B in this project depends on. Same struct
+  size, so the savestate layout is unchanged.
+- Host save-state keys are now **F2 (save) / F4 (load)**.
+
+### Fixed
+
+- A failed or invalid state load (wrong state version, truncated file) no longer
+  kills an in-progress record/replay: record/replay is closed only after the
+  loaded state passes validation, so a bad load leaves the replay running.
+
 ## [v0.0.6]
 
 The performance release. A generic idle-loop skip, a page-mapped 65816 bus, a
