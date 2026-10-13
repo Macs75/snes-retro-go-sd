@@ -245,13 +245,13 @@ int host_poll_events(void)
     }
     if (host_pad.want_save) {
         bool ok = odroid_system_emu_save_state(host_default_slot);
-        printf("host: F1 save slot %d → %s\n", host_default_slot, ok ? "ok" : "failed");
+        printf("host: F2 save slot %d → %s\n", host_default_slot, ok ? "ok" : "failed");
         if (host_sram_save_cb)
             host_sram_save_cb();
     }
     if (host_pad.want_load) {
         bool ok = odroid_system_emu_load_state(host_default_slot);
-        printf("host: F2 load slot %d → %s\n", host_default_slot, ok ? "ok" : "failed");
+        printf("host: F4 load slot %d → %s\n", host_default_slot, ok ? "ok" : "failed");
     }
     if (host_pad.want_reset) {
         extern void snes_console_reset(void);

@@ -157,9 +157,9 @@ int host_platform_poll(host_pad_t *pad)
             if (sc == SDL_SCANCODE_ESCAPE)
                 return 0;
             if (down && pad) {
-                if (sc == SDL_SCANCODE_F1)
+                if (sc == SDL_SCANCODE_F2)
                     pad->want_save = 1;
-                else if (sc == SDL_SCANCODE_F2)
+                else if (sc == SDL_SCANCODE_F4)
                     pad->want_load = 1;
                 else if (sc == SDL_SCANCODE_F5 || sc == SDL_SCANCODE_R)
                     pad->want_reset = 1;
@@ -177,9 +177,9 @@ int host_platform_poll(host_pad_t *pad)
             if (sc == SDL_SCANCODE_ESCAPE)
                 return 0;
             if (down && pad) {
-                if (sc == SDL_SCANCODE_F1)
+                if (sc == SDL_SCANCODE_F2)
                     pad->want_save = 1;
-                else if (sc == SDL_SCANCODE_F2)
+                else if (sc == SDL_SCANCODE_F4)
                     pad->want_load = 1;
                 else if (sc == SDL_SCANCODE_F5 || sc == SDL_SCANCODE_R)
                     pad->want_reset = 1;
