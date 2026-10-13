@@ -1755,7 +1755,6 @@ static bool snes_SaveState(const char *pathName) {
 }
 
 static bool snes_LoadState(const char *pathName) {
-  rec_close();   /* a loaded state is not the recording's machine any more */
   FILE *f = fopen(pathName, "rb");
   if (!f) return false;
   snes_state_header_t h;
@@ -1783,6 +1782,10 @@ static bool snes_LoadState(const char *pathName) {
     fclose(f);
     return false;
   }
+  /* Validation passed: now commit. A loaded state is not the recording's
+   * machine any more, so stop record/replay here -- only once we know the file
+   * is good, so a bad/failed load never kills an in-progress replay. */
+  rec_close();
   fseek(f, sizeof(h), SEEK_SET);
   state_file = f; state_bytes = 0;
   state_stream(&state_read);
