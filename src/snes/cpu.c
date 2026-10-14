@@ -1032,14 +1032,15 @@ restart:
          * Soul Blazer uses BRK as a real software interrupt — skip the
          * signature, push PBR/PC/P, take $00:FFE6. Same shape as COP. */
         cpu_readOpcode(cpu);
-        cpu_pushByte(cpu, cpu->k);
+        if (!cpu->e) cpu_pushByte(cpu, cpu->k);
         cpu_pushWord(cpu, cpu->pc);
         cpu_pushByte(cpu, cpu_getFlags(cpu));
-        cpu->cyclesUsed++;
+        if (!cpu->e) cpu->cyclesUsed++;
         cpu->i = true;
         cpu->d = false;
         cpu->k = 0;
-        cpu->pc = cpu_readWord(cpu, 0xffe6, 0xffe7);
+        cpu->pc = cpu->e ? cpu_readWord(cpu, 0xfffe, 0xffff)
+                         : cpu_readWord(cpu, 0xffe6, 0xffe7);
         break;
 #else
         break;
@@ -1073,14 +1074,15 @@ restart:
     }
     case 0x02: { // cop imm(s)
       cpu_readOpcode(cpu);
-      cpu_pushByte(cpu, cpu->k);
+      if (!cpu->e) cpu_pushByte(cpu, cpu->k);
       cpu_pushWord(cpu, cpu->pc);
       cpu_pushByte(cpu, cpu_getFlags(cpu));
-      cpu->cyclesUsed++; // native mode: 1 extra cycle
+      if (!cpu->e) cpu->cyclesUsed++; // native mode: 1 extra cycle
       cpu->i = true;
       cpu->d = false;
       cpu->k = 0;
-      cpu->pc = cpu_readWord(cpu, 0xffe4, 0xffe5);
+      cpu->pc = cpu->e ? cpu_readWord(cpu, 0xfff4, 0xfff5)
+                       : cpu_readWord(cpu, 0xffe4, 0xffe5);
       break;
     }
     case 0x03: { // ora sr
@@ -1228,7 +1230,7 @@ restart:
       break;
     }
     case 0x1b: { // tcs imp
-      cpu->sp = cpu->a;
+      cpu->sp = cpu->e ? ((cpu->a & 0xff) | 0x100) : cpu->a;
       break;
     }
     case 0x1c: { // trb abs
@@ -2046,7 +2048,7 @@ restart:
       break;
     }
     case 0x9a: { // txs imp
-      cpu->sp = cpu->x;
+      cpu->sp = cpu->e ? ((cpu->x & 0xff) | 0x100) : cpu->x;
       break;
     }
     case 0x9b: { // txy imp

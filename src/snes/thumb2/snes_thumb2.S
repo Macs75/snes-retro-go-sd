@@ -1414,17 +1414,27 @@ snes_thumb2_run:
 .L_notea:
 
         @ --- transfers with no width masking, no ZN (TXS, TCS) ---
-        cmp     r1, #0x9a               @ TXS: sp = x  (no ZN)
+        cmp     r1, #0x9a               @ TXS: sp = e ? (x&0xff)|0x100 : x
         bne     .L_not9a
 .Lop9a:
         ldrh    r2, [r4, #CPU_X]
+        ldrb    r3, [r4, #CPU_E]
+        cbz     r3, .Lop9a_store
+        and     r2, r2, #0xff
+        orr     r2, r2, #0x100
+.Lop9a_store:
         strh    r2, [r4, #CPU_SP]
         b       .L_handled
 .L_not9a:
-        cmp     r1, #0x1b               @ TCS: sp = a  (no ZN, no e-mask here)
+        cmp     r1, #0x1b               @ TCS: sp = e ? (a&0xff)|0x100 : a
         bne     .L_not1b
 .Lop1b:
         ldrh    r2, [r4, #CPU_A]
+        ldrb    r3, [r4, #CPU_E]
+        cbz     r3, .Lop1b_store
+        and     r2, r2, #0xff
+        orr     r2, r2, #0x100
+.Lop1b_store:
         strh    r2, [r4, #CPU_SP]
         b       .L_handled
 .L_not1b:
@@ -8082,14 +8092,18 @@ snes_thumb2_run:
 @ 0x00 entry; BRK is deliberately left in C, it can jump to an arbitrary
 @ OTHER opcode's case body at runtime via goto restart, which a fixed
 @ native handler cannot safely replicate).
-@ COP (cpu.c:924-934): consume signature byte (RAW, discarded -- cpu_readOpcode),
-@ push k, push pc (post-signature, NOT pc-1), push flags (PHP's pack, .Lop08),
-@ +1 cycle, i=1, d=0, k=0, pc = HOOKED word at bank-0 0xffe4/0xffe5
+@ COP (cpu.c:0x02): consume signature byte (RAW, discarded -- cpu_readOpcode),
+@ push k (NATIVE only -- e-mode skips the PBR push), push pc (post-signature,
+@ NOT pc-1), push flags (PHP's pack, .Lop08), +1 cycle (NATIVE only), i=1, d=0,
+@ k=0, pc = HOOKED word at bank-0 0xffe4/0xffe5 native, 0xfff4/0xfff5 emulation
 @ (cpu_readWord -> cpu_read, hooked -- matches JMP-ind's bank-0 pattern). ---
 .Lop02:
         IMM_FETCH_BYTE                  @ r0 = signature byte, discarded; pc++ (raw)
+        ldrb    r3, [r4, #CPU_E]
+        cbnz    r3, .Lop02_pushpc       @ e-mode: skip PBR (k) push
         ldrb    r2, [r4, #CPU_K]
-        PUSH_BYTE                       @ push(k)
+        PUSH_BYTE                       @ push(k)  (native only)
+.Lop02_pushpc:
         ldrh    r6, [r4, #CPU_PC]       @ pc (post-signature; no -1)
         PUSH_WORD                       @ push(pc)
         @ --- pack flags (verbatim PHP, .Lop08) ---
@@ -8116,20 +8130,29 @@ snes_thumb2_run:
         ldrb    r1, [r4, #CPU_C]
         orr     r2, r1
         PUSH_BYTE                       @ push(getFlags())
+        ldrb    r3, [r4, #CPU_E]
+        cbnz    r3, .Lop02_noextra      @ e-mode: no extra (PBR push) cycle
         ldrb    r0, [r4, #CPU_CYCLESUSED]
         adds    r0, r0, #1              @ native mode: 1 extra cycle
         strb    r0, [r4, #CPU_CYCLESUSED]
+.Lop02_noextra:
         movs    r0, #1
         strb    r0, [r4, #CPU_I]        @ i = true
         movs    r0, #0
         strb    r0, [r4, #CPU_D]        @ d = false
         strb    r0, [r4, #CPU_K]        @ k = 0
+        @ vector: native 0xffe4/0xffe5, emulation 0xfff4/0xfff5
+        ldrb    r3, [r4, #CPU_E]
+        movw    r6, #0xffe4
+        cbz     r3, .Lop02_vec
+        movw    r6, #0xfff4
+.Lop02_vec:
         mov     r0, r4
-        movw    r1, #0xffe4
+        mov     r1, r6
         bl      cpu_thumb2_read         @ r0 = vector low byte (HOOKED, bank 0)
         push    {r0}
         mov     r0, r4
-        movw    r1, #0xffe5
+        adds    r1, r6, #1
         bl      cpu_thumb2_read         @ r0 = vector high byte
         lsl     r0, r0, #8
         pop     {r1}
