@@ -4750,7 +4750,7 @@ uint32_t g_sprite_slivers, g_sprite_lines, g_sprite_over32, g_sprite_over34;
 static bool ppu_evaluateSprites(Ppu* ppu, int line) {
   // TODO: iterate over oam normally to determine in-range sprites,
   //   then iterate those in-range sprites in reverse for tile-fetching
-  // TODO: rectangular sprites, wierdness with sprites at -256
+  // TODO: rectangular sprites
   if (!ppu->objCacheValid)
     ppu_rebuildSpriteLineCache(ppu);
   const uint32_t *cand = ppu->objLineCand[line];
@@ -4783,8 +4783,10 @@ static bool ppu_evaluateSprites(Ppu* ppu, int line) {
           int x = ppu->oam[index] & 0xff;
           x |= ((ppu->highOam[index >> 3] >> (index & 7)) & 1) << 8;
           if(x > 255) x -= 512;
-          // if in x-range
-          if(x > -spriteSize) {
+          // if in x-range (x == -256 is a hardware quirk: still on-screen
+          // despite being more negative than any -spriteSize -- Power Rangers
+          // The Movie parks sprites there; dinkc64 80e1980)
+          if(x > -spriteSize || x == -256) {
             // break if we found 32 sprites already
             spritesFound++;
             if(spritesFound > 32) {
