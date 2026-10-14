@@ -246,7 +246,7 @@ void snes_reset(Snes* snes, bool hard) {
   memset(snes->portAutoReadX, 0, sizeof(snes->portAutoReadX));
   snes->autoJoyRead = false;
   snes->autoJoyTimer = 0;
-  snes->ppuLatch = false;
+  snes->ppuLatch = true; // $4201 powers up as 0xff: the IO line idles high (dinkc64 70b26c3)
   snes->multiplyA = 0xff;
   snes->multiplyResult = 0xfe01;
   snes->divideA = 0xffff;
