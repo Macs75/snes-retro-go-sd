@@ -341,8 +341,12 @@ static uint8_t cart_readLorom(Cart* cart, uint8_t bank, uint16_t adr) {
     uint32_t full = ((uint32_t)bank << 16) | adr;
     return sdd1_read(cart->sdd1, full, cart->rom, cart->romSize);
   }
-  if(((bank >= 0x70 && bank < 0x7e) || bank >= 0xf0) && adr < 0x8000 && cart->ramSize > 0) {
-    // banks 70-7e and f0-ff, adr 0000-7fff
+  if(((bank >= 0x70 && bank < 0x7e) || bank >= 0xf0) &&
+     ((cart->romSize >= 0x200000 && adr < 0x8000) || cart->romSize < 0x200000) &&
+     cart->ramSize > 0) {
+    // banks 70-7d and f0-ff: adr 0000-7fff for rom >= 2MB, else full 0000-ffff
+    // (small LoROM carts mirror SRAM across the whole bank -- dinkc64 e9e1139,
+    // fixes PGA Tour)
     return cart->ram[(((bank & 0xf) << 15) | adr) & (cart->ramSize - 1)];
   }
   bank &= 0x7f;
@@ -373,8 +377,12 @@ static uint8_t cart_readLorom(Cart* cart, uint8_t bank, uint16_t adr) {
 }
 
 static void cart_writeLorom(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val) {
-  if(((bank >= 0x70 && bank < 0x7e) || bank >= 0xf0) && adr < 0x8000 && cart->ramSize > 0) {
-    // banks 70-7e and f0-ff, adr 0000-7fff
+  if(((bank >= 0x70 && bank < 0x7e) || bank >= 0xf0) &&
+     ((cart->romSize >= 0x200000 && adr < 0x8000) || cart->romSize < 0x200000) &&
+     cart->ramSize > 0) {
+    // banks 70-7d and f0-ff: adr 0000-7fff for rom >= 2MB, else full 0000-ffff
+    // (small LoROM carts mirror SRAM across the whole bank -- dinkc64 e9e1139,
+    // fixes PGA Tour)
     cart->ram[(((bank & 0xf) << 15) | adr) & (cart->ramSize - 1)] = val;
     return;
   }
