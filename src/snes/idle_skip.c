@@ -384,6 +384,17 @@ static const AccumTemplate s_accum_tpl[] = {
    * skip to the context the $88/$3a offsets were taken at. No precondition. */
   { 0x80, 0x80ed, 8, 0x88, 0x3a, 2, 0, 0, 0, 0, 8,
     { 0xa5, 0x88, 0x65, 0x3a, 0x85, 0x88, 0x80, 0xf8 } },
+
+  /* International Superstar Soccer Deluxe (USA crc 0a20e602, EUR crc cba724ba --
+   * byte-identical here). 80:80d4, the Dracula-shape accumulator with an in-loop
+   * TCD that forces DP=0:
+   *   A9 00 00 LDA #$0000 / 5B TCD / A5 78 LDA $78 / 65 3A ADC $3A /
+   *   85 78 STA $78 / 80 F4 BRA $80D4.  16-bit M, native, DP=0.
+   * The guard runs 4 bytes past the BRA (C2 30 48 DA) because plain ISS (non-
+   * Deluxe) has the same 12 loop bytes at a different head ($80ef); head plus
+   * these bytes pin this to ISS Deluxe. */
+  { 0x80, 0x80d4, 12, 0x78, 0x3a, 2, 0, 0, 0, 0, 16,
+    { 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x78, 0x65, 0x3a, 0x85, 0x78, 0x80, 0xf4, 0xc2, 0x30, 0x48, 0xda } },
 };
 
 bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
