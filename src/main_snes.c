@@ -1231,6 +1231,10 @@ static uint16_t read_snes_pad(odroid_gamepad_state_t *joy) {
     if (phys_select) s |= 1u << 1; /* Y */
     if (phys_start) s |= 1u << 9;  /* X */
   }
+#if defined(HOST_BUILD) && !defined(QEMU_BUILD)
+  /* SDL host convenience: direct keys for the chorded buttons (Ctrl=Select, Q=L, W=R) */
+  { extern uint16_t host_extra_snes_bits(void); s |= host_extra_snes_bits(); }
+#endif
   return s;
 }
 

@@ -18,6 +18,7 @@ typedef struct {
 int host_platform_init(const char *title, int scale);
 void host_platform_shutdown(void);
 int host_platform_poll(host_pad_t *pad); /* 0 = quit requested */
+uint16_t host_extra_snes_bits(void);     /* host-only direct keys: Ctrl=Select, Q=L, W=R */
 void host_platform_present_rgb565(const uint16_t *fb, int width, int height);
 void host_platform_delay_ms(uint32_t ms);
 uint32_t host_platform_ticks_ms(void);

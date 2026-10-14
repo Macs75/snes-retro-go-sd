@@ -115,6 +115,24 @@ static void set_key(host_pad_t *pad, int key, int down)
         pad->values[key] = down ? 1 : 0;
 }
 
+/* Host-only direct SNES keys that bypass the G&W chord mapping of
+ * read_snes_pad: Left/Right Ctrl = Select, Q = L, W = R. Bit layout matches
+ * read_snes_pad (2=Select, 10=L, 11=R); OR'd in there under HOST_BUILD. */
+static uint16_t s_extra_snes = 0;
+static void handle_extra_snes(SDL_Scancode sc, int down)
+{
+    uint16_t bit = 0;
+    switch (sc) {
+    case SDL_SCANCODE_LCTRL:
+    case SDL_SCANCODE_RCTRL: bit = 1u << 2;  break; /* SNES Select */
+    case SDL_SCANCODE_Q:     bit = 1u << 10; break; /* SNES L */
+    case SDL_SCANCODE_W:     bit = 1u << 11; break; /* SNES R */
+    default: return;
+    }
+    if (down) s_extra_snes |= bit; else s_extra_snes &= (uint16_t)~bit;
+}
+uint16_t host_extra_snes_bits(void) { return s_extra_snes; }
+
 #if HOST_SDL == 3
 static int map_scancode(SDL_Scancode sc)
 #else
@@ -167,6 +185,7 @@ int host_platform_poll(host_pad_t *pad)
             int mapped = map_scancode(sc);
             if (mapped >= 0 && pad)
                 set_key(pad, mapped, down);
+            handle_extra_snes(sc, down);
         }
 #else
         if (ev.type == SDL_QUIT)
@@ -187,6 +206,7 @@ int host_platform_poll(host_pad_t *pad)
             int mapped = map_scancode(sc);
             if (mapped >= 0 && pad)
                 set_key(pad, mapped, down);
+            handle_extra_snes(sc, down);
         }
 #endif
     }
