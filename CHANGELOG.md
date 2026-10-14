@@ -39,6 +39,13 @@ record/replay and host-input fixes.
   covers USA and EUR (byte-identical there). On device, Deluxe is the dominant
   idle wait across the attract/demo (~92k dots/frame skipped): cpu −16%, busy
   −12%, PPU/APU unchanged, worst late window 37→16. (ISS host-verified only.)
+- **The Legend of the Mystical Ninja idle-skip template (USA + EUR).** The TMNT
+  JSL+accumulator shape at `00:80b4`; the per-lap `JSL $009d27` (USA) / `$009d3e`
+  (EUR, byte-identical routine) early-returns writing nothing when `[$001e2c]==0`,
+  so the skip carries the same precondition as TMNT. Host-verified bit-exact over
+  the attract (both regions) and an 11660-frame USA gameplay recording. It
+  reclaims the title/menu/idle phases; in active gameplay the loop busy-waits with
+  per-lap JSL work, so the skip is mostly inactive there (that CPU is real work).
 
 ### Changed
 

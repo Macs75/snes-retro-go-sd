@@ -405,6 +405,22 @@ static const AccumTemplate s_accum_tpl[] = {
    * the head ($80ef vs Deluxe's $80d4) is what tells the two games apart. */
   { 0x80, 0x80ef, 12, 0x78, 0x3a, 2, 0, 0, 0, 0, 16,
     { 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x78, 0x65, 0x3a, 0x85, 0x78, 0x80, 0xf4, 0xc2, 0x30, 0x48, 0xda } },
+
+  /* The Legend of the Mystical Ninja (USA, crc 82479d6a). 00:80b4, the same
+   * JSL+accumulator shape as TMNT IV:
+   *   22 27 9d 00 JSL $009d27 / A9 00 00 LDA #$0000 / 5B TCD / A5 94 LDA $94 /
+   *   65 3A ADC $3A / 85 94 STA $94 / 80 F0 BRA $80B4.  DP=0 after the TCD.
+   * The per-lap JSL ($009d27) is the Konami routine LDY #$1e00 / PHY / PLD /
+   * ... / LDX $2c / BEQ ->RTL: with DP=$1e00 it reads [$001e2c] and early-RTLs
+   * (writing nothing) when it is zero, which is its state through the vsync
+   * wait. Same precondition as TMNT -- the skip is gated on [$001e2c]==0 so a
+   * lap is only ever taken while the JSL really is a no-op. EUR (crc 797724c8)
+   * JSLs a different target ($009d3e) whose code is byte-identical to $009d27,
+   * so it gets its own guard entry below (guard[1]=0x3e), same precondition. */
+  { 0x00, 0x80b4, 16, 0x94, 0x3a, 2, 0, 0x001e2c, 0, 2, 16,
+    { 0x22, 0x27, 0x9d, 0x00, 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x94, 0x65, 0x3a, 0x85, 0x94, 0x80, 0xf0 } },
+  { 0x00, 0x80b4, 16, 0x94, 0x3a, 2, 0, 0x001e2c, 0, 2, 16,   /* EUR 797724c8 (JSL $009d3e) */
+    { 0x22, 0x3e, 0x9d, 0x00, 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x94, 0x65, 0x3a, 0x85, 0x94, 0x80, 0xf0 } },
 };
 
 bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
