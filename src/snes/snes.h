@@ -71,8 +71,7 @@ struct Snes {
   // ram
   uint32_t ramAdr;
   uint8_t *ram;
-  uint8_t ramFill;   // power-on WRAM fill byte (per-cart; default 0x00)
-  uint8_t padx[3];
+  uint8_t padx[4];
 
   // frame timing
   uint16_t hPos;
