@@ -40,6 +40,15 @@ typedef struct CartHeader {
 
 static void readHeader(const uint8_t* data, int length, int location, CartHeader* header);
 
+// Power-on WRAM fill is indeterminate on hardware; a few games read it before
+// init and depend on a specific pattern. Default 0-fill, overridden per cart by
+// (space-stripped) header title. dinkc64 962857c/d28d555.
+static uint8_t snes_ramFillFor(const char* name) {
+  if(!strcmp(name, "DEATH BRADE") || !strcmp(name, "POWERDRIVE")) return 0xff;
+  if(!strcmp(name, "ASHITANO JOE") || !strcmp(name, "SUCCESS JOE")) return 0x3f;
+  return 0x00;
+}
+
 bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   // if smaller than smallest possible, don't load
   if(length < 0x8000) {
@@ -104,6 +113,7 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   if(headers[used].coprocessor == 15 && headers[used].chips == 9) {
     cart_attachSpc7110(snes->cart);
   }
+  snes->ramFill = snes_ramFillFor(headers[used].name); // before reset (fills WRAM)
   snes_reset(snes, true); // reset after loading
   snes_set_region(snes, headers[used].pal);
   return true;
@@ -146,6 +156,7 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   if(headers[used].coprocessor == 15 && headers[used].chips == 9) {
     cart_attachSpc7110(snes->cart);
   }
+  snes->ramFill = snes_ramFillFor(headers[used].name); // before reset (fills WRAM)
   snes_reset(snes, true); // reset after loading
   snes_set_region(snes, headers[used].pal);
   free(newData);
@@ -170,6 +181,9 @@ static void readHeader(const uint8_t* data, int length, int location, CartHeader
     }
   }
   header->name[21] = 0;
+  // strip trailing spaces (SNES titles are space-padded to 21 chars) so a
+  // per-cart name match (snes_loadRom ramFill table) compares cleanly
+  for(int i = 20; i >= 0 && header->name[i] == ' '; i--) header->name[i] = 0;
   // read rest
   header->speed = data[location + 0x15] >> 4;
   header->type = data[location + 0x15] & 0xf;

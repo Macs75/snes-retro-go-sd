@@ -136,6 +136,7 @@ Snes* snes_init(uint8_t *ram) {
    * garbage pointer. Set it here as well as in snes_reset(). */
   snes->romPageTag = ~(uint32_t)0;
   snes->romPageBase = NULL;
+  snes->ramFill = 0x00; // per-cart WRAM power-on fill, set in snes_loadRom
 #if SNES_PAGEMAP
   snes_build_pagemap(snes);
 #endif
@@ -226,7 +227,7 @@ void snes_reset(Snes* snes, bool hard) {
   input_reset(snes->input1);
   input_reset(snes->input2);
   if (hard)
-    memset(snes->ram, 0, 0x20000);
+    memset(snes->ram, snes->ramFill, 0x20000);
   snes->ramAdr = 0;
   snes->hPos = 0;
   snes->vPos = 0;
