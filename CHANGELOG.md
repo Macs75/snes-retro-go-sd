@@ -32,12 +32,13 @@ record/replay and host-input fixes.
   page is ambient rather than forced; a new per-template DP-guard field gates the
   skip on `cpu->dp` (re-checked each frame) so its WRAM offsets apply only in the
   context they were measured in.
-- **International Superstar Soccer Deluxe idle-skip template.** An 80:80d4
-  Dracula-shape accumulator (its in-loop TCD forces DP=0); one entry covers USA
-  and EUR (byte-identical there), with a 16-byte guard that disambiguates it from
-  plain ISS (identical loop bytes at a different head). On device it is the
-  dominant idle wait across the attract/demo (~92k dots/frame skipped): cpu −16%,
-  busy −12%, PPU/APU unchanged, worst late window 37→16.
+- **International Superstar Soccer (+ Deluxe) idle-skip templates.** Konami's
+  Dracula-shape accumulator (in-loop TCD forces DP=0) at `80:80ef` (ISS) and
+  `80:80d4` (Deluxe); the two share identical loop bytes, so the head tells them
+  apart and the 16-byte guard disambiguates either from the other. Each entry
+  covers USA and EUR (byte-identical there). On device, Deluxe is the dominant
+  idle wait across the attract/demo (~92k dots/frame skipped): cpu −16%, busy
+  −12%, PPU/APU unchanged, worst late window 37→16. (ISS host-verified only.)
 
 ### Changed
 

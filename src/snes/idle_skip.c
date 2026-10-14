@@ -395,6 +395,16 @@ static const AccumTemplate s_accum_tpl[] = {
    * these bytes pin this to ISS Deluxe. */
   { 0x80, 0x80d4, 12, 0x78, 0x3a, 2, 0, 0, 0, 0, 16,
     { 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x78, 0x65, 0x3a, 0x85, 0x78, 0x80, 0xf4, 0xc2, 0x30, 0x48, 0xda } },
+
+  /* International Superstar Soccer (USA crc 49627238, EUR crc 6cd568a9 --
+   * byte-identical here). 80:80ef, the same Dracula-shape accumulator as ISS
+   * Deluxe but at a different head:
+   *   A9 00 00 LDA #$0000 / 5B TCD / A5 78 LDA $78 / 65 3A ADC $3A /
+   *   85 78 STA $78 / 80 F4 BRA $80EF.  DP=0 from the in-loop TCD.
+   * The 16-byte guard is identical to ISS Deluxe's (same loop + trailing bytes);
+   * the head ($80ef vs Deluxe's $80d4) is what tells the two games apart. */
+  { 0x80, 0x80ef, 12, 0x78, 0x3a, 2, 0, 0, 0, 0, 16,
+    { 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x78, 0x65, 0x3a, 0x85, 0x78, 0x80, 0xf4, 0xc2, 0x30, 0x48, 0xda } },
 };
 
 bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
