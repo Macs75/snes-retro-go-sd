@@ -821,6 +821,7 @@ void dsp_write(Dsp* dsp, uint8_t adr, uint8_t val) {
           memset(dsp->channel[ch].decodeBuffer, 0, sizeof(dsp->channel[ch].decodeBuffer));
           dsp->channel[ch].gain = 0;
           dsp->channel[ch].adsrState = dsp->channel[ch].useGain ? 3 : 0;
+          dsp->ram[0x7c] &= ~(1 << ch); // key-on clears this voice's ENDx (dinkc64 b6f5839)
 #ifdef RIG_DSP_KEYON_PROBE
           g_keyon_pending[ch] = true;
 #endif
