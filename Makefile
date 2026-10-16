@@ -44,6 +44,7 @@ PERF ?= 0
 PERF_PPU ?= 0
 PERF_AUDIO ?= 0
 PERF_CPU ?= 0
+PERF_GSU ?= 0
 
 CORE_C_SOURCES := \
 $(SNES)/apu.c \
@@ -57,6 +58,7 @@ $(SNES)/sdd1.c \
 $(SNES)/spc7110.c \
 $(SNES)/gsu.c \
 $(SNES)/gsu_zsnes/gsu_core.c \
+$(SNES)/gsu_zsnes/gsu_blocks.c \
 $(SNES)/input.c \
 $(SNES)/ppu.c \
 $(SNES)/snes.c \
@@ -123,6 +125,12 @@ endif
 # reads per opcode, and the probes push the ITCM engine 0x400 further.
 ifeq ($(PERF_CPU),1)
 CORE_C_DEFS += -DSNES_PERF_CPU -DSNES_OP_CENSUS=1
+endif
+# PERF_GSU=1 splits the Super FX figure: cycles in PLOT and in the compiled
+# chains, and how many GSU instructions the chains ran. Diagnostic: two timer
+# reads per PLOT and per chain call.
+ifeq ($(PERF_GSU),1)
+CORE_C_DEFS += -DSNES_PERF_GSU
 endif
 # PERF_AUDIO=1 adds the stretcher / audio-rate diagnostics
 ifeq ($(PERF_AUDIO),1)

@@ -64,6 +64,15 @@ extern uint32_t snes_perf_cpu_rd_slow, snes_perf_cpu_rd_page, snes_perf_cpu_wr_s
 #define SNES_PERF_CPU_INC(c) do { } while (0)
 #endif
 
+/* PERF_GSU=1, a diagnostic for the Super FX figure (two timer reads per PLOT
+ * and per chain call): cycles inside PLOT and the PLOT count, cycles inside
+ * the compiled chains (PLOTs they run included), and GSU top-level
+ * instructions run by the chains / in all. */
+#ifdef SNES_PERF_GSU
+extern uint32_t snes_perf_gsu_plot, snes_perf_gsu_plots, snes_perf_gsu_chain;
+extern uint32_t snes_perf_gsu_chain_ops, snes_perf_gsu_ops;
+#endif
+
 /* the split costs probes on every drawn line: only with PERF_PPU=1 */
 #ifdef SNES_PERF_PPU
 #define SNES_PERF_PPU_BEGIN(t)     uint32_t t = snes_perf_now()

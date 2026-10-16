@@ -145,6 +145,7 @@ void gsu_zsnes_build_tables(void)
 {
     InitFxTables();
     gsu_install_regs();
+    gsu_blk_select();
 }
 
 uint8_t gsu_zsnes_reg_read(uint16_t addr)
@@ -161,6 +162,9 @@ void gsu_zsnes_reg_write(uint16_t addr, uint8_t val)
     if (addr < 0x3000 || addr >= 0x3300) return;
     eop *fn = REGPTW(addr);
     if (!fn) return;
+#ifdef HOST_BUILD
+    { extern unsigned long gsu_hs[5]; gsu_hs[4]++; }
+#endif
     mem_set_al(val);                 /* the value the handler consumes */
     MemSeamD = 0;                    /* for the one _DX handler (reg3030w) */
     fn();

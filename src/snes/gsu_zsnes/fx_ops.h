@@ -8,6 +8,9 @@
 #include "unaligned.h"
 #ifndef FX_OPS_H
 #define FX_OPS_H
+#ifdef SNES_PERF_GSU
+#include "../../snes_perf.h"
+#endif
 static inline void gsu_trace_op(void);
 
 /* Run one opcode through a dispatch table. The four ALT sub-tables of a group
@@ -1872,34 +1875,7 @@ void c_FxOpFF(void) /* IWT R15: an absolute jump within the bank */
 /* --- COLOR / GETC / CMODE / MERGE and the 16-bit-address R14/R15 forms ----
  */
 
-/* Setting the colour register also refreshes the four per-bitplane lookups the
-   plot routines use, but only when the value actually changes. */
-static inline void fx_set_color(u1 const col)
-{
-    if ((u1)SfxCOLR == col) {
-        return;
-    }
-    *(u1*)&SfxCOLR = col; /* byte store: the upper three are kept */
-    fxbit01pcal = fxbit01[col];
-    fxbit23pcal = fxbit23[col];
-    fxbit45pcal = fxbit45[col];
-    fxbit67pcal = fxbit67[col];
-}
-
-/* POR bit 2 duplicates the high nibble down; bit 3 keeps the colour register's
-   existing high nibble instead. */
-static inline void fx_color(u4 const raw)
-{
-    u1 col = (u1)raw;
-
-    if (SfxPOR & 0x04u) {
-        col = (u1)((col & 0xF0u) | (col >> 4));
-    }
-    if (SfxPOR & 0x08u) {
-        col = (u1)((col & 0x0Fu) | ((u1)SfxCOLR & 0xF0u));
-    }
-    fx_set_color(col);
-}
+#include "fx_color.h" /* fx_set_color / fx_color, shared with gsu_blocks.c */
 
 void c_FxOp4E(void) /* COLOR */
 {
@@ -1917,20 +1893,7 @@ void c_FxOpDF(void) /* GETC: colour from the ROM buffer */
     FxSeamPC++;
 }
 
-/* The tile holding pixel (x, y) = (index >> 8, index & 0xFF) in screen mode
- * `mode` (see fx_lineloc), or 0xFFFFFFFF below the screen. The GSU numbers the
- * bitmap modes' tiles column by column; object mode interleaves the high bits
- * of x and y. This is what ZSNES's 1 MB of line-location tables held. */
-static inline __attribute__((always_inline)) u4 fx_tile(zreg const mode, u4 const index)
-{
-    u4 const x = (index >> 8) & 0xFFu, y = index & 0xFFu;
-    if (mode == 3)
-        return ((x & 0x80u) << 1) + ((y & 0x80u) << 2) + ((x & 0x78u) >> 3) + ((y & 0x78u) << 1);
-    u4 const rows = mode == 0 ? 16u : mode == 1 ? 20u : 24u;
-    if (y >= rows * 8u)
-        return 0xFFFFFFFFu;
-    return (x >> 3) * rows + (y >> 3);
-}
+#include "fx_plot.h" /* fx_tile / fx_drawpix / fx_plot_pixel, shared with gsu_blocks.c */
 
 /* Which line-location table the current screen mode uses. POR bit 4 forces
    object mode; otherwise SCMR bits 2 and 5 give the screen height. */
@@ -2054,61 +2017,14 @@ void c_FxOp00(void) /* STOP: halt the GSU, optionally raising an IRQ */
  * tables. Bitplane pairs are 16 bytes apart and every write is 16-bit, so one
  * access covers both; fxxand[x] clears the destination bit in both. */
 
-enum { FX_PLOT_2BPP,
-    FX_PLOT_4BPP,
-    FX_PLOT_8BPP };
-
-static inline void* fx_plane(zreg const addr, u4 const n)
-{
-    return (void*)(uintptr_t)(addr + n * 16u);
-}
-
-/* Write one pixel: `bit` is the pixel's bit in both bytes of each bitplane
-   pair (0x0101 << (7 - x&7)). The dithered form just uses the other pair of
-   colour lookups, which COLOR loaded with the high nibble. */
-static inline __attribute__((always_inline))
-void fx_drawpix(zreg const addr, u4 const bit, int const depth, int const dither)
-{
-    u4 const b01 = dither ? fxbit45pcal : fxbit01pcal;
-    u4 const b23 = dither ? fxbit67pcal : fxbit23pcal;
-    u4 const b45 = dither ? fxbit01pcal : fxbit45pcal;
-    u4 const b67 = dither ? fxbit23pcal : fxbit67pcal;
-    u4 const planes = depth == FX_PLOT_2BPP ? 1 : depth == FX_PLOT_4BPP ? 2
-                                                                        : 4;
-    u4 const col[4] = { b01, b23, b45, b67 };
-
-    /* One 16-bit read-modify-write a plane pair: the asm cleared the bit in
-       every plane, then ORed the colour in, in two passes of 32-bit accesses;
-       the planes are 16 bytes apart and only the low 16 bits ever changed (on
-       the last tile of the Game Pak RAM the upper two ran past its end). */
-    for (u4 i = 0; i < planes; i++) {
-        u2 const v = ld16u(fx_plane(addr, i));
-        st16u(fx_plane(addr, i), (u2)((v & ~bit) | (col[i] & bit)));
-    }
-}
-
 /* always_inline: each FX_PLOTS wrapper then folds its depth / zero check /
    dither, which as a shared out-of-line body were run-time branches */
 static inline __attribute__((always_inline))
 void fx_plot(int const depth, u4 const zmask, int const zcheck, int const dither)
 {
-    u4 const shift = depth == FX_PLOT_2BPP ? 4 : depth == FX_PLOT_4BPP ? 5
-                                                                       : 6;
-    u4 const index = (SfxR0[2] & 0xFFFF00FFu) | ((SfxR0[1] & 0xFFu) << 8);
-    u4 tile;
-
     fx_fetchpipe();
     FxSeamPC++;
-    tile = fx_tile(sfxclineloc, index);
-    if (tile != 0xFFFFFFFFu && (!zcheck || ((u1)SfxCOLR & zmask))) {
-        zreg const addr = (uintptr_t)sfxgameram
-            + (((uintptr_t)SCBRrel - (uintptr_t)sfxgameram + (tile << shift) + ((index & 7u) * 2u))
-                  & SfxRamMask);
-        u4 const bit = 0x0101u << ((SfxR0[1] & 7u) ^ 7u);   /* = ~fxxand[x] */
-
-        fx_drawpix(addr, bit, depth,
-            dither && (((SfxR0[1] ^ SfxR0[2]) & 1u) != 0));
-    }
+    fx_plot_pixel(SfxR0[1], SfxR0[2], depth, zmask, zcheck, dither);
     fx_set_lo16(1, SfxR0[1] + 1); /* `inc word[SfxR1]` on every path */
 }
 
@@ -2252,11 +2168,189 @@ static void gsu_maybe_dump(void)
     if (f) { fwrite(sfxgameram, 1, SfxRamMask + 1, f); fclose(f); fprintf(stderr, "GSU: dumped RAM to %s at op %lu\n", p, gsu_op_ctr); }
     gsu_dumped = 1;
 }
+
+/* Hot-address histogram for the per-game block code (env GSU_PCHIST=file,
+ * optional GSU_PCHIST_FRAMES=start:end in emulated frames): top-level GSU
+ * instructions per (program bank, address). R15 already points past the
+ * prefetched opcode, so the instruction is at PC - 1. Written at exit,
+ * hottest first, as "bank:addr count opcode alt". */
+extern long gsu_host_frame;
+#define GSU_PCH_N 65536u
+static struct { u4 key, n; u1 op, alt; } gsu_pch[GSU_PCH_N];
+static int gsu_pch_on = -1;
+static long gsu_pch_f0, gsu_pch_f1;
+static unsigned long gsu_pch_total;
+static int gsu_pch_cmp(void const *a, void const *b)
+{
+    u4 const x = ((u4 const *)a)[1], y = ((u4 const *)b)[1];
+    return x < y ? 1 : x > y ? -1 : 0;
+}
+static void gsu_pch_write(void)
+{
+    char const *p = getenv("GSU_PCHIST");
+    FILE *f = p ? fopen(p, "w") : NULL;
+    if (!f) return;
+    qsort(gsu_pch, GSU_PCH_N, sizeof gsu_pch[0], gsu_pch_cmp);
+    unsigned long cum = 0;
+    fprintf(f, "# total %lu top-level GSU instructions, frames %ld..%ld\n", gsu_pch_total, gsu_pch_f0, gsu_pch_f1);
+    for (u4 i = 0; i < GSU_PCH_N && gsu_pch[i].n; i++) {
+        cum += gsu_pch[i].n;
+        fprintf(f, "%02x:%04x %u %02x %u %.2f\n", (unsigned)(gsu_pch[i].key >> 16), (unsigned)(gsu_pch[i].key & 0xFFFF),
+                (unsigned)gsu_pch[i].n, gsu_pch[i].op, gsu_pch[i].alt, 100.0 * cum / gsu_pch_total);
+    }
+    fclose(f);
+}
+static void gsu_pchist(void)
+{
+    if (gsu_pch_on < 0) {
+        gsu_pch_on = getenv("GSU_PCHIST") != NULL;
+        gsu_pch_f0 = 0; gsu_pch_f1 = 1L << 30;
+        char const *e = getenv("GSU_PCHIST_FRAMES");
+        if (e) sscanf(e, "%ld:%ld", &gsu_pch_f0, &gsu_pch_f1);
+        if (gsu_pch_on) atexit(gsu_pch_write);
+    }
+    if (!gsu_pch_on || gsu_host_frame < gsu_pch_f0 || gsu_host_frame >= gsu_pch_f1) return;
+    u4 const key = ((u4)(SfxPBR & 0x7F) << 16) | ((FxSeamPC - 1) & 0xFFFFu);
+    u4 h = (key * 2654435761u) >> 16;
+    for (;;) {
+        h &= GSU_PCH_N - 1;
+        if (!gsu_pch[h].n || gsu_pch[h].key == key) break;
+        h++;
+    }
+    gsu_pch[h].key = key;
+    gsu_pch[h].n++;
+    gsu_pch[h].op = (u1)FxSeamCX;
+    gsu_pch[h].alt = (u1)(FxSeamCX >> 8);
+    gsu_pch_total++;
+}
+/* State log for checking the block code against the interpreter (env
+ * GSU_STATELOG=file): the whole GSU state at every MainLoop exit folds into a
+ * running hash, written once a frame with a hash of the Game Pak RAM. Runs
+ * with GSU_BLOCKS=0 and without must write the same file. */
+extern u1 *romdata;
+static int gsu_st_on = -1;
+static FILE *gsu_st_f;
+static u8 gsu_st_h = 0xCBF29CE484222325ull;
+static void gsu_st_fold(u4 const v) { gsu_st_h = (gsu_st_h ^ v) * 0x100000001B3ull; }
+static void gsu_state_exit(void)
+{
+    if (gsu_st_on < 0) {
+        char const *p = getenv("GSU_STATELOG");
+        gsu_st_f = p ? fopen(p, "w") : NULL;
+        gsu_st_on = gsu_st_f != NULL;
+    }
+    if (!gsu_st_on) return;
+    for (int i = 0; i < 16; i++) gsu_st_fold(SfxR0[i]);
+    gsu_st_fold(SfxSignZero); gsu_st_fold(SfxCarry); gsu_st_fold(SfxOverflow); gsu_st_fold(SfxB);
+    gsu_st_fold(SfxPIPE); gsu_st_fold(SfxSFR); gsu_st_fold(SfxSREG); gsu_st_fold(SfxDREG);
+    /* both start out 0 (no address); host addresses differ run to run */
+    gsu_st_fold(SfxLastRamAdr ? (u4)(SfxLastRamAdr - (zreg)(uintptr_t)sfxgameram) : 0xFFFFFFFFu);
+    gsu_st_fold(SfxRomBuffer ? (u4)(SfxRomBuffer - (zreg)(uintptr_t)romdata) : 0xFFFFFFFFu);
+    gsu_st_fold((u4)(SfxRAMMem - (zreg)(uintptr_t)sfxgameram));
+    gsu_st_fold((u4)(SfxCROM - (zreg)(uintptr_t)romdata));
+    gsu_st_fold(SfxCBR); gsu_st_fold(SfxCacheActive); gsu_st_fold(SfxCOLR); gsu_st_fold(SfxPOR);
+    gsu_st_fold(SfxPBR); gsu_st_fold(SfxROMBR); gsu_st_fold(SfxRAMBR);
+    gsu_st_fold(NumberOfOpcodes); gsu_st_fold(ChangeOps); gsu_st_fold(SFXProc);
+    gsu_st_fold(fxbit01pcal); gsu_st_fold(fxbit23pcal); gsu_st_fold(fxbit45pcal); gsu_st_fold(fxbit67pcal);
+}
+void gsu_state_frame(long const frame)
+{
+    if (gsu_st_on <= 0) return;
+    extern unsigned long long gsu_blk_ops;
+    extern unsigned long gsu_hs[5], gsu_plotstat[64];
+    if (frame % 500 == 0) fprintf(stderr, "GSU/blk frame=%ld block_ops=%llu\n", frame, gsu_blk_ops);
+    if (frame % 120 == 0) {
+        fprintf(gsu_st_f, "# hs frame=%ld mainloop=%lu interp=%lu chaincalls=%lu chain0=%lu regw=%lu plots:", frame,
+                gsu_hs[0], gsu_hs[1], gsu_hs[2], gsu_hs[3], gsu_hs[4]);
+        for (int i = 0; i < 64; i++) if (gsu_plotstat[i]) fprintf(gsu_st_f, " d%dz%dd%dm%d=%lu", i >> 4, (i >> 3) & 1, (i >> 2) & 1, i & 3, gsu_plotstat[i]);
+        fprintf(gsu_st_f, "\n");
+        for (int i = 0; i < 5; i++) gsu_hs[i] = 0;
+        for (int i = 0; i < 64; i++) gsu_plotstat[i] = 0;
+    }
+    u4 h = 0x811C9DC5u;
+    for (u4 i = 0; i <= SfxRamMask; i++) h = (h ^ sfxgameram[i]) * 0x01000193u;
+    fprintf(gsu_st_f, "%ld %016llx %08x\n", frame, (unsigned long long)gsu_st_h, (unsigned)h);
+}
 #else
 static inline void gsu_trace_entry(void) {}
 static inline void gsu_trace_op(void) {}
 static inline void gsu_maybe_dump(void) {}
+static inline void gsu_pchist(void) {}
+static inline void gsu_state_exit(void) {}
 #endif
+
+/* --- Per-game block code ---------------------------------------------------
+ *
+ * gsu_blocks_<game>.inc (tools/gen_gsu_blocks.py) compiles a game's hot GSU
+ * code to C functions ("chains"), entered where the interpreter stands before a
+ * top-level instruction: program bank, PC (one past the prefetched opcode) and
+ * the prefetched opcode, with no ALT mode or TO/FROM pending. A chain is handed
+ * the budget N (NumberOfOpcodes) and returns how many top-level instructions it
+ * ran, 0 when it ran none; gsu_blocks.c points gsu_blk_tab at a game's table
+ * when its ROM matches. */
+#include "gsu_blocks.h"
+#ifdef HOST_BUILD
+/* GSU_CHAINHIST=file (window GSU_PCHIST_FRAMES): per entry address, chain
+   calls and the instructions they ran; c == 0 is an interpreted instruction */
+static struct { u4 key, calls, ops, interp; } gsu_chh[65536];
+static int gsu_chh_on = -1;
+static int gsu_chh_cmp(void const *a, void const *b)
+{
+    u4 const x = ((u4 const *)a)[1] + ((u4 const *)a)[3], y = ((u4 const *)b)[1] + ((u4 const *)b)[3];
+    return x < y ? 1 : x > y ? -1 : 0;
+}
+static void gsu_chh_write(void)
+{
+    FILE *f = fopen(getenv("GSU_CHAINHIST"), "w");
+    if (!f) return;
+    qsort(gsu_chh, 65536, sizeof gsu_chh[0], gsu_chh_cmp);
+    for (u4 i = 0; i < 65536 && (gsu_chh[i].calls || gsu_chh[i].interp); i++)
+        fprintf(f, "%02x:%04x calls=%u ops=%u interp=%u\n", (unsigned)(gsu_chh[i].key >> 16), (unsigned)(gsu_chh[i].key & 0xFFFF),
+                gsu_chh[i].calls, gsu_chh[i].ops, gsu_chh[i].interp);
+    fclose(f);
+}
+static void gsu_chainhist(u4 const pc, u4 const c)
+{
+    extern long gsu_host_frame;
+    static long f0, f1;
+    if (gsu_chh_on < 0) {
+        gsu_chh_on = getenv("GSU_CHAINHIST") != NULL;
+        f0 = 0; f1 = 1L << 30;
+        char const *e = getenv("GSU_PCHIST_FRAMES");
+        if (e) sscanf(e, "%ld:%ld", &f0, &f1);
+        if (gsu_chh_on) atexit(gsu_chh_write);
+    }
+    if (!gsu_chh_on || gsu_host_frame < f0 || gsu_host_frame >= f1) return;
+    u4 const key = ((u4)(SfxPBR & 0x7F) << 16) | ((pc - 1) & 0xFFFFu);
+    u4 h = (key * 2654435761u) >> 16;
+    for (;; h++) {
+        h &= 65535;
+        if ((!gsu_chh[h].calls && !gsu_chh[h].interp) || gsu_chh[h].key == key) break;
+    }
+    gsu_chh[h].key = key;
+    if (c) { gsu_chh[h].calls++; gsu_chh[h].ops += c; } else gsu_chh[h].interp++;
+}
+unsigned long long gsu_blk_ops, gsu_all_ops;   /* GSU_STATELOG prints them */
+/* GSU_STATELOG also prints, every 120 frames: MainLoop calls, interpreted
+   instructions, chain calls, chain calls that ran nothing, register writes */
+unsigned long gsu_hs[5];
+unsigned long gsu_plotstat[64];
+#endif
+
+static inline __attribute__((always_inline)) u4 gsu_blk_run(void)
+{
+    u4 const pc = FxSeamPC, cx = FxSeamCX;
+    if (pc > 0xFFFFu || cx > 0xFFu || FxSeamSrc != SfxR0 || FxSeamDst != SfxR0)
+        return 0;
+    u4 const key = ((SfxPBR & 0x7Fu) << 24) | (pc << 8) | cx;
+    for (u4 h = (key * 2654435761u) >> 16;; h++) {
+        struct gsu_blk const *const e = &gsu_blk_tab[h & gsu_blk_mask];
+        if (!e->key)
+            return 0;
+        if (e->key == key)
+            return e->fn((s4)NumberOfOpcodes, e->entry);
+    }
+}
 
 /* Run the GSU until the opcode budget runs out or STOP. Between calls the
    program counter, opcode byte and ALT mode live in SfxR15, SfxPIPE and
@@ -2270,10 +2364,47 @@ void MainLoop(void)
     SfxRAMMem = (SfxRAMBR << 16) + (uintptr_t)sfxgameram;
 
     gsu_trace_entry();
+#ifdef HOST_BUILD
+    gsu_hs[0]++;
+#endif
     do {
         FxLoopDone = 0;
         gsu_trace_op();
         gsu_maybe_dump();
+        gsu_pchist();
+#ifdef SNES_PERF_GSU
+        snes_perf_gsu_ops++;
+#endif
+        if (gsu_blk_tab) {
+#ifdef HOST_BUILD
+            u4 const hpc = FxSeamPC;
+#endif
+#ifdef SNES_PERF_GSU
+            u4 const perf_t = snes_perf_now();
+            u4 const c = gsu_blk_run();
+            snes_perf_gsu_chain += snes_perf_now() - perf_t;
+            snes_perf_gsu_chain_ops += c;
+            snes_perf_gsu_ops += c ? c - 1 : 0;
+#else
+            u4 const c = gsu_blk_run();
+#endif
+#ifdef HOST_BUILD
+            gsu_hs[2]++;
+            gsu_hs[3] += c == 0;
+            gsu_chainhist(hpc, c);
+#endif
+            if (c) {
+#ifdef HOST_BUILD
+                gsu_blk_ops += c;
+#endif
+                /* the loop test below spends the last one */
+                NumberOfOpcodes -= c - 1;
+                continue;
+            }
+        }
+#ifdef HOST_BUILD
+        gsu_hs[1]++;
+#endif
         FxDispatch(FxTabled);
     } while (fx_loop_next());
 
@@ -2282,6 +2413,7 @@ void MainLoop(void)
     *((u1*)&SfxSFR + 1) = (u1)((*((u1*)&SfxSFR + 1) & 0xFCu) | ((FxSeamCX >> 8) & 0xFFu));
     SfxSREG = (u4)(FxSeamSrc - SfxR0);
     SfxDREG = (u4)(FxSeamDst - SfxR0);
+    gsu_state_exit();
 }
 
 #endif

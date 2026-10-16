@@ -207,6 +207,10 @@ uint32_t snes_perf_dsp;
 uint32_t snes_perf_dma, snes_perf_dma_calls;
 uint32_t snes_perf_gsu;
 uint32_t snes_perf_ops, snes_perf_gsu_reads;
+#ifdef SNES_PERF_GSU
+uint32_t snes_perf_gsu_plot, snes_perf_gsu_plots, snes_perf_gsu_chain;
+uint32_t snes_perf_gsu_chain_ops, snes_perf_gsu_ops;
+#endif
 uint32_t snes_perf_ppu_part[SNES_PERF_PPU_N];
 uint32_t snes_perf_ppu_drawn, snes_perf_ppu_sub_lines, snes_perf_ppu_spr_lines;
 uint32_t snes_perf_ppu_math_lines, snes_perf_ppu_mode[8];
@@ -305,6 +309,12 @@ static void snes_perf_report(void)
          (unsigned long)gsu, (unsigned long)(snes_perf_ppu_lines / n));
   printf("PROF/ops: ops=%lu gsu_reads=%lu per emulated frame (65816 opcodes run; CPU reads of $3000-$32FF)\n",
          (unsigned long)(snes_perf_ops / n), (unsigned long)(snes_perf_gsu_reads / n));
+#ifdef SNES_PERF_GSU
+  printf("PROF/gsu: plot=%lu cycles in %lu plots, chains=%lu cycles (plots inside included), chain_ops=%lu of %lu GSU instructions per emulated frame\n",
+         (unsigned long)(snes_perf_gsu_plot / n), (unsigned long)(snes_perf_gsu_plots / n),
+         (unsigned long)(snes_perf_gsu_chain / n), (unsigned long)(snes_perf_gsu_chain_ops / n),
+         (unsigned long)(snes_perf_gsu_ops / n));
+#endif
   printf("PROF/apu: total=%lu [spc700=%lu dsp=%lu] in_emu=%lu in_pcm=%lu calls=%lu per emulated frame\n",
          (unsigned long)apu_all, (unsigned long)spc, (unsigned long)dsp, (unsigned long)apu_e,
          (unsigned long)(sp_apu_pcm / n), (unsigned long)(snes_perf_apu_calls / n));
@@ -418,6 +428,10 @@ static void snes_perf_reset(void)
   snes_perf_ppu = snes_perf_ppu_lines = snes_perf_apu = snes_perf_apu_calls = 0;
   snes_perf_dsp = snes_perf_dma = snes_perf_dma_calls = snes_perf_gsu = 0;
   snes_perf_ops = snes_perf_gsu_reads = 0;
+#ifdef SNES_PERF_GSU
+  snes_perf_gsu_plot = snes_perf_gsu_plots = snes_perf_gsu_chain = 0;
+  snes_perf_gsu_chain_ops = snes_perf_gsu_ops = 0;
+#endif
   memset(snes_perf_ppu_part, 0, sizeof(snes_perf_ppu_part));
   memset(snes_perf_ppu_mode, 0, sizeof(snes_perf_ppu_mode));
   snes_perf_ppu_drawn = snes_perf_ppu_sub_lines = snes_perf_ppu_spr_lines = snes_perf_ppu_math_lines = 0;

@@ -85,7 +85,8 @@ read it before touching any hot renderer loop.
 
 ## 4. Landed optimisations (case studies)
 
-All three are **generic** (see §5.2) and verified host-bit-exact + device A/B.
+§4.1-§4.4 are **generic** (see §5.2); §4.5 is the per-game Super FX exception.
+All are verified host-bit-exact + device A/B.
 
 ### 4.1 HiROM low-half pagemap fast path — committed `5c253f7`
 
@@ -177,6 +178,57 @@ confirmed those stayed byte-identical. The §5.1 blow-up only happens when the
 inlined code carries *loop-carried* state that competes for the hot loop's
 registers.
 
+### 4.5 Super FX (GSU): per-game block code, and the PLOT that called `memcpy` — branch `superfx-poc`
+
+The GSU is the ZSNES 2 core (`src/snes/gsu_zsnes/`): one table dispatch per
+opcode, state in globals. Yoshi's Island at the start (device log 3, the 5.89M
+budget): title screen 156% busy with the GSU alone at 102%, gameplay 102% busy
+with the GSU at 23%.
+
+**Block code** (`tools/gen_gsu_blocks.py` → `gsu_blocks_<game>.inc`, built in
+`gsu_blocks.c`): the game's hot GSU code compiled to C, as in the arcade NEC
+`nec_hle_build.py`. A host histogram per phase (`GSU_PCHIST`, windows by
+`GSU_PCHIST_FRAMES`) selects the hot addresses; the generator decodes them into
+*chains* (straight-line code through untaken branches, prefixes resolved,
+registers and flags in locals), joins chains that jump into each other into one
+C function (shared locals, gotos), and keys entries by (bank, PC, prefetched
+opcode). Exactness rests on three things: every template is the ZSNES handler
+transcribed, quirks included; the budget is checked per label so a chain never
+runs an instruction MainLoop would not have; a ROM-bytes hash enables the table
+only for the matching dump. Verified with `GSU_STATELOG` (per-frame hash of the
+whole GSU state + Game Pak RAM, blocks on vs `GSU_BLOCKS=0`: byte-identical over
+19,219 frames), the 160 device REC hashes, and a negative control.
+
+What the chains had to learn, each found by measuring where control left them
+(`GSU_CHAINHIST`): delay slots that hold a *prefix* (TO R14 in a branch delay
+slot takes its opcode from the branch target), LOOPs whose delay slot is a prefix
+(R13 found by following the `IWT R13` that set it — the histogram can't see the
+target), `JMP R11` returns (resolved against `LINK` return addresses). Joining
+chains cut gameplay chain calls from 2,047 to 139 per frame.
+
+Budget: ~50 KB of ARM in a ~54 KB pool, so the selection is per phase (gameplay
+89%, title 95%, intro 75% of instructions), the lookup table runs at a 2/3 load
+factor, and the coldest 5% of functions are `optimize("Os")`.
+
+**The PLOT.** After all that, the title screen still spent ~half its GSU time in
+PLOT. Moving the Game Pak RAM from uncached AHB SRAM into DTCM changed nothing
+(log 9: −1%), so it was not memory. The disassembly was: `fx_drawpix` read and
+wrote each bitplane word through `ld16u`/`st16u` (`memcpy` for unaligned safety),
+and with `-mno-unaligned-access` GCC emits a **real `bl memcpy`** for a 2-byte
+copy — four library calls per 4bpp pixel, in the interpreter's PLOT handlers as
+much as in the chains. The addresses are always even, so `ld16a`/`st16a`
+(`__builtin_assume_aligned`) compile to one `ldrh`/`strh`. See §5.8.
+
+| Yoshi's Island, device | log 3 (interpreter) | log 8 (chains) | log 10 (+ aligned PLOT) |
+| --- | --- | --- | --- |
+| title: busy / GSU | 156% / 102% | 102% / 41% | **87% / 25%**, audio no longer slowed |
+| story panel (frame 9480): busy / GSU | — | 81% / 25% | **71% / 14%** |
+| gameplay: GSU | 23% | 8.5% | **7.8%** |
+| late frames intro / gameplay | 4314 / 4395 | 200 / 2634 | **157 / 2554** |
+
+Gameplay's remaining late frames are an every-other-frame overrun (average busy
+86-93%, heaviest frame ~125%); the GSU is now ~8-10% of that frame.
+
 ---
 
 ## 5. Cross-cutting lessons
@@ -239,6 +291,13 @@ skips.** Per-game data is acceptable only as a guarded, opt-in table — never
 branching logic keyed on a title. The three case studies above are all generic:
 the pagemap path is "HiROM, no coprocessor"; the Mode 7 paths trigger on PPU
 register state, not on which game is running.
+
+**The one exception is the Super FX (§4.5).** Seven titles (plus regional
+copies) use the GSU, and generic speed-ups of the interpreter were exhausted
+(the one-switch dispatch lost on the device: `experiments/superfx-gsu-dispatch-switch.md`).
+There, per-game compiled block code is allowed — gated on a hash of the exact
+ROM bytes it was compiled from, with the generic interpreter as the exact
+fallback.
 
 ### 5.3 Verify output with state hashes, not pixels
 
@@ -342,6 +401,30 @@ safer, bigger win.
   moved, *before* spending a device round-trip. This is what proved §4.4's scan
   didn't perturb the pixel loops, the same lens that caught §5.1's spill blow-up.
   See §6 for the one-liner.
+
+### 5.8 A 2-byte `memcpy` is a library call on this device
+
+The usual portable idiom for an unaligned load — `memcpy(&v, p, 2)` — folds into
+one instruction on the host and on most targets. The device build is
+`-mno-unaligned-access`, so GCC cannot fold it and emits `bl memcpy`. It hid in
+the GSU's PLOT from the port on (§4.5): four calls per pixel, invisible in the C,
+obvious in the disassembly (52 `bl memcpy` in the block code alone). When the
+address is known to be aligned, say so (`__builtin_assume_aligned`, or a typed
+access) and it becomes `ldrh`/`ldr`. **Grep the hot objects for `bl memcpy` /
+`bl memset`** — a "free" helper call in a pixel loop is never free here.
+
+### 5.9 A bigger translation unit changes how GCC inlines *unrelated* code
+
+Including 63 KB of generated block code in `gsu_core.c` made GCC inline 19
+helpers it had kept out of line before (`fx_lm`, `fx_stw`, `fx_cmprn`, …) into
+every interpreter handler: +27 KB of overlay, and the measured interpreter's code
+changed silently. GCC's inline-growth limits are *percentages of the unit*, so a
+bigger unit raises the budget for everything in it. Pinning those 19 `noinline`
+only moved the flip to other helpers (+15 KB). The fix was structural: generated
+code in its own unit (`gsu_blocks.c`); the interpreter then compiled exactly as
+before (an `nm -S` diff of the linked ELF: 3 symbols changed, all intended).
+Diff **linked** symbol sizes, not `.o` sizes — `--gc-sections` drops what is
+unreferenced.
 
 ---
 

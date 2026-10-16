@@ -132,10 +132,10 @@ SECTIONS
 
     . = __APU_HOT_START__ + 0x1D800;
     . = ALIGN(4);
-    /* gsu_core.o (the Super FX core) is not part of the image: see
+    /* gsu_core.o + gsu_blocks.o (the Super FX core) are not part of the image: see
      * .gsu_overlay below. */
-    *(EXCLUDE_FILE(*gsu_core.o) .text*)
-    *(EXCLUDE_FILE(*gsu_core.o) .rodata*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o) .text*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o) .rodata*)
     *(.glue_7)
     *(.glue_7t)
 
@@ -148,7 +148,7 @@ SECTIONS
 
   .data :
   {
-    *(EXCLUDE_FILE(*gsu_core.o) .data*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o) .data*)
   } >RAM_EMU :data
 
   __CORE_CODE_END__ = .;
@@ -156,8 +156,8 @@ SECTIONS
   .bss (NOLOAD) :
   {
     . = ALIGN(8);
-    *(EXCLUDE_FILE(*gsu_core.o) .bss*)
-    *(EXCLUDE_FILE(*gsu_core.o) COMMON)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o) .bss*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o) COMMON)
     . = ALIGN(8);
   } >RAM_EMU :data
 
@@ -221,17 +221,23 @@ SECTIONS
   {
     __GSU_OVL_START__ = .;
     *gsu_core.o(.text* .rodata* .data*)
+    *gsu_blocks.o(.text* .rodata* .data*)
     . = ALIGN(4);
     __GSU_OVL_CODE_END__ = .;
   }
 
-  .gsu_overlay_bss (NOLOAD) :
+  /* Right behind the code: without an address ld would put it at the RAM_EMU
+   * location counter, which has also counted the ITCM segment's load image. */
+  .gsu_overlay_bss ALIGN(__GSU_OVL_CODE_END__, 8) (NOLOAD) :
   {
     *gsu_core.o(.bss* COMMON)
+    *gsu_blocks.o(.bss* COMMON)
     . = ALIGN(4);
     __GSU_OVL_END__ = .;
   }
 
+  ASSERT(ADDR(.gsu_overlay_bss) >= __GSU_OVL_CODE_END__,
+         "SNES: Super FX overlay bss overlaps its code")
   ASSERT(__GSU_OVL_END__ <= __RAM_EMU_END__,
          "SNES: Super FX overlay does not fit the RAM_EMU pool")
 

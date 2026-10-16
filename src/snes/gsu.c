@@ -102,7 +102,15 @@ void gsu_runLine(Gsu *g) {
   gsu_service_irq(g);
 }
 
+#ifdef HOST_BUILD
+long gsu_host_frame;   /* emulated frames, for the host-only GSU tools in fx_ops.h */
+void gsu_state_frame(long frame);
+#endif
 void gsu_vblank(Gsu *g) {
+#ifdef HOST_BUILD
+  gsu_state_frame(gsu_host_frame);
+  gsu_host_frame++;
+#endif
   SNES_PERF_BEGIN(perf_t);
   gsu_zsnes_vblank();
   SNES_PERF_END(snes_perf_gsu, perf_t);
