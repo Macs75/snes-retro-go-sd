@@ -76,6 +76,13 @@ typedef struct {
   uint8_t  nidx;
   struct { uint8_t bank, reg, w, dpmode; uint16_t base; } idx[IDLE_MAX_IDX];
   bool     rdnmi;         /* reads $4210: idle only while the NMI flag is clear */
+  /* Super FX: the loop polls the GSU status word ($3030/$3031, one read).
+   * It changes only when the GSU runs (line events, span boundaries), so the
+   * proof snapshots the bits the polling instruction can observe and laps are
+   * skipped while those bits hold (see idle_prove / idle_skip_laps). */
+  bool     gsu_poll, gsu_bit;
+  uint8_t  gsu_w;         /* bytes read */
+  uint16_t gsu_pc, gsu_base, gsu_mask, gsu_snap;
   bool     code_ram;      /* the loop's code is in WRAM: compared every span    */
   uint8_t  ncode;
   uint8_t  code[IDLE_MAX_LEN];
@@ -138,6 +145,8 @@ extern IdleSkip *g_idlep;
 #define g_idle (*g_idlep)
 extern IdleStats g_idle_stats;
 extern uint8_t g_idle_budget;   /* proving laps left this frame, refilled at the NMI */
+extern uint8_t g_idle_gsu_budget;   /* the same for GSU poll sites, so they never
+                                     * starve the frame's wait loop of its proofs */
 
 /* once, after snes_init: move the state to DTCM (no-op off the device) */
 void idle_alloc(void);
@@ -145,6 +154,13 @@ void idle_alloc(void);
 void idle_reset(void);
 /* at the NMI request: examine the interrupted pc, arm a site if it passes */
 void idle_nmi_sample(Snes *s);
+/* Super FX: the CPU read the GSU status while the GSU is busy -- the same
+ * site search at the current pc (no per-frame bookkeeping) */
+void idle_gsu_poll_sample(Snes *s);
+/* Super FX, once a line: activate whichever known site holds the pc. Such a
+ * game waits in two loops a frame -- its frame wait and the GSU poll -- and
+ * only the NMI and the poll would otherwise switch between them. */
+void idle_line_select(Snes *s);
 /* before proving: resolve the read set (indexed operands with the current
  * X/Y) into pmem_off; false if any of it is not WRAM or ROM */
 bool idle_prepare_reads(Snes *s, IdleSkip *g);

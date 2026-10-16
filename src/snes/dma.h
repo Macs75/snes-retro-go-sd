@@ -38,6 +38,8 @@ struct Dma {
   Snes* snes;
   DmaChannel channel[8];
   uint16_t hdmaTimer;
+  uint8_t hclip;         /* H-IRQ dot moved mid-span: run_dots re-ends the span (in padding:
+                          * the engine reads it with hdmaTimer in one word) */
   uint32_t dmaTimer;
   bool dmaBusy;
   uint8_t hdmaEnabled;   /* $420C mask: nonzero if any HDMA channel armed (empty-scan guard) */

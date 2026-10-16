@@ -75,6 +75,16 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     printf("Failed to load rom: unsupported type (%d)\n", headers[used].cartType);
     return false;
   }
+  int loadRamSize = headers[used].chips > 0 ? (int)headers[used].ramSize : 0;
+  if(headers[used].coprocessor == 1) {
+    /* Super FX: the Game Pak RAM (the GSU's framebuffer and work RAM, shared
+     * with the 65816 as cart->ram) is the expansion RAM of a v3 header ($FFBD:
+     * 32 KB Yoshi/Vortex, 64 KB Doom/Stunt Race/Winter Gold...); the old Star
+     * Fox header has none and the board carries 32 KB. The GSU wraps its
+     * addresses to this size, as the chip does. */
+    uint32_t ex = headers[used].headerVersion == 3 ? headers[used].exRamSize : 0;
+    loadRamSize = ex >= 0x8000 && ex <= 0x20000 ? (int)ex : 0x8000;
+  }
 #ifdef GNW_SNES_CORE
   // Device: the ROM is memory-mapped from flash (the launcher caches it there)
   // and is megabytes large — the pow2 expand+malloc+copy below cannot fit the
@@ -83,7 +93,7 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   // by cart_fold(), so nothing is allocated or copied.
   cart_load(
     snes->cart, headers[used].cartType,
-    (uint8_t*)data, length, headers[used].chips > 0 ? headers[used].ramSize : 0
+    (uint8_t*)data, length, loadRamSize
   );
   // $ffd6: low nibble 3-5 = cart carries a coprocessor; high nibble 0 = the
   // DSP family. Attach the DSP-1 HLE (Mario Kart / Pilotwings class). DSP-2/3/4
@@ -103,6 +113,10 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   }
   if(headers[used].coprocessor == 15 && headers[used].chips == 9) {
     cart_attachSpc7110(snes->cart);
+  }
+  // $ffd6 high nibble $1 = Super FX / GSU (Star Fox, Yoshi's Island...).
+  if(headers[used].coprocessor == 1) {
+    cart_attachGsu(snes->cart);
   }
   snes_reset(snes, true); // reset after loading
   snes_set_region(snes, headers[used].pal);
@@ -129,7 +143,7 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   // load it
   cart_load(
     snes->cart, headers[used].cartType,
-    newData, newLength, headers[used].chips > 0 ? headers[used].ramSize : 0
+    newData, newLength, loadRamSize
   );
   // $ffd6: low nibble 3-5 = cart carries a coprocessor; high nibble 0 = the
   // DSP family. Attach the DSP-1 HLE (Mario Kart / Pilotwings class). DSP-2/3/4
@@ -145,6 +159,9 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   }
   if(headers[used].coprocessor == 15 && headers[used].chips == 9) {
     cart_attachSpc7110(snes->cart);
+  }
+  if(headers[used].coprocessor == 1) {
+    cart_attachGsu(snes->cart);
   }
   snes_reset(snes, true); // reset after loading
   snes_set_region(snes, headers[used].pal);

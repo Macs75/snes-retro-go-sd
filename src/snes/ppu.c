@@ -1974,7 +1974,7 @@ static void PpuDrawBackground_mosaic(Ppu *ppu, uint y, bool sub, uint layer,
 }
 
 /* Mode 2/4 offset-per-tile: each 8px screen column can replace H and/or V
- * scroll from BG3. One tile fetch per column. Mode 4 packs H/V in one word
+ * scroll from BG3. One tile fetch per BG tile. Mode 4 packs H/V in one word
  * (ppu_handleOPT). column 0 never applies OPT. */
 static void PpuDrawBackground_opt(Ppu *ppu, uint y, bool sub, uint layer,
                                   PpuZbufType zhi, PpuZbufType zlo, int bpp) {
@@ -1997,7 +1997,10 @@ static void PpuDrawBackground_opt(Ppu *ppu, uint y, bool sub, uint layer,
     PpuZbufType *dstz = ppu->bgBuffers[sub].data + x + kPpuExtraLeftRight;
     int run;
     do {
-      run = IntMin(8 - (x & 7), x2 - x);
+      /* A run must stay inside one BG tile: tiles start where (x + hScroll) & 7
+       * is 0, not at screen x & 7. OPT replaces only the coarse bits of lx, so
+       * this fine phase holds for the replaced position too. */
+      run = IntMin(8 - ((x + bglayer->hScroll) & 7), x2 - x);
       int lx = x + bglayer->hScroll;
       int ly = (int)y + bglayer->vScroll;
       ppu_handleOPT(ppu, (int)layer, &lx, &ly);

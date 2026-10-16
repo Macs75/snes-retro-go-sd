@@ -132,8 +132,10 @@ SECTIONS
 
     . = __APU_HOT_START__ + 0x1D800;
     . = ALIGN(4);
-    *(.text*)
-    *(.rodata*)
+    /* gsu_core.o (the Super FX core) is not part of the image: see
+     * .gsu_overlay below. */
+    *(EXCLUDE_FILE(*gsu_core.o) .text*)
+    *(EXCLUDE_FILE(*gsu_core.o) .rodata*)
     *(.glue_7)
     *(.glue_7t)
 
@@ -146,7 +148,7 @@ SECTIONS
 
   .data :
   {
-    *(.data*)
+    *(EXCLUDE_FILE(*gsu_core.o) .data*)
   } >RAM_EMU :data
 
   __CORE_CODE_END__ = .;
@@ -154,8 +156,8 @@ SECTIONS
   .bss (NOLOAD) :
   {
     . = ALIGN(8);
-    *(.bss*)
-    *(COMMON)
+    *(EXCLUDE_FILE(*gsu_core.o) .bss*)
+    *(EXCLUDE_FILE(*gsu_core.o) COMMON)
     . = ALIGN(8);
   } >RAM_EMU :data
 
@@ -207,6 +209,31 @@ SECTIONS
 
   ASSERT(__CORE_ITCM_BSS_END__ <= __ITCM_CORE_START__ + __ITCM_CORE_LENGTH__,
          "Error: SNES core ITCM (65816 Thumb-2) overflows 64K ITCM")
+
+  /* Super FX (GSU) overlay: linked to run at the start of the RAM_EMU pool
+   * (ram_start = __CORE_BSS_END__, where the firmware seeds the bump) and
+   * NOT loaded with the core. pack appends .gsu_overlay to snes.bin; for a
+   * Super FX cart the core's first pool allocation reserves this range and
+   * gsu_overlay_load() reads it in and zeroes .gsu_overlay_bss. Other games
+   * keep the whole pool. The LMA is a dummy outside every region (the bytes
+   * are only ever taken with objcopy --only-section). */
+  .gsu_overlay __CORE_BSS_END__ : AT(0xD0000000)
+  {
+    __GSU_OVL_START__ = .;
+    *gsu_core.o(.text* .rodata* .data*)
+    . = ALIGN(4);
+    __GSU_OVL_CODE_END__ = .;
+  }
+
+  .gsu_overlay_bss (NOLOAD) :
+  {
+    *gsu_core.o(.bss* COMMON)
+    . = ALIGN(4);
+    __GSU_OVL_END__ = .;
+  }
+
+  ASSERT(__GSU_OVL_END__ <= __RAM_EMU_END__,
+         "SNES: Super FX overlay does not fit the RAM_EMU pool")
 
   __exidx_start = .;
   __exidx_end = .;

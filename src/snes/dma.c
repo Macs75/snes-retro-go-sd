@@ -207,7 +207,12 @@ void dma_doDma(Dma* dma) {
     }
   }
   if(i == 8) {
-    // no active channels
+    // no active channels: the data has moved, but the CPU stays halted for the
+    // transfer's bus time ($420B charges it to dmaTimer), 2 dots per call
+    if(dma->dmaTimer >= 2) {
+      dma->dmaTimer -= 2;
+      return;
+    }
     dma->dmaBusy = false;
     dma->dmaTimer = 0;
     return;

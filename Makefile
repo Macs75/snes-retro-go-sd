@@ -55,6 +55,8 @@ $(SNES)/dsp1_hle.c \
 $(SNES)/cx4_hle.c \
 $(SNES)/sdd1.c \
 $(SNES)/spc7110.c \
+$(SNES)/gsu.c \
+$(SNES)/gsu_zsnes/gsu_core.c \
 $(SNES)/input.c \
 $(SNES)/ppu.c \
 $(SNES)/snes.c \
@@ -211,6 +213,8 @@ pack: $(TARGET_BIN)
 		--header-logo $(HEADER_LOGO) \
 		--logo-invert \
 		--out $(PACKED_BIN)
+	$(V)python3 tools/append_gsu_overlay.py $(TARGET_ELF) $(PACKED_BIN) \
+		--nm $(subst objcopy,nm,$(CP)) --objcopy $(CP)
 
 all: pack
 

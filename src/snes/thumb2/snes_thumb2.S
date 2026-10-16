@@ -8955,6 +8955,13 @@ snes_thumb2_batch:
         ldrb    r2, [r2]
         cmp     r2, #0
         bne     .Lb_exit_noop
+#ifdef SNES_PERF
+        movw    r0, #:lower16:snes_perf_ops     @ PROF/ops: one more 65816 opcode
+        movt    r0, #:upper16:snes_perf_ops
+        ldr     r1, [r0]
+        adds    r1, r1, #1
+        str     r1, [r0]
+#endif
         movs    r0, #0
         strb    r0, [r7, #SNES_CPUMEMOPS]   @ cpuMemOps = 0
         mov     r0, r7                  @ fetch, exactly as snes_thumb2_run
@@ -8982,8 +8989,8 @@ snes_thumb2_batch:
         ldr     r10, [r7, #SNES_APUDOTS]    @ the opcode's APU catch-up may have zeroed it
         ldrb    r1, [r11, #DMA_BUSY]
         cbnz    r1, .Lb_out             @ DMA started: C takes the step
-        ldrh    r1, [r11, #DMA_HDMATIMER]
-        cbnz    r1, .Lb_out
+        ldr     r1, [r11, #DMA_HDMATIMER]   @ hdmaTimer, and hclip in the next halfword:
+        cbnz    r1, .Lb_out             @ an HDMA stall or a moved H-IRQ dot -> C
         cmp     r0, #2
         blo     .Lb_out                 @ (never: a charge is >= 6) C's else-branch
         cmp     r0, r8

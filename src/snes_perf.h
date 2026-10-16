@@ -28,6 +28,8 @@ extern uint32_t snes_perf_ppu, snes_perf_ppu_lines;
 extern uint32_t snes_perf_apu, snes_perf_apu_calls;   /* apu_run, inclusive (SPC700 + DSP) */
 extern uint32_t snes_perf_dsp;                        /* DSP ticks inside apu_run */
 extern uint32_t snes_perf_dma, snes_perf_dma_calls;   /* DMA, minus any APU work inside it */
+extern uint32_t snes_perf_gsu;                        /* Super FX: every GSU slice (line, vblank, start) */
+extern uint32_t snes_perf_ops, snes_perf_gsu_reads;   /* 65816 opcodes run; CPU reads of GSU registers */
 
 /* the PPU split (cycles, both inside snes_perf_ppu): sprite evaluation runs
  * on every line of every frame; the rest only on drawn lines. main/sub are

@@ -57,6 +57,8 @@ _Static_assert(offsetof(Snes, hTimer)       == SNES_HTIMER,  "SNES_HTIMER stale"
 _Static_assert(offsetof(Snes, vTimer)       == SNES_VTIMER,  "SNES_VTIMER stale");
 _Static_assert(offsetof(Snes, inIrq)        == SNES_INIRQ,   "SNES_INIRQ stale");
 _Static_assert(offsetof(Dma, hdmaTimer)     == DMA_HDMATIMER, "DMA_HDMATIMER stale");
+_Static_assert(offsetof(Dma, hclip)         == DMA_HDMATIMER + 2 && offsetof(Dma, dmaTimer) == DMA_HDMATIMER + 4,
+               "the batch reads hdmaTimer and hclip as one word");
 _Static_assert(offsetof(Dma, dmaBusy)       == DMA_BUSY,      "DMA_BUSY stale");
 _Static_assert(sizeof(((Snes*)0)->hPos) == 2 && sizeof(((Snes*)0)->apuDotsAccum) == 4 &&
                sizeof(((Snes*)0)->hTimer) == 2 && sizeof(((Snes*)0)->vTimer) == 2 &&

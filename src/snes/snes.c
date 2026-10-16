@@ -18,6 +18,7 @@
 #include "cart.h"
 #include "sdd1.h"
 #include "spc7110.h"
+#include "gsu.h"
 #include "input.h"
 #include "tracing.h"
 #include "snes_gnw_alloc.h"
@@ -48,6 +49,20 @@ static uint8_t *snes_pagemap_base(Snes *snes, uint32_t adr) {
   if (bank == 0x7e || bank == 0x7f) return &snes->ram[((bank & 1) << 16) | off];
   if (off < 0x2000 && (bank < 0x40 || (bank >= 0x80 && bank < 0xc0))) return &snes->ram[off];
   Cart *cart = snes->cart;
+  /* Super FX: exactly the ROM that cart_gsu_read serves -- $00-$3F/$80-$BF
+   * upper halves as LoROM, $40-$5F/$C0-$DF as linear 64 KB banks. Game Pak RAM,
+   * the RAM mirror and the GSU registers keep the slow path. (romPageOk is off
+   * for these carts; the CPU is never locked out of ROM in this port.) */
+  if (cart && cart->gsu) {
+    if (!cart->romMask) return NULL;   /* Super FX ROMs are 512 KB-2 MB, all 2^n */
+    uint8_t b = bank & 0x7f;
+    uint32_t page = adr & ~(uint32_t)0x1fff;
+    if (b <= 0x3f && off >= 0x8000)
+      return cart->rom + ((((uint32_t)b << 15) | (page & 0x7fff)) & cart->romMask);
+    if (b >= 0x40 && b <= 0x5f)
+      return cart->rom + ((((uint32_t)(b & 0x1f) << 16) | (page & 0xffff)) & cart->romMask);
+    return NULL;
+  }
   if (cart && off >= 0x8000 && SNES_ROM_PAGE_OK(cart) && !SNES_DSP_LOROM_WINDOW(cart, bank)) {
     uint32_t page = adr & ~(uint32_t)0x1fff;
 #if SNES_ROMPAGE_FOLD
@@ -303,7 +318,11 @@ void snes_handle_pos_stuff(Snes *snes) {
       }
       if (snes->cart && snes->cart->spc7110)
         spc7110_tick(snes->cart->spc7110);
+      if (snes->cart && snes->cart->gsu)
+        gsu_vblank(snes->cart->gsu);   /* finish the frame's GSU work */
     }
+    if (snes->cart && snes->cart->gsu)
+      gsu_runLine(snes->cart->gsu);    /* one scanline's GSU slice */
   } else if (snes->hPos == 512) {
     // render the line halfway of the screen for better compatibility
     if (!snes->inVblank && !snes->disableRender) {
@@ -408,7 +427,11 @@ void snes_run_line(Snes *snes) {
     }
     if (snes->cart && snes->cart->spc7110)
       spc7110_tick(snes->cart->spc7110);
+    if (snes->cart && snes->cart->gsu)
+      gsu_vblank(snes->cart->gsu);     /* finish the frame's GSU work */
   }
+  if (snes->cart && snes->cart->gsu)
+    gsu_runLine(snes->cart->gsu);      /* one scanline's GSU slice */
 
   /* The V-timer matches on every dot of its line; setting the flag once is the
    * same thing to everyone who reads it. */
@@ -627,6 +650,15 @@ static uint8_t snes_readReg(Snes* snes, uint16_t adr) {
   }
 }
 
+/* $4207/$4208 (HTIME), out of line: written a few times a frame, and
+ * snes_write fills its fixed BUS window (snes_core.ld). */
+__attribute__((noinline))
+static void snes_write_htime(Snes* snes, uint16_t adr, uint8_t val) {
+  if (adr == 0x4207) snes->hTimer = (snes->hTimer & 0x100) | val;
+  else               snes->hTimer = (snes->hTimer & 0x0ff) | ((val & 1) << 8);
+  snes->dma->hclip = 1;   /* the H-IRQ dot moved: end the span there */
+}
+
 static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
   switch(adr) {
     case 0x4200: {
@@ -637,6 +669,7 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
       if(!snes->autoJoyRead) snes->autoJoyTimer = 0;
       snes->hIrqEnabled = val & 0x10;
       snes->vIrqEnabled = val & 0x20;
+      snes->dma->hclip = 1;   /* the H-IRQ may now match inside this span */
       snes->nmiEnabled = val & 0x80;
       if(!snes->hIrqEnabled && !snes->vIrqEnabled) {
         snes->inIrq = false;
@@ -693,14 +726,10 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
       }
       break;
     }
-    case 0x4207: {
-      snes->hTimer = (snes->hTimer & 0x100) | val;
+    case 0x4207:
+    case 0x4208:
+      snes_write_htime(snes, adr, val);
       break;
-    }
-    case 0x4208: {
-      snes->hTimer = (snes->hTimer & 0x0ff) | ((val & 1) << 8);
-      break;
-    }
     case 0x4209: {
       snes->vTimer = (snes->vTimer & 0x100) | val;
       break;
@@ -719,11 +748,26 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
                t, snes->dma->channel[1].bAdr,
                snes->ppu->vramPointer, snes->dma->channel[1].size, data);
       }
-      dma_startDma(snes->dma, val, false);
       {
+        /* The data moves now, but the CPU is halted for the transfer's bus time
+         * on hardware: 8 master cycles a byte plus 8 a channel. Leave that in
+         * dmaTimer with dmaBusy set; the scheduler runs it out as a DMA stall,
+         * so interrupts raised meanwhile are taken only when it ends (Dirt Trax
+         * FX's WAI after a 14 KB VRAM upload relies on the NMI landing first). */
+        Dma *dma = snes->dma;
+        uint32_t stall = 0;
+        for (int c = 0; c < 8; c++)
+          if (val & (1 << c)) stall += 8 * (dma->channel[c].size ? dma->channel[c].size : 0x10000u) + 8;
+        dma_startDma(dma, val, false);
         SNES_PERF_DMA_BEGIN(perf_t, perf_a);
-        while (dma_cycle(snes->dma)) {}
+        for (;;) {
+          int c = 0;
+          while (c < 8 && !dma->channel[c].dmaActive) c++;
+          if (c == 8) break;
+          dma_cycle(dma);
+        }
         SNES_PERF_DMA_END(perf_t, perf_a);
+        if (dma->dmaBusy) dma->dmaTimer += stall;
       }
       break;
     }

@@ -74,6 +74,7 @@ static void snes_wait_button(void)
 
 #include "snes/snes.h"
 #include "snes/cart.h"
+#include "snes/gsu.h"
 #include "snes/spc7110.h"
 #include "snes/ppu.h"
 #include "snes/apu.h"
@@ -204,6 +205,8 @@ uint32_t snes_perf_ppu, snes_perf_ppu_lines;
 uint32_t snes_perf_apu, snes_perf_apu_calls;
 uint32_t snes_perf_dsp;
 uint32_t snes_perf_dma, snes_perf_dma_calls;
+uint32_t snes_perf_gsu;
+uint32_t snes_perf_ops, snes_perf_gsu_reads;
 uint32_t snes_perf_ppu_part[SNES_PERF_PPU_N];
 uint32_t snes_perf_ppu_drawn, snes_perf_ppu_sub_lines, snes_perf_ppu_spr_lines;
 uint32_t snes_perf_ppu_math_lines, snes_perf_ppu_mode[8];
@@ -284,8 +287,9 @@ static void snes_perf_report(void)
   /* the frame budget at the PCB rate: 60.0988 Hz NTSC, 50.0070 Hz PAL */
   uint32_t budget = (uint32_t)((uint64_t)sp_mhz * 1000000u * 10000u / (snes_fps == SNES_FPS_PAL ? 500070u : 600988u));
   uint32_t ppu = snes_perf_ppu / n, apu_e = sp_apu_emu / n, dma = snes_perf_dma / n;
+  uint32_t gsu = snes_perf_gsu / n;
   uint32_t emu = sp_phase[SP_EMU] / n;
-  uint32_t cpu = emu > ppu + apu_e + dma ? emu - ppu - apu_e - dma : 0;
+  uint32_t cpu = emu > ppu + apu_e + dma + gsu ? emu - ppu - apu_e - dma - gsu : 0;
   uint32_t dsp = snes_perf_dsp / n, apu_all = snes_perf_apu / n;
   uint32_t spc = apu_all > dsp ? apu_all - dsp : 0;
   uint32_t busy = 0;
@@ -296,9 +300,11 @@ static void snes_perf_report(void)
          snes_half_lock_active() ? "on" : "off", sm < 4 ? scal[sm] : "?", snes_fps == SNES_FPS_PAL ? "PAL" : "NTSC");
   printf("PROF/budget: budget=%lu busy=%lu heaviest=%lu (cycles per emulated frame, %lu MHz)\n",
          (unsigned long)budget, (unsigned long)busy, (unsigned long)sp_frame_max, (unsigned long)sp_mhz);
-  printf("PROF/emu: total=%lu [cpu=%lu ppu=%lu apu=%lu dma=%lu] per emulated frame, ppu lines=%lu\n",
+  printf("PROF/emu: total=%lu [cpu=%lu ppu=%lu apu=%lu dma=%lu gsu=%lu] per emulated frame, ppu lines=%lu\n",
          (unsigned long)emu, (unsigned long)cpu, (unsigned long)ppu, (unsigned long)apu_e, (unsigned long)dma,
-         (unsigned long)(snes_perf_ppu_lines / n));
+         (unsigned long)gsu, (unsigned long)(snes_perf_ppu_lines / n));
+  printf("PROF/ops: ops=%lu gsu_reads=%lu per emulated frame (65816 opcodes run; CPU reads of $3000-$32FF)\n",
+         (unsigned long)(snes_perf_ops / n), (unsigned long)(snes_perf_gsu_reads / n));
   printf("PROF/apu: total=%lu [spc700=%lu dsp=%lu] in_emu=%lu in_pcm=%lu calls=%lu per emulated frame\n",
          (unsigned long)apu_all, (unsigned long)spc, (unsigned long)dsp, (unsigned long)apu_e,
          (unsigned long)(sp_apu_pcm / n), (unsigned long)(snes_perf_apu_calls / n));
@@ -410,7 +416,8 @@ static void snes_perf_reset(void)
   sp_under0 = snes_stretch_underruns(); sp_ins0 = g_stretch_ins;
   for (int i = 0; i < SP_N; i++) sp_phase[i] = 0;
   snes_perf_ppu = snes_perf_ppu_lines = snes_perf_apu = snes_perf_apu_calls = 0;
-  snes_perf_dsp = snes_perf_dma = snes_perf_dma_calls = 0;
+  snes_perf_dsp = snes_perf_dma = snes_perf_dma_calls = snes_perf_gsu = 0;
+  snes_perf_ops = snes_perf_gsu_reads = 0;
   memset(snes_perf_ppu_part, 0, sizeof(snes_perf_ppu_part));
   memset(snes_perf_ppu_mode, 0, sizeof(snes_perf_ppu_mode));
   snes_perf_ppu_drawn = snes_perf_ppu_sub_lines = snes_perf_ppu_spr_lines = snes_perf_ppu_math_lines = 0;
@@ -481,6 +488,9 @@ static int SNES_ITCM_SCHED run_one_opcode(Snes *s) {
   uint32_t pc_t0 = snes_perf_now(), pc_a0 = snes_perf_apu, pc_d0 = snes_perf_dma, pc_p0 = snes_perf_ppu;
 #endif
   int cycles = SNES_PROF_CPU_CALL(CPU_RUN_OPCODE(cpu));
+#ifdef SNES_PERF
+  snes_perf_ops++;   /* PROF/ops; the Thumb-2 batch counts its own */
+#endif
 #ifdef SNES_PERF_CPU
   snes_perf_cpu_eng += snes_perf_now() - pc_t0 - (snes_perf_apu - pc_a0) - (snes_perf_dma - pc_d0)
                        - (snes_perf_ppu - pc_p0);
@@ -532,6 +542,9 @@ static inline uint32_t SNES_ITCM_SCHED run_one_opcode_charge(Snes *s) {
   uint32_t pc_t0 = snes_perf_now(), pc_a0 = snes_perf_apu, pc_d0 = snes_perf_dma, pc_p0 = snes_perf_ppu;
 #endif
   int cycles = SNES_PROF_CPU_CALL(CPU_RUN_OPCODE(cpu));
+#ifdef SNES_PERF
+  snes_perf_ops++;   /* PROF/ops; the Thumb-2 batch counts its own */
+#endif
 #ifdef SNES_PERF_CPU
   snes_perf_cpu_eng += snes_perf_now() - pc_t0 - (snes_perf_apu - pc_a0) - (snes_perf_dma - pc_d0)
                        - (snes_perf_ppu - pc_p0);
@@ -686,6 +699,7 @@ static bool idle_prove(Snes *s, int *dots) {
   if (!idle_code_ok(s, g) || !idle_prepare_reads(s, g)) return false;
   idle_state(s, &start);
   for (int i = 0; i < g->npmem; i++) mem[i] = s->ram[g->pmem_off[i]];
+  const uint16_t sfr0 = g->gsu_poll ? gsu_sfr_peek() : 0;
   IdleState seen[IDLE_MAX_STATES];
   uint8_t seen_ch[IDLE_MAX_STATES];
   int nseen = 0;
@@ -711,6 +725,22 @@ static bool idle_prove(Snes *s, int *dots) {
     idle_state(s, &cur);
     if (cur.pc == start.pc) {
       if (!idle_state_eq(&cur, &start) || !idle_mem_eq(s, mem)) return false;
+      if (g->gsu_poll) {
+        /* The bits of the GSU status the polling instruction can observe:
+         * BIT sets only N/V (bits 15/14, or 7/6 of the byte read) and Z from
+         * A & value, with A as it was at that instruction; any other read
+         * loads or compares the whole value. A lap only recurs if they held. */
+        int j;
+        for (j = 0; j < nseen; j++) if (seen[j].pc == g->gsu_pc) break;
+        if (j == nseen) return false;
+        const uint16_t a = (uint16_t)(seen[j].img[0] | seen[j].img[1] << 8);
+        uint16_t m = g->gsu_bit ? (uint16_t)(g->gsu_w == 2 ? 0xC000 | a : 0xC0 | (a & 0xff))
+                                : (uint16_t)(g->gsu_w == 2 ? 0xFFFF : 0x00FF);
+        if (g->gsu_w == 1 && g->gsu_base == 0x3031) m = (uint16_t)(m << 8);
+        if ((gsu_sfr_peek() & m) != (sfr0 & m)) return false;
+        g->gsu_mask = m;
+        g->gsu_snap = (uint16_t)(sfr0 & m);
+      }
       for (int i = 0; i < nseen; i++) { g->st[i] = seen[i]; g->ch[i] = seen_ch[i]; }
       g->nst = (uint8_t)nseen;
       for (int i = 0; i < g->npmem; i++) g->smem[i] = mem[i];
@@ -727,8 +757,9 @@ static bool idle_prove(Snes *s, int *dots) {
 static int idle_skip_laps(Snes *s, int dots);
 __attribute__((noinline))
 static int idle_prove_span(Snes *s, int dots) {
-  if (g_idle_budget == 0 || !idle_boundary_ok(s)) return dots;
-  g_idle_budget--;
+  uint8_t *budget = g_idle.gsu_poll ? &g_idle_gsu_budget : &g_idle_budget;
+  if (*budget == 0 || !idle_boundary_ok(s)) return dots;
+  (*budget)--;
   if (!idle_prove(s, &dots)) return dots;
   return idle_skip_laps(s, dots);
 }
@@ -746,6 +777,9 @@ static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
   IdleSkip *g = &g_idle;
   if (!g->snap_ok) return dots;
   if (g->rdnmi && idle_rdnmi_live(s)) return dots; /* the loop is about to see the flag */
+  /* the GSU status the loop watches moved (GO cleared, IRQ set): the loop is
+   * about to leave, so no lap to skip and none worth a proof */
+  if (g->gsu_poll && (gsu_sfr_peek() & g->gsu_mask) != g->gsu_snap) return dots;
   if (g->code_ram && !idle_code_ok(s, g)) {        /* its code was overwritten: drop it */
     g->snap_ok = false; g->head = 0xffff; g->len = 0;
     return dots;
@@ -963,6 +997,24 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
         SNES_PERF_CPU_INC(snes_perf_cpu_dmaloop);
         continue;
       }
+      /* General-DMA stall: $420B has moved the data and left its bus time in
+       * dmaTimer; with no channel active, dma_cycle() only counts it down 2 dots
+       * a call (~56,000 calls for a 14 KB upload). Take it in one step like the
+       * HDMA stall above, leaving the call that clears dmaBusy to the path
+       * below. Same end state as the 2-dot calls. */
+      if (dma->hdmaTimer == 0 && dma->dmaBusy && dma->dmaTimer >= 2 && !(dma->dmaTimer & 1)) {
+        int c = 0;
+        while (c < 8 && !dma->channel[c].dmaActive) c++;
+        if (c == 8) {
+          int k = (int)(dma->dmaTimer >> 1), kd = (dots + 1) >> 1;
+          if (kd < k) k = kd;
+          dma->dmaTimer -= (uint32_t)(2 * k);
+          apud += (uint32_t)(2 * k);
+          hpos = (uint16_t)(hpos + 2 * k); dots -= 2 * k;
+          SNES_PERF_CPU_INC(snes_perf_cpu_dmaloop);
+          continue;
+        }
+      }
       s->hPos = hpos;
       s->apuDotsAccum = apud;
 #ifdef SNES_PERF
@@ -1016,6 +1068,20 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
           }
         }
 #endif
+      }
+      /* The H-IRQ matches only on its exact dot, and a span ends on that dot
+       * only if hTimer held it when the span began. When this opcode moved it
+       * ($4207/$4208, or $4200 turning it on: those set hclip, and the engine
+       * batch hands back on it) and the new dot is still ahead in the span,
+       * end the span there -- else every later opcode steps over the match and
+       * the IRQ comes a frame late (Doom: IRQ at dot 384 sets HTIME for 992 on
+       * the same line, polls TIMEUP, then toggles forced blank). */
+      if (dma->hclip) {
+        dma->hclip = 0;
+        if (s->hIrqEnabled) {
+          const int t = s->hTimer * 4 - hpos;
+          if (t > 0 && t < dots) dots = t;
+        }
       }
       started_dma = dma->dmaBusy || dma->hdmaTimer > 0;
     }
@@ -2183,6 +2249,65 @@ static void rec_host_start(void)
  * (DSP-x/SA-1/SuperFX/...). The DSP-1 family (high nibble 0, low nibble 3-5)
  * has HLE support in dsp1_hle.c, and Cx4 (romType $F0-$FF with $FFBF=$10)
  * in cx4_hle.c. Everything else is rejected. */
+/* Super FX: the GSU core (gsu_core.o) is an overlay, not part of the core
+ * image -- see .gsu_overlay in snes_core.ld. pack appends it to snes.bin as
+ *   u32 magic 'GSUO', u32 run address, u32 code+data size, u32 bss size,
+ *   code+data bytes
+ * after the segments. For a Super FX cart it must be the FIRST allocation in
+ * the RAM_EMU pool (which starts exactly where it is linked to run). */
+#define GSU_OVL_MAGIC 0x4F555347u   /* "GSUO" */
+#define GSU_OVL_CORE_PATH "/cores/snes.bin"
+
+static bool rom_is_superfx(const uint8_t *rom, uint32_t len) {
+  if (!rom || len < 0x8000) return false;
+  const uint8_t *h = rom + 0x7fb0;             /* Super FX carts are LoROM */
+  uint16_t cks  = h[0x2e] | (h[0x2f] << 8);
+  uint16_t icks = h[0x2c] | (h[0x2d] << 8);
+  return (cks ^ icks) == 0xffff && (h[0x26] >> 4) == 0x01 && h[0x26] >= 0x13;
+}
+
+#ifndef HOST_BUILD
+extern uint8_t __GSU_OVL_START__[], __GSU_OVL_CODE_END__[], __GSU_OVL_END__[];
+
+static uint32_t gsu_ovl_rd32(const uint8_t *p) {
+  return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+/* Returns NULL on success, else why it failed. */
+static const char *gsu_overlay_load(void) {
+  const uint32_t code = (uint32_t)(__GSU_OVL_CODE_END__ - __GSU_OVL_START__);
+  const uint32_t bss  = (uint32_t)(__GSU_OVL_END__ - __GSU_OVL_CODE_END__);
+  if (ram_get_free_size() < code + bss) return "not enough RAM";
+  uint8_t *dst = (uint8_t *)ram_malloc(code + bss);
+  if (dst != __GSU_OVL_START__) return "overlay address";
+
+  /* "CORE" header: u16 version at 4, u16 header_length at 6, meta at 8 with
+   * segments_count at +12 and segments[] (region, code_size, bss_size) at +16;
+   * the payload (segments' code back to back) starts at 8 + header_length. */
+  static uint8_t hdr[8 + 16 + 4 * 12];
+  if (rg_storage_copy_file_range_to_ram(GSU_OVL_CORE_PATH, hdr, 0, sizeof hdr, NULL) != sizeof hdr ||
+      memcmp(hdr, "CORE", 4) != 0)
+    return "cannot read " GSU_OVL_CORE_PATH;
+  uint32_t off = 8 + (hdr[6] | (hdr[7] << 8));
+  uint32_t nseg = gsu_ovl_rd32(hdr + 8 + 12);
+  if (nseg > 4) return "core header";
+  for (uint32_t i = 0; i < nseg; i++) off += gsu_ovl_rd32(hdr + 8 + 16 + i * 12 + 4);
+
+  uint8_t th[16];
+  if (rg_storage_copy_file_range_to_ram(GSU_OVL_CORE_PATH, th, off, sizeof th, NULL) != sizeof th ||
+      gsu_ovl_rd32(th) != GSU_OVL_MAGIC || gsu_ovl_rd32(th + 4) != (uint32_t)(uintptr_t)dst ||
+      gsu_ovl_rd32(th + 8) != code || gsu_ovl_rd32(th + 12) != bss)
+    return "overlay does not match this core";
+  if (rg_storage_copy_file_range_to_ram(GSU_OVL_CORE_PATH, dst, off + sizeof th, code, NULL) != code)
+    return "overlay read";
+  memset(dst + code, 0, bss);
+  SCB_CleanDCache_by_Addr((uint32_t *)dst, (int32_t)code);
+  SCB_InvalidateICache();
+  printf("snes: Super FX overlay %lu+%lu B at %p\n", (unsigned long)code, (unsigned long)bss, (void *)dst);
+  return NULL;
+}
+#endif
+
 static bool cart_needs_coprocessor(const uint8_t *rom, uint32_t len) {
   static const uint32_t offs[2] = { 0x7fb0, 0xffb0 };   /* LoROM, HiROM */
   for (int i = 0; i < 2; i++) {
@@ -2200,6 +2325,8 @@ static bool cart_needs_coprocessor(const uint8_t *rom, uint32_t len) {
           /* Cx4 is supported */
         } else if ((romType >> 4) == 0x04) {
           /* S-DD1 is supported (Star Ocean, SFA2) */
+        } else if ((romType >> 4) == 0x01) {
+          /* Super FX / GSU is supported (Star Fox, Yoshi's Island...) */
         } else if ((romType >> 4) == 0x0F && (romType & 0x0f) == 0x09) {
           /* SPC7110 is supported (Far East of Eden Zero / Momotaro / SPL4) */
         } else {
@@ -2429,6 +2556,20 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
   smw_hle_frame = 0;
   bool wire_armed = wire_configure_rom(rom, sz);
   printf("SNES SMW audio HLE: %s\n", wire_armed ? "armed (exact ROM)" : "LLE fallback");
+#endif
+
+#ifndef HOST_BUILD
+  if (rom_is_superfx(rom, sz)) {
+    const char *why = gsu_overlay_load();
+    if (why) {
+      printf("snes: Super FX overlay: %s\n", why);
+      draw_error_screen("Super FX core not loaded", why, "Press a button");
+      lcd_swap();
+      snes_wait_button();
+      odroid_system_switch_app(0);
+      return;
+    }
+  }
 #endif
 
   printf("snes: snes_init\n");

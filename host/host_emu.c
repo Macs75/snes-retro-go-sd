@@ -315,8 +315,35 @@ void *lcd_get_inactive_buffer(void)
     return active_framebuffer ? framebuffer1 : framebuffer2;
 }
 
+/* SNES_SHOT=start:end:step dumps presented frames (by presented-frame number)
+ * as PPM into SNES_SHOT_DIR (default .) */
+static void host_maybe_shot(const uint16_t *px, unsigned long n)
+{
+    static long s0 = -2, s1, st = 1;
+    if (s0 == -2) {
+        const char *e = getenv("SNES_SHOT");
+        s0 = -1;
+        if (e) sscanf(e, "%ld:%ld:%ld", &s0, &s1, &st);
+        if (st < 1) st = 1;
+    }
+    if (s0 < 0 || (long)n < s0 || (long)n > s1 || ((long)n - s0) % st) return;
+    const char *d = getenv("SNES_SHOT_DIR");
+    char path[512];
+    snprintf(path, sizeof path, "%s/f%06lu.ppm", d ? d : ".", n);
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    fprintf(f, "P6\n%d %d\n255\n", GW_LCD_WIDTH, GW_LCD_HEIGHT);
+    for (int i = 0; i < GW_LCD_WIDTH * GW_LCD_HEIGHT; i++) {
+        uint16_t c = px[i];
+        uint8_t rgb[3] = { (uint8_t)((c >> 11) << 3), (uint8_t)(((c >> 5) & 0x3f) << 2), (uint8_t)((c & 0x1f) << 3) };
+        fwrite(rgb, 1, 3, f);
+    }
+    fclose(f);
+}
+
 void lcd_swap(void)
 {
+    host_maybe_shot((const uint16_t *)lcd_get_active_buffer(), frame_counter);
     host_poll_events();
     host_platform_present_rgb565((const uint16_t *)lcd_get_active_buffer(),
                                  GW_LCD_WIDTH, GW_LCD_HEIGHT);
