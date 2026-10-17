@@ -13,9 +13,8 @@
  *     once; the borders are odd, so the two pairs at the image edges mix a
  *     border pixel with an image pixel.
  *
- * `frame` is the 320-wide SNES frame buffer and `top`/`left` the picture's
- * position in it (the margins it is centred with); `dst` the 320x240
- * panel buffer, 4-byte aligned. */
+ * `frame` is the SNES picture, SNES_SCALE_SRC_W pixels a row; `dst` the
+ * 320x240 panel buffer, 4-byte aligned. */
 #pragma once
 #include <stdint.h>
 
@@ -31,16 +30,16 @@ typedef uint32_t __attribute__((may_alias)) snes_scale_u32;
 #define SNES_SCALE_FIT_W   ((SNES_SCALE_SRC_W * SNES_SCALE_DST_H + SNES_SCALE_SRC_H / 2) / SNES_SCALE_SRC_H)  /* 274 */
 #define SNES_SCALE_FIT_PAD ((SNES_SCALE_DST_W - SNES_SCALE_FIT_W) / 2)                                      /* 23 */
 
-static inline const uint16_t *snes_scale_src_row(const uint16_t *frame, int y, int top, int left)
+static inline const uint16_t *snes_scale_src_row(const uint16_t *frame, int y)
 {
   int sy = (y * SNES_SCALE_SRC_H) / SNES_SCALE_DST_H;
-  return frame + (sy + top) * SNES_SCALE_DST_W + left;
+  return frame + sy * SNES_SCALE_SRC_W;
 }
 
-static void snes_scale_full(uint16_t *dst, const uint16_t *frame, int top, int left)
+static void snes_scale_full(uint16_t *dst, const uint16_t *frame)
 {
   for (int y = 0; y < SNES_SCALE_DST_H; y++) {
-    const snes_scale_u32 *s = (const snes_scale_u32 *)(const void *)snes_scale_src_row(frame, y, top, left);
+    const snes_scale_u32 *s = (const snes_scale_u32 *)(const void *)snes_scale_src_row(frame, y);
     snes_scale_u32 *d = (snes_scale_u32 *)(void *)(dst + y * SNES_SCALE_DST_W);
     for (int i = 0; i < SNES_SCALE_SRC_W / 8; i++, s += 4, d += 5) {
       uint32_t a = s[0], b = s[1], c = s[2], e = s[3];   /* s0s1 s2s3 s4s5 s6s7 */
@@ -57,7 +56,7 @@ static void snes_scale_full(uint16_t *dst, const uint16_t *frame, int top, int l
 static uint8_t snes_scale_fit_col[SNES_SCALE_FIT_W];
 static int snes_scale_fit_ready;
 
-static void snes_scale_fit(uint16_t *dst, const uint16_t *frame, int top, int left)
+static void snes_scale_fit(uint16_t *dst, const uint16_t *frame)
 {
   enum { W = SNES_SCALE_FIT_W, PAD = SNES_SCALE_FIT_PAD };
   if (!snes_scale_fit_ready) {
@@ -67,7 +66,7 @@ static void snes_scale_fit(uint16_t *dst, const uint16_t *frame, int top, int le
   /* output pairs: [0, PAD/2) black, PAD/2 = black | image 0 (PAD is odd),
    * then image pairs, then image W-1 | black, then black */
   for (int y = 0; y < SNES_SCALE_DST_H; y++) {
-    const uint16_t *s = snes_scale_src_row(frame, y, top, left);
+    const uint16_t *s = snes_scale_src_row(frame, y);
     snes_scale_u32 *d = (snes_scale_u32 *)(void *)(dst + y * SNES_SCALE_DST_W);
     int p = 0;
     for (; p < PAD / 2; p++) d[p] = 0;

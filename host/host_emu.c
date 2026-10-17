@@ -946,8 +946,12 @@ void odroid_system_switch_app(int app)
     exit(app == 0 ? 0 : 1);
 }
 
+/* SNES_SCALING=off|full|fit picks the presentation mode (default off, 1:1) */
 odroid_display_scaling_t odroid_display_get_scaling_mode(void)
 {
+    const char *e = getenv("SNES_SCALING");
+    if (e && !strcmp(e, "full")) return ODROID_DISPLAY_SCALING_FULL;
+    if (e && !strcmp(e, "fit")) return ODROID_DISPLAY_SCALING_FIT;
     return ODROID_DISPLAY_SCALING_OFF;
 }
 

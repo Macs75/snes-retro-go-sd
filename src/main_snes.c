@@ -1319,22 +1319,21 @@ static uint16_t read_snes_pad(odroid_gamepad_state_t *joy) {
 }
 
 /* ---- video ----------------------------------------------------------------
- * Render into a PRIVATE persistent framebuffer, then copy the complete visible
- * 320x240 image to whichever LCD buffer is active.  This keeps both LCD buffers
- * complete across swaps/overlays.  SNES_DIRECT_VIDEO lets the PPU write its RGB565
+ * Render into a PRIVATE persistent framebuffer holding just the SNES picture,
+ * 256 pixels by up to 240 lines (224, or 239 with overscan, in NTSC and PAL
+ * alike; hi-res modes are drawn into 256-pixel lines), then present it into
+ * whichever LCD buffer is active: 1:1 centred with black borders, or scaled
+ * (src/snes_scale.h). SNES_DIRECT_VIDEO lets the PPU write its RGB565
  * scanlines directly into that private framebuffer, removing the old 512-byte
  * scratch-to-frame memcpy on every visible line. */
 #define SNES_TOP_MARGIN  ((GW_LCD_HEIGHT - SNES_HEIGHT) / 2)   /* (240-224)/2 = 8 */
 #define SNES_LEFT_MARGIN ((GW_LCD_WIDTH - SNES_WIDTH) / 2)     /* (320-256)/2 = 32 */
-#ifdef SNES_DIRECT_VIDEO
-/* Overscan can produce 240 lines.  Starting at row 8 therefore needs eight
- * hidden tail rows; present_frame still copies only the visible 240 rows. */
-#define SNES_FRAME_ROWS (GW_LCD_HEIGHT + SNES_TOP_MARGIN)
-#else
-#define SNES_FRAME_ROWS GW_LCD_HEIGHT
+#define SNES_FRAME_W     SNES_WIDTH                            /* 256 */
+#define SNES_FRAME_ROWS  240
+#ifndef SNES_DIRECT_VIDEO
 static uint16_t snes_line[256];
 #endif
-static uint16_t snes_frame[GW_LCD_WIDTH * SNES_FRAME_ROWS] __attribute__((aligned(8)));
+static uint16_t snes_frame[SNES_FRAME_W * SNES_FRAME_ROWS] __attribute__((aligned(8)));
 
 #ifdef SNES_LOAD_DIAG
 /* DWT profiling accumulators for the SNES_LOAD_DIAG block further below.
@@ -1357,19 +1356,16 @@ uint64_t g_diag_dsp_echo_cycles = 0;
 #ifndef SNES_DIRECT_VIDEO
 static void snes_blit_line(unsigned y, const uint16_t *line) {
   if (y < 1) return;   /* y is 1-based */
-  unsigned row = (y - 1) + SNES_TOP_MARGIN;
-  if (row >= GW_LCD_HEIGHT) return;   /* clip overscan past the panel */
-  memcpy(snes_frame + row * GW_LCD_WIDTH + SNES_LEFT_MARGIN, line, sizeof(snes_line));
+  unsigned row = y - 1;
+  if (row >= SNES_FRAME_ROWS) return;
+  memcpy(snes_frame + row * SNES_FRAME_W, line, sizeof(snes_line));
 }
 #endif
 
 static void render_frame_into_active_buffer(void) {
 #ifdef SNES_DIRECT_VIDEO
   g_ppu_line_cb = NULL;
-  PpuBeginDrawing(snes->ppu,
-                  (uint8_t *)(snes_frame + SNES_TOP_MARGIN * GW_LCD_WIDTH +
-                              SNES_LEFT_MARGIN),
-                  GW_LCD_WIDTH * sizeof(uint16_t), 0);
+  PpuBeginDrawing(snes->ppu, (uint8_t *)snes_frame, SNES_FRAME_W * sizeof(uint16_t), 0);
 #else
   g_ppu_line_cb = &snes_blit_line;
   PpuBeginDrawing(snes->ppu, (uint8_t *)snes_line, 0, 0);  /* pitch 0: every line here */
@@ -1403,30 +1399,21 @@ static void present_frame(void) {
   odroid_display_scaling_t scaling = odroid_display_get_scaling_mode();
 
   if (scaling == ODROID_DISPLAY_SCALING_OFF) {
-    /* 1:1 centred (256x224 in 320x240): snes_frame already has black borders
-     * baked in (cleared once at init). DMA2D moves the 320x240 straight copy
-     * into the background so the CPU can spend that time on audio/pacing
-     * instead of blocked on an uncached memcpy — the caller MUST reach
-     * present_frame_wait() before touching dst again. */
-#ifdef SNES_PRESENT_DMA2D
-    /* snes_frame lives in cacheable RAM_EMU; SNES_DIRECT_VIDEO's PPU write
-     * this frame's pixels via normal cached stores. DMA2D is a bus master
-     * and cache-blind, so any dirty line not yet evicted would be read as
-     * stale — clean (not invalidate: the next frame's PPU render is about
-     * to overwrite this same buffer through the cache again) before
-     * handing the address to hardware. */
-    SCB_CleanDCache_by_Addr((uint32_t *)snes_frame, sizeof(snes_frame));
-    if (dma2d_m2m_rgb565_start((uint32_t)(uintptr_t)snes_frame,
-                               (uint32_t)(uintptr_t)dst,
-                               GW_LCD_WIDTH, GW_LCD_HEIGHT) == 0) {
-      snes_dma2d_pending = true;
-      return;
+    /* 1:1 centred: the picture at (32, 8) with black around it, as the panel
+     * shows 240 lines (picture lines 232+ of an overscan frame fall below it).
+     * A CPU copy: the firmware's DMA2D call has no line offsets to place a
+     * 256-wide picture in the 320-wide panel (see TODO.md). The borders are
+     * repainted every time -- an overlay or another scaling mode may have
+     * drawn there, and each LCD buffer has to be right. */
+    enum { L = SNES_LEFT_MARGIN, T = SNES_TOP_MARGIN, W = SNES_FRAME_W,
+           R = GW_LCD_WIDTH - SNES_LEFT_MARGIN - SNES_FRAME_W };
+    memset(dst, 0, T * GW_LCD_WIDTH * sizeof(uint16_t));
+    for (int y = 0; y < GW_LCD_HEIGHT - T; y++) {
+      uint16_t *d = dst + (y + T) * GW_LCD_WIDTH;
+      memset(d, 0, L * sizeof(uint16_t));
+      memcpy(d + L, snes_frame + y * W, W * sizeof(uint16_t));
+      memset(d + L + W, 0, R * sizeof(uint16_t));
     }
-    /* DMA2D unavailable for some reason — fall back to the plain CPU copy. */
-#endif
-    /* Revert switch: drop -DSNES_PRESENT_DMA2D to force this path
-     * unconditionally (present_frame_wait() stays a safe no-op either way). */
-    memcpy(dst, snes_frame, GW_LCD_WIDTH * GW_LCD_HEIGHT * sizeof(uint16_t));
     return;
   }
 
@@ -1435,9 +1422,9 @@ static void present_frame(void) {
    * nearest-neighbour output as the per-pixel loops it replaced, with 32-bit
    * stores and no division per pixel. */
   if (scaling == ODROID_DISPLAY_SCALING_FULL)
-    snes_scale_full(dst, snes_frame, SNES_TOP_MARGIN, SNES_LEFT_MARGIN);
+    snes_scale_full(dst, snes_frame);
   else
-    snes_scale_fit(dst, snes_frame, SNES_TOP_MARGIN, SNES_LEFT_MARGIN);
+    snes_scale_fit(dst, snes_frame);
 }
 
 /* Present the last rendered frame and draw the in-game overlay on top. Used both
@@ -2820,7 +2807,7 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
   } else {
     lcd_clear_buffers();
   }
-  memset(snes_frame, 0, sizeof(snes_frame));   /* borders start black and stay black */
+  memset(snes_frame, 0, sizeof(snes_frame));   /* lines the PPU never draws stay black */
 
 #ifdef SNES_DEVICE_PROFILE
   /* Arm AFTER snes_init()/load_state so the AHB pre-flight sees the Apu's
