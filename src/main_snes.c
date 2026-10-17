@@ -226,6 +226,18 @@ uint32_t snes_perf_cpu_bake, snes_perf_cpu_events, snes_perf_cpu_dmaloop;
 uint32_t snes_perf_cpu_rd_slow, snes_perf_cpu_rd_page, snes_perf_cpu_wr_slow;
 extern uint32_t g_op_total, g_op_fallback, g_op_fbhist[256];
 #endif
+#ifdef SNES_PERF_CPUB
+/* PERF_CPUB: the cpu figure split with one probe pair per engine batch, per
+ * opcode the batch hands back to C, per frame event and per spin-bake span, so
+ * the batch engine stays on (PERF_CPU turns it off). Each part leaves out the
+ * APU, DMA, PPU and GSU time inside it. */
+uint32_t snes_perf_cpub_batch, snes_perf_cpub_batches, snes_perf_cpub_single, snes_perf_cpub_singles;
+uint32_t snes_perf_cpub_events, snes_perf_cpub_bake;
+#define SNES_CPUB_BEGIN(v) uint32_t v##_t = snes_perf_now(), \
+    v##_o = snes_perf_apu + snes_perf_dma + snes_perf_ppu + snes_perf_gsu
+#define SNES_CPUB_END(v, acc) ((acc) += snes_perf_now() - v##_t - \
+    (snes_perf_apu + snes_perf_dma + snes_perf_ppu + snes_perf_gsu - v##_o))
+#endif
 /* main-loop phases, cycles per window */
 enum { SP_FRAMECTL, SP_INPUT, SP_EMU, SP_KICK, SP_PCM, SP_WAIT, SP_OVERLAY, SP_SWAP, SP_N };
 static uint32_t sp_phase[SP_N];
@@ -347,6 +359,23 @@ static void snes_perf_report(void)
          (unsigned long)(sp_phase[SP_FRAMECTL] / n));
   printf("PROF/pace: late=%lu of %lu frames (already behind the audio clock), wait_ms=%lu\n",
          (unsigned long)sp_late, (unsigned long)sp_frames, (unsigned long)sp_pace_ms);
+#if defined(SNES_PERF_CPUB) && defined(SNES_IDLE_SKIP)
+  {
+    uint32_t bt = snes_perf_cpub_batch / n, sg = snes_perf_cpub_single / n, ev = snes_perf_cpub_events / n;
+    uint32_t bk = snes_perf_cpub_bake / n, idl = g_idle_stats.cyc / n;
+    uint32_t sum = bt + sg + ev + bk + idl, rest = cpu > sum ? cpu - sum : 0;
+    uint32_t pair = 0xffffffffu;   /* one probe pair, to read the parts net of it */
+    for (int i = 0; i < 32; i++) {
+      uint32_t t = snes_perf_now();
+      uint32_t d = snes_perf_now() - t;
+      if (d < pair) pair = d;
+    }
+    printf("PROF/cpub: batch=%lu in %lu calls, single=%lu in %lu opcodes, events=%lu, bake=%lu, idle=%lu, rest=%lu (of cpu=%lu) per emulated frame, probe_pair=%lu\n",
+           (unsigned long)bt, (unsigned long)(snes_perf_cpub_batches / n), (unsigned long)sg,
+           (unsigned long)(snes_perf_cpub_singles / n), (unsigned long)ev, (unsigned long)bk,
+           (unsigned long)idl, (unsigned long)rest, (unsigned long)cpu, (unsigned long)pair);
+  }
+#endif
 #ifdef SNES_IDLE_SKIP
   /* idle-loop skip: the armed site, emulated dots it advanced without running
    * (loop laps, and WAI), and how often a new site was armed or a NMI-time pc
@@ -449,6 +478,10 @@ static void snes_perf_reset(void)
   snes_perf_ppu = snes_perf_ppu_lines = snes_perf_apu = snes_perf_apu_calls = 0;
   snes_perf_dsp = snes_perf_dma = snes_perf_dma_calls = snes_perf_gsu = 0;
   snes_perf_ops = snes_perf_gsu_reads = 0;
+#ifdef SNES_PERF_CPUB
+  snes_perf_cpub_batch = snes_perf_cpub_batches = snes_perf_cpub_single = snes_perf_cpub_singles = 0;
+  snes_perf_cpub_events = snes_perf_cpub_bake = 0;
+#endif
 #ifdef SNES_PERF_GSU
   snes_perf_gsu_plot = snes_perf_gsu_plots = snes_perf_gsu_chain = 0;
   snes_perf_gsu_chain_ops = snes_perf_gsu_ops = 0;
@@ -1035,7 +1068,13 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
 #ifdef SNES_PERF_CPU
     uint32_t pb_t0 = snes_perf_now(), pb_d0 = snes_perf_dma;
 #endif
+#ifdef SNES_PERF_CPUB
+    SNES_CPUB_BEGIN(cbk);
+#endif
     dots = spin_bake_run_span(s, s->cpu, dots);
+#ifdef SNES_PERF_CPUB
+    SNES_CPUB_END(cbk, snes_perf_cpub_bake);
+#endif
 #ifdef SNES_PERF_CPU
     snes_perf_cpu_bake += snes_perf_now() - pb_t0 - (snes_perf_dma - pb_d0);
 #endif
@@ -1124,7 +1163,14 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
        * the last one's charge (it started a DMA or crosses the span's end),
        * or -1 when the next opcode needs the ordinary path */
       SnesBatch b = { dots, apud, hpos, 0, s };
+#ifdef SNES_PERF_CPUB
+      SNES_CPUB_BEGIN(cbb);
+#endif
       int c = snes_thumb2_batch(s->cpu, &b);
+#ifdef SNES_PERF_CPUB
+      SNES_CPUB_END(cbb, snes_perf_cpub_batch);
+      snes_perf_cpub_batches++;
+#endif
       dots = b.dots; apud = b.apud; hpos = b.hpos;
       if (c >= 0) {
         left = (uint8_t)c;
@@ -1133,8 +1179,15 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
       {
         s->hPos = hpos;
         s->apuDotsAccum = apud;
+#ifdef SNES_PERF_CPUB
+        SNES_CPUB_BEGIN(cbs);
+#endif
         apply_irq_match(s);
         left = (uint8_t)(left + run_one_opcode_charge(s));
+#ifdef SNES_PERF_CPUB
+        SNES_CPUB_END(cbs, snes_perf_cpub_single);
+        snes_perf_cpub_singles++;
+#endif
         apud = s->apuDotsAccum;          /* the opcode's APU catch-up may have zeroed it */
 #if defined(SNES_IDLE_SKIP) && SNES_IDLE_WAI
         /* WAI: until an interrupt is pending every call is the same no-op
@@ -1278,6 +1331,12 @@ static void SNES_ITCM_SCHED run_frame_events(Snes *s) {
       snes_handle_pos_stuff(s);
       snes_perf_cpu_events += snes_perf_now() - pe_t0 - (snes_perf_apu - pe_a0) - (snes_perf_dma - pe_d0)
                               - (snes_perf_ppu - pe_p0);
+    }
+#elif defined(SNES_PERF_CPUB)
+    {
+      SNES_CPUB_BEGIN(cbe);
+      snes_handle_pos_stuff(s);
+      SNES_CPUB_END(cbe, snes_perf_cpub_events);
     }
 #else
     snes_handle_pos_stuff(s);

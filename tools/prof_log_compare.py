@@ -21,6 +21,8 @@ PATS = [
      ('tot', 'cpu', 'ppu', 'apu', 'dma', 'gsu')),
     (r'PROF/pace: late=(\d+)', ('late',)),
     (r'step_avg=(\d+) step_min=(\d+).*underruns=(\d+)', ('savg', 'smin', 'under')),
+    (r'PROF/cpub: batch=(\d+) in (\d+) calls, single=(\d+) in (\d+) opcodes, events=(\d+), bake=(\d+), '
+     r'idle=(\d+), rest=(\d+)', ('cb', 'cbn', 'cs', 'csn', 'ce', 'ck', 'ci', 'cr')),
 ]
 
 
@@ -78,6 +80,20 @@ def main():
                     agg(rows, fr, 'busy') / k / B, agg(rows, fr, 'gsu') / k / B, agg(rows, fr, 'cpu') / k / B,
                     max(rows[f]['heavy'] for f in fr) / B, agg(rows, fr, 'late')))
             print('%-10s (%3d)     ' % (name, len(fr)) + '   '.join('%-34s' % c for c in cells))
+        if any('cb' in r for rows, _ in logs for r in rows.values()):
+            # PERF_CPUB: the 65816 figure split, K cycles per emulated frame
+            print('\nPROF/cpub, K cycles/frame  ' + '   '.join('%-36s' % n for n in names))
+            print(' ' * 26 + '   '.join('%-36s' % 'batch  calls events  idle  rest  bake' for _ in names))
+            for spec in a.phase:
+                name, lo, hi = spec.split(':')
+                fr = [f for f in common if int(lo) <= f <= int(hi)]
+                if not fr:
+                    continue
+                k = len(fr) * 1000.0
+                cells = ['%6.0f %5.0f %6.0f %5.0f %5.0f %5.0f' % tuple(
+                    agg(rows, fr, x) / k * (1000 if x == 'cbn' else 1)
+                    for x in ('cb', 'cbn', 'ce', 'ci', 'cr', 'ck')) for rows, _ in logs]
+                print('%-10s (%3d)           ' % (name, len(fr)) + '   '.join('%-36s' % c for c in cells))
     if a.frames:
         print('\nframe  ' + '   '.join('%-40s' % (n + ': busy  gsu  heaviest late step_min') for n in names))
         for f in (int(x) for x in a.frames.split(',')):

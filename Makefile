@@ -44,6 +44,7 @@ PERF ?= 0
 PERF_PPU ?= 0
 PERF_AUDIO ?= 0
 PERF_CPU ?= 0
+PERF_CPUB ?= 0
 PERF_GSU ?= 0
 PERF_SPC ?= 0
 
@@ -128,6 +129,12 @@ endif
 # reads per opcode, and the probes push the ITCM engine 0x400 further.
 ifeq ($(PERF_CPU),1)
 CORE_C_DEFS += -DSNES_PERF_CPU -DSNES_OP_CENSUS=1
+endif
+# PERF_CPUB=1 splits the 65816 figure with the engine batch left on: one probe
+# pair per batch, per opcode handed back to C, per frame event and per spin-bake
+# span (PROF/cpub). Use it instead of PERF_CPU to measure the normal path.
+ifeq ($(PERF_CPUB),1)
+CORE_C_DEFS += -DSNES_PERF_CPUB
 endif
 # PERF_GSU=1 splits the Super FX figure: cycles in PLOT and in the compiled
 # chains, and how many GSU instructions the chains ran. Diagnostic: two timer

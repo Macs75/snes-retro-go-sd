@@ -394,6 +394,21 @@ underruns over the replay 8,112 → 3,536. What remains refused (~2,200/frame)
 enters the loop with different registers than the proven lap; accepting those
 needs to know which registers the loop reads.
 
+### 4.9 Code run from WRAM: the fetch page
+
+The engine's inline fetch serves bytes from one cached page, which only
+`snes_cpuRead` installs, and only for ROM. In Star Fox's level 1 half the
+65816 opcodes run from WRAM, so every fetched byte there paid the call. The
+page map now installs WRAM pages too (`$7E/$7F` and the low mirror). Only
+fetches reach `snes_cpuRead` for those pages (data reads are served by the
+engine's page-map hit), and the page points at live memory that is never
+remapped, so a write to it needs no invalidation. Generic.
+
+Device (`PERF_CPUB`, Star Fox logs 9 → 10, hashes equal in all 105 windows):
+level-1 batch engine 1,540K → 1,423K cycles/frame, lower in every window, busy
+101.8% → 99.8%. gwemu and host agree on eight recordings
+(`tools/qemu_vs_host.py`); a build serving WRAM fetches one byte off diverged.
+
 ---
 
 ## 5. Cross-cutting lessons
@@ -626,4 +641,8 @@ diff <(norm before/ppu.o ppu_runLine) <(norm after/ppu.o ppu_runLine)
 PROFLITE (`PROFLITE=1`) is the cheap "how does it fare" build: per-frame skip +
 audio-step tracking only, no per-line/opcode DWT probes. `PERF=1 PERF_CPU=1` adds
 the opcode census (and disables opcode batching, so it can overflow ITCM — a
-diagnostic build only).
+diagnostic build only). Its per-opcode cost is therefore that of a path normal
+builds don't run: to split the 65816 figure of a normal build, use
+`PERF=1 PERF_CPUB=1` (batch / events / idle / rest, `PROF/cpub`, summed per phase
+by `tools/prof_log_compare.py`). A change to the Thumb-2 engines or bridges is
+checked with `tools/qemu_vs_host.py` (gwemu against the host, per recording).
