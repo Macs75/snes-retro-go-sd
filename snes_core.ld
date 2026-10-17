@@ -119,7 +119,9 @@ SECTIONS
     *(.text.cart_read .text.cart_write .text.input_read)
     . = ALIGN(32);
     *(.text.dma_doHdma .text.dma_doDma .text.dma_read .text.dma_write .text.dma_startDma .text.dma_initHdma)
-    . = ALIGN(32);
+    /* the PPU registers at a fixed offset, where they measured: a DMA change
+     * no longer moves them (ld stops if the DMA code grows past it) */
+    . = __BUS_HOT_START__ + 0x18A0;
     *(.text.ppu_write .text.ppu_read)
     __BUS_HOT_END__ = .;
     ASSERT(__BUS_HOT_END__ <= __BUS_HOT_START__ + 0x2400, "SNES: BUS window (9K) overflows");

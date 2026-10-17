@@ -263,6 +263,31 @@ opcode's cost, invisible until the loop moved. The C fallback (246 opcodes,
 ~22.5K/frame, ~7% of the SPC700) is now the measured baseline for native
 handlers; the DSP (~530K) is the larger half of the APU.
 
+### 4.7 DMA: read the source where `snes_read` would, not through it
+
+Yoshi's waterfall room showed `dma=562K` a frame for only ~4,400 bytes moved
+(`DMA_HIST`, `tools/dma_hist_report.py`): ~128 device cycles a byte. Not the
+volume and not the `dma_cycle` calls (~1,350 a frame); the per-byte path. Every
+byte from a LoROM, Super FX or WRAM-mirror source ran the full decode
+(`cart_read` → `cart_readLorom` → `cart_gsu_read`, or `snes_read`'s ladder)
+although the bank is fixed for the whole transfer. Only WRAM `$7E/$7F` and
+plain HiROM banks had a direct pointer, which is why HiROM games never showed it.
+
+The fix reuses what the CPU already trusts: `g_snes_rdmap`, the 65816's 8 KB
+page map, gives a host pointer exactly where `snes_read` reads plain memory, so
+one table load per byte replaces the decode (NULL pages still go through
+`snes_read`); the Super FX Game Pak RAM gets its own flat case. Bytes are still
+read one at a time, so a target that writes WRAM is seen. Reading the page map
+against `cart_readLorom` found one place they disagree (LoROM under 2 MB with
+SRAM, `$70-$7D:$8000+`, noted in `snes_pagemap_base`); DMA keeps the slow path
+there.
+
+Device, waterfall (logs 13 → 14, same PERF level): DMA 562K → 320K, busy 100.0%
+→ 95.8%, late frames 113 → 60 of 120; CPU, PPU, APU, GSU and the 65816 opcode
+count unchanged. The first build overflowed the 9 KB BUS window: the three flat
+loops became one (`src[(ofs | adr) & mask]`), and `ppu_write`/`ppu_read` are now
+pinned at their measured offset so DMA edits can't move them.
+
 ---
 
 ## 5. Cross-cutting lessons

@@ -440,6 +440,16 @@ static int cart_gsu_read(Cart* cart, uint8_t bank, uint16_t adr, uint8_t* out) {
   return 0;
 }
 
+const uint8_t* cart_gsu_dma_ram(Cart* cart, uint8_t bank, uint32_t* ofs, uint32_t* mask) {
+  uint8_t b = bank & 0x7f;
+  /* cart_gsu_read's $70-$73 case, the first one that matches in those banks */
+  if(!cart->gsu || cart->ramSize == 0 || b < 0x70 || b > 0x73 || gsu_cpu_ram_blocked(cart->gsu))
+    return NULL;
+  *ofs = (uint32_t)(b & 3) << 16;
+  *mask = (uint32_t)cart->ramSize - 1;
+  return cart->ram;
+}
+
 static uint8_t cart_readLorom(Cart* cart, uint8_t bank, uint16_t adr) {
   if(cart->gsu) {
     uint8_t v;

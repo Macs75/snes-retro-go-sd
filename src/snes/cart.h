@@ -70,6 +70,10 @@ void cart_free(Cart* cart);
 void cart_reset(Cart* cart); // will reset special chips etc, general reading is set up in load
 void cart_load(Cart* cart, int type, uint8_t* rom, int romSize, int ramSize); // TODO: figure out how to handle (battery, cart-chips etc)
 uint8_t cart_read(Cart* cart, uint8_t bank, uint16_t adr);
+/* Super FX: the Game Pak RAM a DMA from `bank` reads, if cart_gsu_read serves
+ * the whole bank from it ($70-$73 and mirrors): byte adr is
+ * ram[(*ofs | adr) & *mask]. NULL for any other bank or cart. */
+const uint8_t* cart_gsu_dma_ram(Cart* cart, uint8_t bank, uint32_t* ofs, uint32_t* mask);
 void cart_write(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val);
 void cart_saveload(Cart *cart, SaveLoadFunc *func, void *ctx);
 #endif

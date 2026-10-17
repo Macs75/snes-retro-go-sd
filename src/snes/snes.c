@@ -63,6 +63,13 @@ static uint8_t *snes_pagemap_base(Snes *snes, uint32_t adr) {
       return cart->rom + ((((uint32_t)(b & 0x1f) << 16) | (page & 0xffff)) & cart->romMask);
     return NULL;
   }
+  /* NOT the same as cart_readLorom in one place: a LoROM cart under 2 MB with
+   * SRAM has its SRAM across the whole of banks $70-$7D/$F0-$FF (dinkc64
+   * e9e1139, PGA Tour), but this maps their $8000-$FFFF to ROM. So the 65816's
+   * data reads there get ROM while snes_read (and DMA) get SRAM, and the PGA
+   * Tour fix holds only for those. dma_doDma excludes these banks from its
+   * page-map path to stay with snes_read. Making this agree means NULL pages
+   * there (or SRAM pointers); it changes what the CPU reads on such carts. */
   if (cart && off >= 0x8000 && SNES_ROM_PAGE_OK(cart) && !SNES_DSP_LOROM_WINDOW(cart, bank)) {
     uint32_t page = adr & ~(uint32_t)0x1fff;
 #if SNES_ROMPAGE_FOLD
