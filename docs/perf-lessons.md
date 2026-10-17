@@ -361,6 +361,28 @@ it is one remap and one store instead of two read-modify-writes. Device (logs
 15 → 16): DMA 238K → 191K, busy 94.4% → 93.8% (the other figures +7K, within
 what two logs can tell apart). Over the three steps: DMA 562K → 191K (-66%).
 
+### 4.8 Idle skip: a Super FX wait compares only the bits it tests
+
+Star Fox's 65816 waits for the GSU with `LDA $3030 / AND #$20 / BNE`. The idle
+skip knew the loop, but its proof snapshotted the whole status byte, and the
+GSU's own flags in that byte (Z/CY/S/OV) change on every slice it runs, so
+nearly every span was refused; the 2-per-frame re-proof budget then ran out
+and half the frame's opcodes (~4,200 of ~8,250) were the poll, interpreted.
+
+The loop decoder now records an `AND #imm` right after the status read, and
+the skip tells three cases apart: the tested bits changed (no skip, the loop is
+leaving), the whole byte unchanged (the exact path, as before), only untested
+bits changed (skip whole laps from the loop head). The stored mid-lap states
+hold the old byte, so that last case does not use them: a span that starts
+mid-lap first runs the rest of the lap for real, in a `noinline` helper so the
+ITCM code grew only 178 bytes. Generic for any GSU poll of this shape.
+
+Device (Star Fox logs 4 → 5, hashes equal in all 39 windows): gameplay CPU
+2.36M → 2.03M cycles/frame, 65816 opcodes 8,447 → 7,146, busy 103% → 97%,
+underruns over the replay 8,112 → 3,536. What remains refused (~2,200/frame)
+enters the loop with different registers than the proven lap; accepting those
+needs to know which registers the loop reads.
+
 ---
 
 ## 5. Cross-cutting lessons

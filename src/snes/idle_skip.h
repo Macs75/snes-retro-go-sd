@@ -83,6 +83,12 @@ typedef struct {
   bool     gsu_poll, gsu_bit;
   uint8_t  gsu_w;         /* bytes read */
   uint16_t gsu_pc, gsu_base, gsu_mask, gsu_snap;
+  /* An LDA of the status followed by AND #imm keeps only the imm bits of it
+   * beyond that AND, so the CPU state at the loop head depends on those bits
+   * alone (gsu_and, 0 = no such AND). The GSU's own flags in the status move
+   * every slice while it runs; with the head bits unchanged, whole laps from
+   * the head are still the same laps (idle_skip_laps). */
+  uint16_t gsu_and, gsu_hmask, gsu_hsnap;
   bool     code_ram;      /* the loop's code is in WRAM: compared every span    */
   uint8_t  ncode;
   uint8_t  code[IDLE_MAX_LEN];

@@ -41,6 +41,10 @@
   tiles and read BG3's offset table once per pass. Star Fox on device: PPU
   41-43% → 24-26% of the frame budget, intro and gameplay from 1.25x to
   ~1.07x real time. Output bit-identical.
+- **Idle skip: Super FX status polls** (`LDA $3030 / AND #imm / BNE`) are
+  skipped while only the GSU flags the loop doesn't test change. Star Fox on
+  device: gameplay CPU -14%, busy 103% → 97% of the budget, audio underruns
+  over the replay -56%. Output bit-identical.
 
 ### Changed
 

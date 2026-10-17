@@ -180,6 +180,8 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
   bool saw_pc = false, modx = false, mody = false, sep_rep = false;
   out->nmem = 0; out->nidx = 0; out->rdnmi = false; out->uses_db = false; out->uses_dp = false;
   out->gsu_poll = false;
+  out->gsu_and = 0;
+  uint16_t gsu_lda_next = 0xffff;                  /* the instruction after a status LDA */
   uint32_t ro;
   const int ccls = classify(s, bank, head, &ro);
   if (ccls != MEM_ROM && ccls != MEM_WRAM) return false;
@@ -206,6 +208,12 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
       default: return false;
     }
     modx |= in.modx; mody |= in.mody;
+    if (q == gsu_lda_next && op == 0x29) {            /* AND #imm right after the status LDA */
+      uint16_t imm = code_at(s, bank, (uint16_t)(q + 1));
+      if (w == 2) imm |= (uint16_t)(code_at(s, bank, (uint16_t)(q + 2)) << 8);
+      if (w == out->gsu_w)
+        out->gsu_and = out->gsu_w == 1 && out->gsu_base == 0x3031 ? (uint16_t)(imm << 8) : imm;
+    }
     if (in.kind == K_IMM8) {                                   /* SEP/REP */
       if (cpu->e) return false;
       uint8_t v = code_at(s, bank, (uint16_t)(q + 1));
@@ -254,6 +262,7 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
               out->gsu_base = ma;
               out->gsu_w = (uint8_t)w;
               out->gsu_bit = op == 0x2c || op == 0x24 || op == 0x3c || op == 0x34;
+              if (op == 0xad || op == 0xaf) gsu_lda_next = (uint16_t)(q + len);   /* LDA abs / long */
             }
           }
           if (c == MEM_WRAM) {

@@ -778,6 +778,8 @@ static bool idle_prove(Snes *s, int *dots) {
         if ((gsu_sfr_peek() & m) != (sfr0 & m)) return false;
         g->gsu_mask = m;
         g->gsu_snap = (uint16_t)(sfr0 & m);
+        g->gsu_hmask = g->gsu_and ? (uint16_t)(m & g->gsu_and) : m;
+        g->gsu_hsnap = (uint16_t)(sfr0 & g->gsu_hmask);
       }
       for (int i = 0; i < nseen; i++) { g->st[i] = seen[i]; g->ch[i] = seen_ch[i]; }
       g->nst = (uint8_t)nseen;
@@ -802,6 +804,31 @@ static int idle_prove_span(Snes *s, int dots) {
   return idle_skip_laps(s, dots);
 }
 
+/* Run opcodes for real, as run_dots' ordinary path does, until the CPU is at
+ * the armed loop's head (at most the rest of one lap; any DMA, the loop being
+ * left, or the span running out stops it). Out of the ITCM skip: it only runs
+ * for a GSU poll whose status moved in bits the loop drops (idle_skip_laps). */
+__attribute__((noinline))
+static int idle_align_head(Snes *s, int dots) {
+  Cpu *cpu = s->cpu;
+  const IdleSkip *g = &g_idle;
+  for (int cap = IDLE_MAX_STATES; cpu->pc != g->head; ) {
+    if (--cap < 0 || (uint16_t)(cpu->pc - g->head) > g->len) return dots;
+    apply_irq_match(s);
+    const uint32_t c = run_one_opcode_charge(s);
+    s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
+    if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) {
+      /* run_dots' started_dma step; the burst is run_dots' to run */
+      s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft - 2);
+      s->apuDotsAccum += 2; s->hPos += 2;
+      return dots - 2;
+    }
+    while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
+    if (s->cpuCyclesLeft || dots <= 0) return dots;
+  }
+  return dots;
+}
+
 /* The hot half, once per span while the pc is in the armed loop, so it lives
  * in ITCM. In RAM it measured 418 cycles a call on the device
  * (251K a frame of Zelda gameplay, more than the laps it skipped): ~60
@@ -816,8 +843,16 @@ static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
   if (!g->snap_ok) return dots;
   if (g->rdnmi && idle_rdnmi_live(s)) return dots; /* the loop is about to see the flag */
   /* the GSU status the loop watches moved (GO cleared, IRQ set): the loop is
-   * about to leave, so no lap to skip and none worth a proof */
-  if (g->gsu_poll && (gsu_sfr_peek() & g->gsu_mask) != g->gsu_snap) return dots;
+   * about to leave, so no lap to skip and none worth a proof. Only bits the
+   * loop drops before its head moved (the GSU's flags, while it runs): the
+   * laps are the same, but the stored mid-lap states hold the old status, so
+   * only whole laps from the head (below). */
+  bool exact = true;
+  if (g->gsu_poll) {
+    const uint16_t v = gsu_sfr_peek();
+    if ((v & g->gsu_hmask) != g->gsu_hsnap) return dots;
+    exact = (v & g->gsu_mask) == g->gsu_snap;
+  }
   if (g->code_ram && !idle_code_ok(s, g)) {        /* its code was overwritten: drop it */
 #ifdef HOST_BUILD
     if (getenv("IDLE_TRACE")) printf("IDLE: skip: code of %02x:%04x changed, site dropped\n", g->bank, g->head);
@@ -827,16 +862,29 @@ static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
   }
   for (int i = 0; i < g->npmem; i++) if (s->ram[g->pmem_off[i]] != g->smem[i]) return -1 - dots;
   Cpu *cpu = s->cpu;
-  const uint16_t pc = cpu->pc;
+  uint16_t pc = cpu->pc;
+  if (!exact && pc != g->head) {
+    /* mid-lap: run the rest of this lap for real, then skip from the head */
+    dots = idle_align_head(s, dots);
+    if (dots <= 0 || cpu->pc != g->head || s->cpuCyclesLeft) return dots;
+    pc = g->head;
+  }
   for (int i = 0; i < g->nst; i++) {
     if (g->st[i].pc != pc) continue;
-    if (!idle_img_eq((const uint8_t *)&cpu->a, g->st[i].img)) return -1 - dots;
+    if (!idle_img_eq((const uint8_t *)&cpu->a, g->st[i].img)) return exact ? -1 - dots : dots;
     const int L = (int)g->lap;
     const int k = dots / L;
     uint32_t adv = (uint32_t)(k * L);
     dots -= k * L;
     g_idle_stats.laps += (uint32_t)k;
     g_idle_stats.ff_dots += adv;
+    if (!exact) {
+      /* whole laps only: the CPU stays at the head in the head's state, and
+       * the interpreter runs what is left of the span */
+      s->hPos = (uint16_t)(s->hPos + adv);
+      s->apuDotsAccum += adv;
+      return dots;
+    }
     /* The partial lap that is left: step it boundary by boundary from the
      * stored lap instead of handing it to the engine. An opcode takes effect
      * when it starts and is then consumed, so starting the one at boundary i
