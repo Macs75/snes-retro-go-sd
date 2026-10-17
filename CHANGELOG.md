@@ -54,6 +54,8 @@
   volume, echo state); `tools/spc_hist_report.py` groups it into routines and
   disassembles them, `tools/spc_native_coverage.py` lists the opcodes that still
   fall back to C.
+- **`CPU_PCHIST=file`** (host): 65816 instructions executed per bank:pc after
+  the idle skip, hottest first, with the cumulative share.
 
 ## [v0.0.7]
 
