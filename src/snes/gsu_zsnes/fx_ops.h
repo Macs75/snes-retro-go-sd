@@ -2179,6 +2179,15 @@ extern long gsu_host_frame;
 static struct { u4 key, n; u1 op, alt; } gsu_pch[GSU_PCH_N];
 static int gsu_pch_on = -1;
 static long gsu_pch_f0, gsu_pch_f1;
+/* GSU_PCHIST_FRAMES may list several ranges: a:b,c:d,... (end exclusive) */
+static long gsu_pch_r[32][2];
+static int gsu_pch_nr;
+static int gsu_pch_in(long const f)
+{
+    for (int i = 0; i < gsu_pch_nr; i++)
+        if (f >= gsu_pch_r[i][0] && f < gsu_pch_r[i][1]) return 1;
+    return 0;
+}
 static unsigned long gsu_pch_total;
 static int gsu_pch_cmp(void const *a, void const *b)
 {
@@ -2205,11 +2214,24 @@ static void gsu_pchist(void)
     if (gsu_pch_on < 0) {
         gsu_pch_on = getenv("GSU_PCHIST") != NULL;
         gsu_pch_f0 = 0; gsu_pch_f1 = 1L << 30;
+        gsu_pch_r[0][0] = 0; gsu_pch_r[0][1] = 1L << 30; gsu_pch_nr = 1;
         char const *e = getenv("GSU_PCHIST_FRAMES");
-        if (e) sscanf(e, "%ld:%ld", &gsu_pch_f0, &gsu_pch_f1);
+        if (e) {
+            int n = 0, k = 0;
+            gsu_pch_nr = 0;
+            while (gsu_pch_nr < 32 && sscanf(e, "%ld:%ld%n", &gsu_pch_r[gsu_pch_nr][0], &gsu_pch_r[gsu_pch_nr][1], &n) == 2) {
+                gsu_pch_nr++;
+                e += n;
+                if (*e != ',') break;
+                e++;
+                k++;
+            }
+            gsu_pch_f0 = gsu_pch_r[0][0];
+            gsu_pch_f1 = gsu_pch_r[gsu_pch_nr ? gsu_pch_nr - 1 : 0][1];
+        }
         if (gsu_pch_on) atexit(gsu_pch_write);
     }
-    if (!gsu_pch_on || gsu_host_frame < gsu_pch_f0 || gsu_host_frame >= gsu_pch_f1) return;
+    if (!gsu_pch_on || !gsu_pch_in(gsu_host_frame)) return;
     u4 const key = ((u4)(SfxPBR & 0x7F) << 16) | ((FxSeamPC - 1) & 0xFFFFu);
     u4 h = (key * 2654435761u) >> 16;
     for (;;) {
@@ -2255,6 +2277,13 @@ static void gsu_state_exit(void)
 }
 void gsu_state_frame(long const frame)
 {
+    {
+        extern unsigned long gsu_src_ops[3];
+        static FILE *fo; static int on = -1;
+        if (on < 0) { char const *p = getenv("GSU_FRAMEOPS"); fo = p ? fopen(p, "w") : NULL; on = fo != NULL; }
+        if (on) fprintf(fo, "%ld %lu %lu %lu\n", frame, gsu_src_ops[0], gsu_src_ops[1], gsu_src_ops[2]);
+        gsu_src_ops[0] = gsu_src_ops[1] = gsu_src_ops[2] = 0;
+    }
     if (gsu_st_on <= 0) return;
     extern unsigned long long gsu_blk_ops;
     extern unsigned long gsu_hs[5], gsu_plotstat[64];
@@ -2335,6 +2364,10 @@ unsigned long long gsu_blk_ops, gsu_all_ops;   /* GSU_STATELOG prints them */
    instructions, chain calls, chain calls that ran nothing, register writes */
 unsigned long gsu_hs[5];
 unsigned long gsu_plotstat[64];
+/* GSU_FRAMEOPS=file: GSU instructions per emulated frame by where the slice
+   came from (sched.inc sets gsu_src): 0 per-line, 1 vblank catch-up, 2 start */
+int gsu_src;
+unsigned long gsu_src_ops[3];
 #endif
 
 static inline __attribute__((always_inline)) u4 gsu_blk_run(void)
@@ -2396,6 +2429,7 @@ void MainLoop(void)
             if (c) {
 #ifdef HOST_BUILD
                 gsu_blk_ops += c;
+                gsu_src_ops[gsu_src] += c;
 #endif
                 /* the loop test below spends the last one */
                 NumberOfOpcodes -= c - 1;
@@ -2404,6 +2438,7 @@ void MainLoop(void)
         }
 #ifdef HOST_BUILD
         gsu_hs[1]++;
+        gsu_src_ops[gsu_src]++;
 #endif
         FxDispatch(FxTabled);
     } while (fx_loop_next());

@@ -87,6 +87,9 @@ void StartSFX(void)
     if (SfxSCMR & ((SfxPBR & 0x7F) < 0x70 ? /* noram */ 0x10 : /* ram */ 0x08)) {
         NumberOfOpcodes = NumberOfOpcodes2 + SfxOwedOps;
         SfxOwedOps = 0;
+#ifdef HOST_BUILD
+        { extern int gsu_src; gsu_src = 0; }
+#endif
         MainLoop();
         SfxIRQpoll();
     } else {
@@ -103,6 +106,9 @@ void SfxExecOnStart(void)
 {
     if (SfxSCMR & ((SfxPBR & 0x7F) < 0x70 ? /* noram */ 0x10 : /* ram */ 0x08)) {
         NumberOfOpcodes = NumberOfOpcodes2;
+#ifdef HOST_BUILD
+        { extern int gsu_src; gsu_src = 2; }
+#endif
         MainLoop();
         SfxIRQpoll();
         SfxRanThisLine = 1;
@@ -116,6 +122,9 @@ void SfxVblankCatchup(void)
     if ((SfxSFR & 0x20) &&
         (SfxSCMR & ((SfxPBR & 0x7F) < 0x70 ? /* noram */ 0x10 : /* ram */ 0x08))) {
         NumberOfOpcodes = NumberOfOpcodes2 * 240;
+#ifdef HOST_BUILD
+        { extern int gsu_src; gsu_src = 1; }
+#endif
         MainLoop();
         SfxIRQpoll();
     }
