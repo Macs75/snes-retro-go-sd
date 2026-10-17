@@ -281,7 +281,9 @@ static void snes_perf_report(void)
     printf("PROFLITE: frames=%lu shown=%lu late=%lu of %lu wall_ms=%lu\n",
            (unsigned long)sp_frames, (unsigned long)sp_shown,
            (unsigned long)sp_late, (unsigned long)sp_frames, (unsigned long)wall);
-    if (sp_step_min < 65536u || avg_step < 65536u)
+    /* Below 0.99x only: inside +-1% the stretcher is trimming its backlog
+       (snes_audio_stretch.c, STEP_MIN), which is not a slowdown you can hear. */
+    if (sp_step_min < 64881u || avg_step < 64881u)
       printf("PROFLITE: audio SLOWED step_avg=%lu step_min=%lu (65536 = 1.0x)\n",
              (unsigned long)avg_step, (unsigned long)sp_step_min);
     snes_perf_reset();
