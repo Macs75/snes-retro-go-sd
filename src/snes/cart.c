@@ -17,6 +17,18 @@
  * predate dsp1_hle.c still link; without the strong definitions a DSP cart
  * just behaves as before (status reads 0). Harness globs pick up the real
  * implementation automatically. */
+/* main_snes.c overrides this on the device, where each coprocessor's code is an
+   overlay loaded only for its carts; elsewhere all of it is linked in. */
+__attribute__((weak)) bool snes_copro_overlay_ready(int kind) { (void)kind; return true; }
+
+/* A chip whose code is not loaded is not attached: cart->x stays NULL, and
+   every call into its code is behind that pointer. */
+static bool cart_copro_ready(int kind, const char *name) {
+  if (snes_copro_overlay_ready(kind)) return true;
+  printf("snes: %s code not loaded, chip not attached\n", name);
+  return false;
+}
+
 __attribute__((weak)) void dsp1_reset(Dsp1* d) { (void)d; }
 __attribute__((weak)) uint8_t dsp1_readDR(Dsp1* d) { (void)d; return 0; }
 __attribute__((weak)) void dsp1_writeDR(Dsp1* d, uint8_t v) { (void)d; (void)v; }
@@ -185,6 +197,7 @@ Cart* cart_init(Snes* snes) {
 }
 
 void cart_attachDsp1(Cart* cart) {
+  if (!cart_copro_ready(SNES_COPRO_DSP1, "DSP-1")) return;
   if (cart->dsp1 == NULL) cart->dsp1 = dsp1_alloc();
   if (cart->dsp1) {
     dsp1_reset(cart->dsp1);
@@ -199,6 +212,7 @@ void cart_attachDsp1(Cart* cart) {
 }
 
 void cart_attachCx4(Cart* cart) {
+  if (!cart_copro_ready(SNES_COPRO_CX4, "Cx4")) return;
   if (cart->cx4 == NULL) cart->cx4 = cx4_alloc();
   if (cart->cx4) {
     cx4_init(cart->cx4);
@@ -214,6 +228,7 @@ void cart_attachCx4(Cart* cart) {
 }
 
 void cart_attachSdd1(Cart* cart) {
+  if (!cart_copro_ready(SNES_COPRO_SDD1, "S-DD1")) return;
   if (cart->sdd1 == NULL) cart->sdd1 = sdd1_alloc();
   if (cart->sdd1) {
     sdd1_reset(cart->sdd1);
@@ -233,6 +248,7 @@ void cart_attachSdd1(Cart* cart) {
 }
 
 void cart_attachSpc7110(Cart* cart) {
+  if (!cart_copro_ready(SNES_COPRO_SPC7110, "SPC7110")) return;
   if (cart->spc7110 == NULL) cart->spc7110 = spc7110_alloc();
   if (cart->spc7110) {
     spc7110_reset(cart->spc7110);
@@ -252,6 +268,7 @@ void cart_attachSpc7110(Cart* cart) {
 }
 
 void cart_attachGsu(Cart* cart) {
+  if (!cart_copro_ready(SNES_COPRO_GSU, "Super FX")) return;
   if (cart->gsu == NULL) cart->gsu = gsu_alloc();
   if (cart->gsu) {
     /* The GSU shares ROM and Game Pak RAM with the 65816, so the fetch-page

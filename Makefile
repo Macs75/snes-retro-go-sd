@@ -221,7 +221,7 @@ pack: $(TARGET_BIN)
 		--header-logo $(HEADER_LOGO) \
 		--logo-invert \
 		--out $(PACKED_BIN)
-	$(V)python3 tools/append_gsu_overlay.py $(TARGET_ELF) $(PACKED_BIN) \
+	$(V)python3 tools/append_overlays.py $(TARGET_ELF) $(PACKED_BIN) \
 		--nm $(subst objcopy,nm,$(CP)) --objcopy $(CP)
 
 all: pack

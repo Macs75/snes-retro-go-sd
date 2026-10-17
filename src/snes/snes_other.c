@@ -40,15 +40,9 @@ typedef struct CartHeader {
 
 static void readHeader(const uint8_t* data, int length, int location, CartHeader* header);
 
-bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
-  // if smaller than smallest possible, don't load
-  if(length < 0x8000) {
-    printf("Failed to load rom: rom to small (%d bytes)\n", length);
-    return false;
-  }
-  // check headers
-  CartHeader headers[4];
-  memset(headers, 0, sizeof(headers));
+/* Score the four header candidates; returns the one used (odd = copier-headered). */
+static int pickHeader(const uint8_t* data, int length, CartHeader headers[4]) {
+  memset(headers, 0, 4 * sizeof(CartHeader));
   for(int i = 0; i < 4; i++) {
     headers[i].score = -50;
   }
@@ -56,7 +50,6 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   if(length >= 0x8200) readHeader(data, length, 0x81c0, &headers[1]);
   if(length >= 0x10000) readHeader(data, length, 0xffc0, &headers[2]);
   if(length >= 0x10200) readHeader(data, length, 0x101c0, &headers[3]);
-  // see which it is
   int max = 0;
   int used = 0;
   for(int i = 0; i < 4; i++) {
@@ -65,6 +58,35 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
       used = i;
     }
   }
+  return used;
+}
+
+/* The first coprocessor snes_loadRom's attach tests below match, in their order. */
+static int coproOf(const CartHeader* h) {
+  if(h->coprocessor == 0 && h->chips >= 3 && h->chips <= 5) return SNES_COPRO_DSP1;
+  if(h->coprocessor == 15 && h->exCoprocessor == 16) return SNES_COPRO_CX4;
+  if(h->coprocessor == 4 && h->chips >= 3 && h->chips <= 5) return SNES_COPRO_SDD1;
+  if(h->coprocessor == 15 && h->chips == 9) return SNES_COPRO_SPC7110;
+  if(h->coprocessor == 1) return SNES_COPRO_GSU;
+  return SNES_COPRO_NONE;
+}
+
+int snes_rom_coprocessor(const uint8_t* data, int length) {
+  if(length < 0x8000) return SNES_COPRO_NONE;
+  CartHeader headers[4];
+  return coproOf(&headers[pickHeader(data, length, headers)]);
+}
+
+bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
+  // if smaller than smallest possible, don't load
+  if(length < 0x8000) {
+    printf("Failed to load rom: rom to small (%d bytes)\n", length);
+    return false;
+  }
+  // check headers
+  CartHeader headers[4];
+  // see which it is
+  int used = pickHeader(data, length, headers);
   if(used & 1) {
     // odd-numbered ones are for headered roms
     data += 0x200; // move pointer past header

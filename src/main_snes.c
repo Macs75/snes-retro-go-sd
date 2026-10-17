@@ -2263,63 +2263,87 @@ static void rec_host_start(void)
  * (DSP-x/SA-1/SuperFX/...). The DSP-1 family (high nibble 0, low nibble 3-5)
  * has HLE support in dsp1_hle.c, and Cx4 (romType $F0-$FF with $FFBF=$10)
  * in cx4_hle.c. Everything else is rejected. */
-/* Super FX: the GSU core (gsu_core.o) is an overlay, not part of the core
- * image -- see .gsu_overlay in snes_core.ld. pack appends it to snes.bin as
- *   u32 magic 'GSUO', u32 run address, u32 code+data size, u32 bss size,
- *   code+data bytes
- * after the segments. For a Super FX cart it must be the FIRST allocation in
- * the RAM_EMU pool (which starts exactly where it is linked to run). */
-#define GSU_OVL_MAGIC 0x4F555347u   /* "GSUO" */
-#define GSU_OVL_CORE_PATH "/cores/snes.bin"
-
-static bool rom_is_superfx(const uint8_t *rom, uint32_t len) {
-  if (!rom || len < 0x8000) return false;
-  const uint8_t *h = rom + 0x7fb0;             /* Super FX carts are LoROM */
-  uint16_t cks  = h[0x2e] | (h[0x2f] << 8);
-  uint16_t icks = h[0x2c] | (h[0x2d] << 8);
-  return (cks ^ icks) == 0xffff && (h[0x26] >> 4) == 0x01 && h[0x26] >= 0x13;
-}
+/* Coprocessor overlays: the code of the Super FX (gsu_core.o + gsu_blocks.o),
+ * Cx4, S-DD1, SPC7110 and DSP-1 is not part of the core image -- see the
+ * OVERLAY in snes_core.ld. All are linked to run at the start of the RAM_EMU
+ * pool; pack (tools/append_overlays.py) appends each to snes.bin after the
+ * segments as
+ *   u32 tag, u32 run address, u32 code+data size, u32 bss size, code+data bytes
+ * For a cart with a coprocessor, its overlay is read in as the FIRST
+ * allocation of the pool (which starts exactly where they are linked to run). */
+#define COPRO_OVL_CORE_PATH "/cores/snes.bin"
 
 #ifndef HOST_BUILD
+static int copro_overlay_loaded = SNES_COPRO_NONE;
 extern uint8_t __GSU_OVL_START__[], __GSU_OVL_CODE_END__[], __GSU_OVL_END__[];
+extern uint8_t __CX4_OVL_START__[], __CX4_OVL_END__[];
+extern uint8_t __SDD1_OVL_START__[], __SDD1_OVL_END__[];
+extern uint8_t __SPC7110_OVL_START__[], __SPC7110_OVL_END__[];
+extern uint8_t __DSP1_OVL_START__[], __DSP1_OVL_END__[];
 
-static uint32_t gsu_ovl_rd32(const uint8_t *p) {
+static const struct {
+  int kind;
+  const char *name;
+  uint32_t tag;             /* the four characters, little-endian */
+  uint8_t *start, *code_end, *end;
+} copro_ovl[] = {
+  { SNES_COPRO_GSU,     "Super FX", 0x4F555347u /* GSUO */, __GSU_OVL_START__, __GSU_OVL_CODE_END__, __GSU_OVL_END__ },
+  { SNES_COPRO_CX4,     "Cx4",      0x4F345843u /* CX4O */, __CX4_OVL_START__, __CX4_OVL_END__, __CX4_OVL_END__ },
+  { SNES_COPRO_SDD1,    "S-DD1",    0x31444453u /* SDD1 */, __SDD1_OVL_START__, __SDD1_OVL_END__, __SDD1_OVL_END__ },
+  { SNES_COPRO_SPC7110, "SPC7110",  0x31313753u /* S711 */, __SPC7110_OVL_START__, __SPC7110_OVL_END__, __SPC7110_OVL_END__ },
+  { SNES_COPRO_DSP1,    "DSP-1",    0x31505344u /* DSP1 */, __DSP1_OVL_START__, __DSP1_OVL_END__, __DSP1_OVL_END__ },
+};
+
+static uint32_t copro_ovl_rd32(const uint8_t *p) {
   return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-/* Returns NULL on success, else why it failed. */
-static const char *gsu_overlay_load(void) {
-  const uint32_t code = (uint32_t)(__GSU_OVL_CODE_END__ - __GSU_OVL_START__);
-  const uint32_t bss  = (uint32_t)(__GSU_OVL_END__ - __GSU_OVL_CODE_END__);
+/* Load the overlay of coprocessor `kind`. Returns NULL on success, else why. */
+static const char *copro_overlay_load(int kind) {
+  unsigned i = 0;
+  while (i < sizeof copro_ovl / sizeof copro_ovl[0] && copro_ovl[i].kind != kind) i++;
+  if (i == sizeof copro_ovl / sizeof copro_ovl[0]) return "no overlay for this chip";
+  const uint32_t code = (uint32_t)(copro_ovl[i].code_end - copro_ovl[i].start);
+  const uint32_t bss  = (uint32_t)(copro_ovl[i].end - copro_ovl[i].code_end);
   if (ram_get_free_size() < code + bss) return "not enough RAM";
   uint8_t *dst = (uint8_t *)ram_malloc(code + bss);
-  if (dst != __GSU_OVL_START__) return "overlay address";
+  if (dst != copro_ovl[i].start) return "overlay address";
 
   /* "CORE" header: u16 version at 4, u16 header_length at 6, meta at 8 with
    * segments_count at +12 and segments[] (region, code_size, bss_size) at +16;
    * the payload (segments' code back to back) starts at 8 + header_length. */
   static uint8_t hdr[8 + 16 + 4 * 12];
-  if (rg_storage_copy_file_range_to_ram(GSU_OVL_CORE_PATH, hdr, 0, sizeof hdr, NULL) != sizeof hdr ||
+  if (rg_storage_copy_file_range_to_ram(COPRO_OVL_CORE_PATH, hdr, 0, sizeof hdr, NULL) != sizeof hdr ||
       memcmp(hdr, "CORE", 4) != 0)
-    return "cannot read " GSU_OVL_CORE_PATH;
+    return "cannot read " COPRO_OVL_CORE_PATH;
   uint32_t off = 8 + (hdr[6] | (hdr[7] << 8));
-  uint32_t nseg = gsu_ovl_rd32(hdr + 8 + 12);
+  uint32_t nseg = copro_ovl_rd32(hdr + 8 + 12);
   if (nseg > 4) return "core header";
-  for (uint32_t i = 0; i < nseg; i++) off += gsu_ovl_rd32(hdr + 8 + 16 + i * 12 + 4);
+  for (uint32_t k = 0; k < nseg; k++) off += copro_ovl_rd32(hdr + 8 + 16 + k * 12 + 4);
 
+  /* the overlay records follow the segments; walk them to this chip's */
   uint8_t th[16];
-  if (rg_storage_copy_file_range_to_ram(GSU_OVL_CORE_PATH, th, off, sizeof th, NULL) != sizeof th ||
-      gsu_ovl_rd32(th) != GSU_OVL_MAGIC || gsu_ovl_rd32(th + 4) != (uint32_t)(uintptr_t)dst ||
-      gsu_ovl_rd32(th + 8) != code || gsu_ovl_rd32(th + 12) != bss)
+  for (;;) {
+    if (rg_storage_copy_file_range_to_ram(COPRO_OVL_CORE_PATH, th, off, sizeof th, NULL) != sizeof th)
+      return "overlay not in " COPRO_OVL_CORE_PATH;
+    if (copro_ovl_rd32(th) == copro_ovl[i].tag) break;
+    off += sizeof th + copro_ovl_rd32(th + 8);
+  }
+  if (copro_ovl_rd32(th + 4) != (uint32_t)(uintptr_t)dst ||
+      copro_ovl_rd32(th + 8) != code || copro_ovl_rd32(th + 12) != bss)
     return "overlay does not match this core";
-  if (rg_storage_copy_file_range_to_ram(GSU_OVL_CORE_PATH, dst, off + sizeof th, code, NULL) != code)
+  if (rg_storage_copy_file_range_to_ram(COPRO_OVL_CORE_PATH, dst, off + sizeof th, code, NULL) != code)
     return "overlay read";
   memset(dst + code, 0, bss);
   SCB_CleanDCache_by_Addr((uint32_t *)dst, (int32_t)code);
   SCB_InvalidateICache();
-  printf("snes: Super FX overlay %lu+%lu B at %p\n", (unsigned long)code, (unsigned long)bss, (void *)dst);
+  copro_overlay_loaded = kind;
+  printf("snes: %s overlay %lu+%lu B at %p\n", copro_ovl[i].name, (unsigned long)code,
+         (unsigned long)bss, (void *)dst);
   return NULL;
 }
+
+bool snes_copro_overlay_ready(int kind) { return copro_overlay_loaded == kind; }
 #endif
 
 static bool cart_needs_coprocessor(const uint8_t *rom, uint32_t len) {
@@ -2573,11 +2597,12 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 #endif
 
 #ifndef HOST_BUILD
-  if (rom_is_superfx(rom, sz)) {
-    const char *why = gsu_overlay_load();
+  int copro_kind = rom ? snes_rom_coprocessor(rom, (int)sz) : SNES_COPRO_NONE;
+  if (copro_kind != SNES_COPRO_NONE) {
+    const char *why = copro_overlay_load(copro_kind);
     if (why) {
-      printf("snes: Super FX overlay: %s\n", why);
-      draw_error_screen("Super FX core not loaded", why, "Press a button");
+      printf("snes: coprocessor overlay: %s\n", why);
+      draw_error_screen("Coprocessor code not loaded", why, "Press a button");
       lcd_swap();
       snes_wait_button();
       odroid_system_switch_app(0);
