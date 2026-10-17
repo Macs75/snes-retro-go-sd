@@ -36,6 +36,11 @@
   waterfall room: DMA 562K → 191K cycles/frame, busy 100% → 94% of the budget,
   late frames halved. Output bit-identical (Super Mario Kart,
   Castlevania, Batman, TMNT IV and Yoshi's Island replays).
+- **Offset-per-tile backgrounds** (BG modes 2 and 4 with OPT, Star Fox's 3D
+  scenes) decode each tile once instead of every pixel bit by bit, skip blank
+  tiles and read BG3's offset table once per pass. Star Fox on device: PPU
+  41-43% → 24-26% of the frame budget, intro and gameplay from 1.25x to
+  ~1.07x real time. Output bit-identical.
 
 ### Changed
 

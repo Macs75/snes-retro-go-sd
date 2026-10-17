@@ -86,6 +86,7 @@ static int ppu_getPixel(Ppu* ppu, int x, int y, bool sub, int* r, int* g, int* b
 static uint16_t ppu_getOffsetValue(Ppu* ppu, int col, int row);
 static bool PpuMode4HasOpt(Ppu *ppu);
 static bool PpuMode2HasOpt(Ppu *ppu);
+static uint16_t g_opt_word[2][32];   /* see PpuMode2HasOpt */
 static int ppu_getPixelForBgLayer(Ppu* ppu, int x, int y, int layer, bool priority);
 static void ppu_handleOPT(Ppu* ppu, int layer, int* lx, int* ly);
 static void ppu_calculateMode7Starts(Ppu* ppu, int y);
@@ -1974,8 +1975,31 @@ static void PpuDrawBackground_mosaic(Ppu *ppu, uint y, bool sub, uint layer,
 }
 
 /* Mode 2/4 offset-per-tile: each 8px screen column can replace H and/or V
- * scroll from BG3. One tile fetch per BG tile. Mode 4 packs H/V in one word
- * (ppu_handleOPT). column 0 never applies OPT. */
+ * scroll from BG3. ppu_handleOPT for Modes 2 and 4, on the offset words
+ * PpuMode2HasOpt/PpuMode4HasOpt just read (g_opt_word). Column 0 never
+ * applies OPT. */
+static inline void PpuOptApply(const Ppu *ppu, uint layer, int *lx, int *ly) {
+  const int x = *lx, y = *ly;
+  const int column = ((x - (x & 0x7)) - (ppu->bgLayer[layer].hScroll & 0xfff8)) >> 3;
+  if (column > 0) {
+    const int valid = layer == 0 ? 0x2000 : 0x4000;
+    uint16_t hOffset = g_opt_word[0][column - 1];
+    uint16_t vOffset = 0;
+    if (ppu->mode == 4) {
+      if (hOffset & 0x8000) {
+        vOffset = hOffset;
+        hOffset = 0;
+      }
+    } else {
+      vOffset = g_opt_word[1][column - 1];
+    }
+    if (hOffset & valid) *lx = ((hOffset & 0x3f8) + (column * 8)) | (x & 0x7);
+    if (vOffset & valid) *ly = (vOffset & 0x3ff) + (y - ppu->bgLayer[layer].vScroll);
+  }
+}
+
+/* One tile fetch per BG tile, decoded once to chunky nibbles (pixel column c
+ * is nibble 7 - c, or c when h-flipped); a tile with no set bit draws nothing. */
 static void PpuDrawBackground_opt(Ppu *ppu, uint y, bool sub, uint layer,
                                   PpuZbufType zhi, PpuZbufType zlo, int bpp) {
   if (!IS_SCREEN_ENABLED(ppu, sub, layer))
@@ -2003,7 +2027,7 @@ static void PpuDrawBackground_opt(Ppu *ppu, uint y, bool sub, uint layer,
       run = IntMin(8 - ((x + bglayer->hScroll) & 7), x2 - x);
       int lx = x + bglayer->hScroll;
       int ly = (int)y + bglayer->vScroll;
-      ppu_handleOPT(ppu, (int)layer, &lx, &ly);
+      PpuOptApply(ppu, layer, &lx, &ly);
       lx &= 0x3ff;
       ly &= 0x3ff;
 
@@ -2029,20 +2053,21 @@ static void PpuDrawBackground_opt(Ppu *ppu, uint y, bool sub, uint layer,
       if (bpp >= 8)
         bits_hi = ppu->vram[(adr + 16) & 0x7fff]
                 | (uint32)ppu->vram[(adr + 24) & 0x7fff] << 16;
-      PpuZbufType z = (tile & 0x2000) ? zhi : zlo;
-      if (bpp < 8)
-        z += (tile & 0x1c00) >> pal_shift;
-
-      for (int i = 0; i < run; i++) {
-        int col = (tile & 0x4000) ? ((lx + i) & 7) : 7 - ((lx + i) & 7);
-        int pixel = ((bits >> col) & 1) | ((bits >> (7 + col)) & 2);
-        if (bpp >= 4)
-          pixel |= ((bits >> (14 + col)) & 4) | ((bits >> (21 + col)) & 8);
-        if (bpp >= 8)
-          pixel |= (((bits_hi >> col) & 1) | ((bits_hi >> (7 + col)) & 2)
-                 | ((bits_hi >> (14 + col)) & 4) | ((bits_hi >> (21 + col)) & 8)) << 4;
-        if (pixel && z > dstz[i])
-          dstz[i] = z + (PpuZbufType)pixel;
+      if (bits | bits_hi) {
+        PpuZbufType z = (tile & 0x2000) ? zhi : zlo;
+        if (bpp < 8)
+          z += (tile & 0x1c00) >> pal_shift;
+        const uint32 lo = (bpp >= 4) ? PpuDecode4bpp(bits) : PpuDecode2bpp(bits);
+        const uint32 hi = (bpp >= 8) ? PpuDecode4bpp(bits_hi) : 0;
+        const unsigned flip = (tile & 0x4000) ? 0u : 7u;
+        for (int i = 0; i < run; i++) {
+          const unsigned sh = 4u * (((unsigned)(lx + i) & 7u) ^ flip);
+          int pixel = (int)((lo >> sh) & 0xf);
+          if (bpp >= 8)
+            pixel |= (int)((hi >> sh) & 0xf) << 4;
+          if (pixel && z > dstz[i])
+            dstz[i] = z + (PpuZbufType)pixel;
+        }
       }
     } while (x += run, dstz += run, x < x2);
   }
@@ -4575,20 +4600,26 @@ static uint16_t ppu_getOffsetValue(Ppu* ppu, int col, int row) {
   return ppu->vram[tilemapAdr & 0x7fff];
 }
 
-static bool PpuMode4HasOpt(Ppu *ppu) {
-  for (int c = 0; c < 32; c++) {
-    if (ppu_getOffsetValue(ppu, c, 0) & 0x6000)
-      return true;
-  }
-  return false;
+/* Mode 2/4 decide per pass whether any column applies OPT, which reads the
+ * whole offset table anyway: they keep it in g_opt_word (row 0 = the H words,
+ * row 1 = the V words; Mode 4 has row 0 only) for PpuDrawBackground_opt, which
+ * draws the same pass right after -- nothing writes VRAM or BG3's registers in
+ * between. Out of line: once a pass, and inlined they grew PpuDrawBackgrounds
+ * past its slot in the PPU window (snes_core.ld). */
+__attribute__((noinline)) static bool PpuMode4HasOpt(Ppu *ppu) {
+  uint16_t any = 0;
+  for (int c = 0; c < 32; c++)
+    any |= g_opt_word[0][c] = ppu_getOffsetValue(ppu, c, 0);
+  return (any & 0x6000) != 0;
 }
 
-static bool PpuMode2HasOpt(Ppu *ppu) {
+__attribute__((noinline)) static bool PpuMode2HasOpt(Ppu *ppu) {
+  uint16_t any = 0;
   for (int c = 0; c < 32; c++) {
-    if ((ppu_getOffsetValue(ppu, c, 0) | ppu_getOffsetValue(ppu, c, 1)) & 0x6000)
-      return true;
+    any |= g_opt_word[0][c] = ppu_getOffsetValue(ppu, c, 0);
+    any |= g_opt_word[1][c] = ppu_getOffsetValue(ppu, c, 1);
   }
-  return false;
+  return (any & 0x6000) != 0;
 }
 
 static int ppu_getPixelForBgLayer(Ppu* ppu, int x, int y, int layer, bool priority) {

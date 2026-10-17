@@ -85,7 +85,7 @@ SECTIONS
     . = __APU_HOT_START__ + 0xA800;
     __PPU_HOT_START__ = .;
     *(.text.PpuDrawBackgrounds)
-    . = ALIGN(32);
+    . = __PPU_HOT_START__ + 0xA20;   /* the drawers at the offsets they measured at */
     *(.text.PpuDrawBackground_4bpp*)
     . = ALIGN(32);
     *(.text.PpuDrawBackground_2bpp*)
@@ -96,7 +96,11 @@ SECTIONS
     . = ALIGN(32);
     *(.text.ppu_getPixel*)
     . = ALIGN(32);
-    *(.text.PpuDrawBackground_8bpp* .text.PpuDrawBackground_hires* .text.PpuDrawBackground_opt*)
+    /* the rest at the offsets they measured at; the Mode 2/4 offset-per-tile
+     * drawer, which only OPT lines run, sits at the end where its size moves
+     * nothing (ld stops if the code before outgrows the pin) */
+    . = __PPU_HOT_START__ + 0x4754;
+    *(.text.PpuDrawBackground_8bpp* .text.PpuDrawBackground_hires*)
     *(.text.PpuDrawBackground_mosaic* .text.ppu_handleOPT*)
     /* last: ppu_runLine inlines the line-start table updates and the sprite
      * evaluation, so it changes size with most PPU work -- here that moves
@@ -109,6 +113,8 @@ SECTIONS
     *(.text.PpuBlendSpan*)
     . = ALIGN(32);
     *(.text.ppu_runLine)
+    . = ALIGN(32);
+    *(.text.PpuDrawBackground_opt*)
     __PPU_HOT_END__ = .;
     ASSERT(__PPU_HOT_END__ <= __APU_HOT_START__ + 0x149C0, "SNES: PPU window (40.4K) overflows");
 

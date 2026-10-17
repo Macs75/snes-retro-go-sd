@@ -261,6 +261,19 @@ chains on and off. Device (Star Fox logs 2 → 3): GSU 67% → 20% (intro),
 real time, intro and gameplay from ~1.65x to ~1.25x. What is left there is the
 PPU (41-43%) and the 65816 (37-40%), no longer the GSU.
 
+**Then the PPU: offset-per-tile.** Star Fox's 3D scenes are BG mode 2 with
+OPT on, which leaves the fast tile walkers for `PpuDrawBackground_opt`: host
+callgrind put it at 82% of the PPU's instructions, ~72 per pixel -- every
+pixel's 4 bits pulled out one by one, two BG3 tilemap reads per column per layer
+(`ppu_handleOPT`). It now decodes each tile once to chunky nibbles (the table
+the fast drawers use), skips blank tiles, and reuses the offset words the
+per-pass "is OPT on" check already reads. Host: the OPT drawer -60%, PPU -44%.
+Device (Star Fox logs 3 → 4): PPU 41-43% → 24-26%, intro and gameplay 1.25x →
+~1.07x real time, underruns -90%; CPU, GSU, APU and the hashes unchanged.
+Placement cost two pins: the drawer moved behind `ppu_runLine` (only OPT lines
+run it) and the 4bpp drawer is pinned, because taking the OPT checks out of
+line shrank `PpuDrawBackgrounds` and would have shifted every drawer behind it.
+
 ### 4.6 SPC700: batch the opcodes inside the Thumb-2 engine
 
 In Yoshi's Island the SPC700 cost is real driver work, not polling: a host
