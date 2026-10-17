@@ -2,60 +2,43 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Super FX (GSU) support.** Yoshi's Island, Star Fox, Doom, Vortex, Dirt Trax
+  FX, Stunt Race FX and Winter Gold boot and play. The GSU core is the ZSNES
+  one, made to fit the G&W, and is loaded only for a Super FX cart. Yoshi's
+  Island runs its hot GSU code as precompiled blocks: on device the title screen
+  went from 156% to 87% of the frame budget, gameplay averages under it and the
+  heaviest room (the waterfall) sits at it. Save states work for Super
+  FX carts; one saved by an earlier build is refused.
+- Diagnostics: `PERF_SPC=1` (the SPC700 time split), host `APU_HIST`,
+  `CPU_PCHIST` and `IDLE_TRACE`, the GSU spike/coverage and core memory reports
+  in `tools/`, and `tools/state_resume_test.py` (a save state resumed in a fresh
+  process must continue like the run that saved it).
+
 ### Performance
 
-- **SPC700: whole batches of opcodes inside the Thumb-2 engine.** `apu_run`
-  called the engine once per SPC700 opcode, through `spc_runOpcode`, and did the
-  cycle bookkeeping and DSP ticks in C between every two. The engine now runs
-  opcodes in a loop (`spc_thumb2_run(spc, budget)`) with its registers live
-  across them, commits `apu->cycles` itself and calls `apu_dsp_ticks` only when
-  an opcode crosses a 32-cycle DSP boundary. It hands back to `apu_run` only for
-  what that loop does differently: the idle-wait pattern (so the idle skip still
-  fires), an opcode longer than the budget left (in `cpuCyclesLeft`), and
-  STOP/SLEEP. Unhandled opcodes call the C fallback (`spc_fallback`) from inside
-  the loop. Generic: every game's sound driver runs through it. Yoshi's Island
-  waterfall room on device (PERF_SPC, logs 12 → 13): 3,569 engine calls → 45 per
-  frame, SPC700 507K → 321K cycles/frame, APU total 1.04M → 850K, busy 103.3% →
-  100.0% of the budget. Log 12's per-opcode probes cost ~42K, so against a
-  normal build the saving is estimated at ~145K/frame (~2.5% of the budget).
-  Output bit-identical on the Cortex-M7 QEMU harness over the full Castlevania
-  (4,105 frames) and Yoshi's Island (19,289 frames) replays; a negative control
-  (DSP ticks removed) fails 64 of Castlevania's 68 hashes.
+- **SPC700: the Thumb-2 engine runs whole batches of opcodes**, instead of being
+  called once per opcode from C. Generic, every game's sound driver runs through
+  it. Yoshi's Island waterfall room: SPC700 507K → 321K cycles/frame, an
+  estimated 2.5% of the frame budget against a normal build. Output
+  bit-identical (Castlevania and Yoshi's Island replays on the Cortex-M7
+  harness).
 
 ### Changed
 
-- **Idle skip: one site per decode environment, found at IRQs too.** A wait
-  loop entered with a different M/X/E, DB or DP is now a site of its own
-  instead of being decoded again over the existing one; only a site whose code
-  changed is replaced in place. Yoshi's Island polls the GSU from the same WRAM
-  loop with DB $01 and DB $03 every frame, and the two kept evicting each other.
-  The table holds 8 sites (was 4). The site search also runs at every H/V-IRQ
-  and Super FX IRQ request, at the interrupted pc: a loop that waits for an IRQ
-  mid-frame (Yoshi's frame wait ends on the GSU's STOP IRQ) is never where the
-  CPU is at the NMI, so the NMI sample alone never found it. Host
-  `IDLE_TRACE=n` logs the first n site decisions.
+- **Idle skip:** a wait loop entered in another CPU environment (M/X/E, DB, DP)
+  gets a site of its own instead of replacing the existing one (8 sites, was 4),
+  and the site search also runs at IRQ requests, so loops that wait for an IRQ
+  mid-frame are found.
+- The Cx4, S-DD1, SPC7110 and DSP-1 code joined the Super FX core as overlays
+  loaded only for their carts, and the private framebuffer holds only the
+  256x240 picture: ~65 KB more RAM for every game.
 
-### Added
+### Fixed
 
-- **Super FX save states.** The GSU's registers, flags, cache and scheduler
-  bookkeeping are the ZSNES core's globals, outside the serialized `Cart`;
-  `gsu_saveload` streams them after the Game Pak RAM (with the ROM-buffer and
-  last-RAM pointers as offsets, the host pointers rebuilt from the bank
-  registers on load). Other carts' state layout is unchanged; a Super FX state
-  saved before this has a different payload size and is refused, not loaded.
-  Host test: `tools/state_resume_test.py` saves at frame X of a replay
-  (`SNES_STATE_SAVE_AT`), resumes it in a fresh process (`SNES_STATE_RESUME`)
-  and compares the machine hashes, plus the per-frame GSU state log with
-  `--gsu`. `HOST_LOAD_STATE=1` boots the host straight into save slot 0.
-- **`PERF_SPC=1`**: the SPC700 figure split into the engine (net of its DSP
-  ticks), its C fallback and the idle skip's count (`PROF/spc`).
-- **`APU_HIST=file`** (host, window `APU_HIST_FRAMES=a:b`): SPC700 opcodes per
-  pc after the idle skip, plus a DSP census per tick (voices playing, at zero
-  volume, echo state); `tools/spc_hist_report.py` groups it into routines and
-  disassembles them, `tools/spc_native_coverage.py` lists the opcodes that still
-  fall back to C.
-- **`CPU_PCHIST=file`** (host): 65816 instructions executed per bank:pc after
-  the idle skip, hottest first, with the cumulative share.
+- PROFLITE no longer reports the audio as slowed for the stretcher's normal
+  ±1% trimming, only below 0.99x.
 
 ## [v0.0.7]
 
