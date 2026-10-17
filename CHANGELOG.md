@@ -11,7 +11,8 @@
   loaded only for its own cart. Yoshi's title screen went from 156% to 87% of
   the frame budget on device, gameplay averages under it and the heaviest room
   (the waterfall) sits at it; Star Fox's title runs at full speed and its intro
-  and gameplay went from ~1.65x to ~1.25x real time. Save states work for Super
+  and gameplay went from ~1.65x to ~1.25x real time; its mission map and planet
+  zoom, up to 2.7x, now run at full speed. Save states work for Super
   FX carts; one saved by an earlier build is refused.
 - Diagnostics: `PERF_SPC=1` (the SPC700 time split), host `APU_HIST`,
   `CPU_PCHIST` and `IDLE_TRACE`, the GSU spike/coverage and core memory reports

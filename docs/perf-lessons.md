@@ -261,6 +261,17 @@ chains on and off. Device (Star Fox logs 2 → 3): GSU 67% → 20% (intro),
 real time, intro and gameplay from ~1.65x to ~1.25x. What is left there is the
 PPU (41-43%) and the 65816 (37-40%), no longer the GSU.
 
+A later recording reached the mission map and the zoom onto Corneria, which
+none of the three phases had: 89% of their GSU instructions interpreted, GSU
+85-210% of the budget. One routine (01:b674-bbf2, the textured planets) was
+86% of that; a fourth histogram of those frames brought them to 98% compiled
+and the record to 108 KB (4.5 KB of pool left). Device (logs 6 → 7): those
+windows 149% → 72% busy, the worst 268% → 79%, underruns over the replay -86%.
+Level 1 was already 92% compiled: the same addition took it to 94% and its
+GSU 21% → 19.5%; compiling the rest would save at most ~4% of the budget for
+~150 KB of code. Use `tools/gsu_hist_report.py` on a new scene's frames before
+assuming chains will help.
+
 **Then the PPU: offset-per-tile.** Star Fox's 3D scenes are BG mode 2 with
 OPT on, which leaves the fast tile walkers for `PpuDrawBackground_opt`: host
 callgrind put it at 82% of the PPU's instructions, ~72 per pixel -- every
