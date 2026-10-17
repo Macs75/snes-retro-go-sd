@@ -607,7 +607,7 @@ class Chain:
     """Straight-line hot code from `head` on: through untaken branches, up to an
     unconditional transfer, an instruction not compiled, or cold code."""
 
-    def __init__(self, rom, tables, handlers, bank, head, sel, dyn, maxlen, seen=frozenset()):
+    def __init__(self, rom, tables, handlers, bank, head, sel, dyn, maxlen, seen=frozenset(), owned=frozenset()):
         g = self.g = Gen(rom, tables, handlers, bank)
         g.dyn = {t for b, t in dyn if b == bank}
         g.links = set()
@@ -619,6 +619,10 @@ class Chain:
         while True:
             if len(self.starts) == maxlen or (a != head and (bank, a) not in sel):
                 g.e('BLK_TO(0x%04X);' % a)
+                break
+            if a != head and (bank, a) in owned:   # another chain runs on from here
+                g.e('BLK_TO(0x%04X);' % a)
+                self.stop = 'joins'
                 break
             mark = len(g.lines)
             saved = (set(g.used), set(g.wr), set(g.bytes), set(g.glob))
@@ -831,7 +835,7 @@ def main():
     for p in sorted(sel):
         if p in owner:
             continue
-        ch = Chain(rom, tables, handlers, p[0], p[1], sel, dyn, a.maxlen, seen)
+        ch = Chain(rom, tables, handlers, p[0], p[1], sel, dyn, a.maxlen, seen, owner)
         if not ch.starts:
             continue
         chains[p] = ch
