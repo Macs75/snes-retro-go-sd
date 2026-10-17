@@ -83,7 +83,8 @@ def main():
             cl.append({'b': b, 'lo': x, 'hi': x, 'addrs': [x]})
     for c in cl:
         c['in'] = sum(miss[(c['b'], x)] for x in c['addrs'])
-        c['out'] = sum(whole.get((c['b'], x), 0) for x in c['addrs']) - c['in']
+        w = sum(whole.get((c['b'], x), 0) for x in c['addrs'])
+        c['out'] = w - c['in'] if w >= c['in'] else None   # None: not (all) in the --all run
     cl.sort(key=lambda c: -c['in'])
 
     # static references: IWT R15 (FF) and IWT R13 (FD) immediates into a routine
@@ -111,9 +112,10 @@ def main():
     for c in cl:
         acc += c['in']
         r = refs(c)
-        print('%02x:%04x-%04x  %5d %5d %9d %5.1f%% %13d %7.0f B  %s'
+        print('%02x:%04x-%04x  %5d %5d %9d %5.1f%% %13s %7.0f B  %s'
               % (c['b'], c['lo'], c['hi'], c['hi'] - c['lo'] + 1, len(c['addrs']), c['in'], 100.0 * acc / msum,
-                 c['out'], len(c['addrs']) * bpi, '; '.join(r) if r else '-'))
+                 'not in --all' if c['out'] is None else str(c['out']), len(c['addrs']) * bpi,
+                 '; '.join(r) if r else '-'))
     for frac in (0.8, 0.9, 0.95):
         acc = addrs = k = 0
         for c in cl:
