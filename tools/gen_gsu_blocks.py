@@ -927,7 +927,7 @@ def main():
            % (len(chains), len(groups), len(groups) - len(hot), len(keys), len(sel)),
            ' * Profiled top-level GSU instructions inside the chains: %s.' % covtxt,
            ' * Chain ends: %s.' % ', '.join('%s %d' % kv for kv in sorted(stops.items())),
-           ' * Included by gsu_blocks.c. */', '',
+           ' * Included by gsu_blocks_%s.c. */' % N, '',
            '/* fx_ram() through the locals: rmem = SfxRAMMem, gram = sfxgameram, gmask = SfxRamMask */',
            '#define BLK_RAM(a) (gram + ((rmem - (uintptr_t)gram + (a)) & gmask))', '']
     # PLOT: the variants CMODE selects in this game run inline, any other is called
@@ -945,6 +945,10 @@ def main():
         txt.append('    ' + ' '.join('0x%08Xu,' % ((b << 24) | (x << 8) | n) for b, x, n in runs[i:i + 6]))
     txt.append('};')
     txt.append('#define GSU_BLK_%s_HASH 0x%08Xu /* FNV-1a of those bytes */' % (N.upper(), hsh))
+    # the cart's internal header ($7FC0, 32 bytes): the device loads this game's
+    # overlay for the cart whose header hashes to it (gsu_blk_cart_id)
+    txt.append('#define GSU_BLK_%s_ID 0x%08Xu /* FNV-1a of the internal header */'
+               % (N.upper(), fnv1a(rom.d[0x7FC0:0x7FE0])))
     txt.append('#undef BLK_RAM')
     txt.append('#undef BLK_PLOT')
     open(a.o, 'w').write('\n'.join(txt) + '\n')

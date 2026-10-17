@@ -75,6 +75,7 @@ static void snes_wait_button(void)
 #include "snes/snes.h"
 #include "snes/cart.h"
 #include "snes/gsu.h"
+#include "snes/gsu_zsnes/gsu_blocks.h"   /* gsu_blk_cart_id, GSU_BLK_GAME_MAGIC */
 #include "snes/spc7110.h"
 #include "snes/ppu.h"
 #include "snes/apu.h"
@@ -2351,16 +2352,20 @@ static uint32_t copro_ovl_rd32(const uint8_t *p) {
   return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-/* Load the overlay of coprocessor `kind`. Returns NULL on success, else why. */
-static const char *copro_overlay_load(int kind) {
+/* Super FX: the cart's game block code (gsu_blocks.c reads it), or NULL */
+void const *snes_gsu_game;
+extern uint8_t __GSU_GAME_OVL_START__[];
+
+/* Load the overlay of coprocessor `kind`, and for the Super FX the block code of
+ * the cart's game if snes.bin has it (a GSGM record whose header carries the
+ * cart id): both linked back to back (snes_core.ld), so they are one pool
+ * allocation. Returns NULL on success, else why. */
+static const char *copro_overlay_load(int kind, const uint8_t *rom, uint32_t rom_len) {
   unsigned i = 0;
   while (i < sizeof copro_ovl / sizeof copro_ovl[0] && copro_ovl[i].kind != kind) i++;
   if (i == sizeof copro_ovl / sizeof copro_ovl[0]) return "no overlay for this chip";
   const uint32_t code = (uint32_t)(copro_ovl[i].code_end - copro_ovl[i].start);
   const uint32_t bss  = (uint32_t)(copro_ovl[i].end - copro_ovl[i].code_end);
-  if (ram_get_free_size() < code + bss) return "not enough RAM";
-  uint8_t *dst = (uint8_t *)ram_malloc(code + bss);
-  if (dst != copro_ovl[i].start) return "overlay address";
 
   /* "CORE" header: u16 version at 4, u16 header_length at 6, meta at 8 with
    * segments_count at +12 and segments[] (region, code_size, bss_size) at +16;
@@ -2369,30 +2374,65 @@ static const char *copro_overlay_load(int kind) {
   if (rg_storage_copy_file_range_to_ram(COPRO_OVL_CORE_PATH, hdr, 0, sizeof hdr, NULL) != sizeof hdr ||
       memcmp(hdr, "CORE", 4) != 0)
     return "cannot read " COPRO_OVL_CORE_PATH;
-  uint32_t off = 8 + (hdr[6] | (hdr[7] << 8));
+  uint32_t first = 8 + (hdr[6] | (hdr[7] << 8));
   uint32_t nseg = copro_ovl_rd32(hdr + 8 + 12);
   if (nseg > 4) return "core header";
-  for (uint32_t k = 0; k < nseg; k++) off += copro_ovl_rd32(hdr + 8 + 16 + k * 12 + 4);
+  for (uint32_t k = 0; k < nseg; k++) first += copro_ovl_rd32(hdr + 8 + 16 + k * 12 + 4);
 
   /* the overlay records follow the segments; walk them to this chip's */
   uint8_t th[16];
+  uint32_t off = first;
   for (;;) {
     if (rg_storage_copy_file_range_to_ram(COPRO_OVL_CORE_PATH, th, off, sizeof th, NULL) != sizeof th)
       return "overlay not in " COPRO_OVL_CORE_PATH;
     if (copro_ovl_rd32(th) == copro_ovl[i].tag) break;
     off += sizeof th + copro_ovl_rd32(th + 8);
   }
-  if (copro_ovl_rd32(th + 4) != (uint32_t)(uintptr_t)dst ||
+  if (copro_ovl_rd32(th + 4) != (uint32_t)(uintptr_t)copro_ovl[i].start ||
       copro_ovl_rd32(th + 8) != code || copro_ovl_rd32(th + 12) != bss)
     return "overlay does not match this core";
+
+  /* Super FX: a GSGM record for this cart. Its header starts with the magic
+   * and the cart id; gsu_blk_select still checks the ROM bytes it was made
+   * from before using it. None: the interpreter alone. */
+  uint32_t game_off = 0, game_size = 0;
+  if (kind == SNES_COPRO_GSU) {
+    const uint32_t id = gsu_blk_cart_id(rom, rom_len);
+    uint8_t gh[16 + 8];
+    for (uint32_t p = first;
+         rg_storage_copy_file_range_to_ram(COPRO_OVL_CORE_PATH, gh, p, sizeof gh, NULL) == sizeof gh;
+         p += 16 + copro_ovl_rd32(gh + 8)) {
+      if (copro_ovl_rd32(gh) == GSU_BLK_GAME_MAGIC && copro_ovl_rd32(gh + 16) == GSU_BLK_GAME_MAGIC &&
+          copro_ovl_rd32(gh + 20) == id && copro_ovl_rd32(gh + 12) == 0 &&
+          copro_ovl_rd32(gh + 4) == (uint32_t)(uintptr_t)__GSU_GAME_OVL_START__) {
+        game_off = p + 16;
+        game_size = copro_ovl_rd32(gh + 8);
+        break;
+      }
+    }
+  }
+
+  const uint32_t total = game_size ? (uint32_t)(__GSU_GAME_OVL_START__ - copro_ovl[i].start) + game_size
+                                   : code + bss;
+  if (ram_get_free_size() < total) return "not enough RAM";
+  uint8_t *dst = (uint8_t *)ram_malloc(total);
+  if (dst != copro_ovl[i].start) return "overlay address";
   if (rg_storage_copy_file_range_to_ram(COPRO_OVL_CORE_PATH, dst, off + sizeof th, code, NULL) != code)
     return "overlay read";
-  memset(dst + code, 0, bss);
-  SCB_CleanDCache_by_Addr((uint32_t *)dst, (int32_t)code);
+  memset(dst + code, 0, total - code);   /* the bss, and the gap before a game */
+  if (game_size) {
+    if (rg_storage_copy_file_range_to_ram(COPRO_OVL_CORE_PATH, __GSU_GAME_OVL_START__, game_off, game_size,
+                                          NULL) != game_size)
+      return "game block code read";
+    snes_gsu_game = __GSU_GAME_OVL_START__;
+  }
+  SCB_CleanDCache_by_Addr((uint32_t *)dst, (int32_t)total);
   SCB_InvalidateICache();
   copro_overlay_loaded = kind;
-  printf("snes: %s overlay %lu+%lu B at %p\n", copro_ovl[i].name, (unsigned long)code,
-         (unsigned long)bss, (void *)dst);
+  printf("snes: %s overlay %lu+%lu B at %p%s%lu\n", copro_ovl[i].name, (unsigned long)code,
+         (unsigned long)bss, (void *)dst,
+         kind != SNES_COPRO_GSU ? ", " : game_size ? ", game blocks B " : ", no game blocks for this cart ",
+         (unsigned long)game_size);
   return NULL;
 }
 
@@ -2652,7 +2692,7 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 #ifndef HOST_BUILD
   int copro_kind = rom ? snes_rom_coprocessor(rom, (int)sz) : SNES_COPRO_NONE;
   if (copro_kind != SNES_COPRO_NONE) {
-    const char *why = copro_overlay_load(copro_kind);
+    const char *why = copro_overlay_load(copro_kind, rom, sz);
     if (why) {
       printf("snes: coprocessor overlay: %s\n", why);
       draw_error_screen("Coprocessor code not loaded", why, "Press a button");

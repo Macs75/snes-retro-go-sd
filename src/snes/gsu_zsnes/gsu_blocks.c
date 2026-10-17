@@ -6,9 +6,11 @@
  * exactly what the interpreter (fx_ops.h) would. MainLoop runs a block when one
  * is keyed at the current program bank / PC / prefetched opcode.
  *
- * A unit of its own: GCC's inline growth limits are percentages of the unit,
- * so in gsu_core.c the blocks would change how the interpreter is inlined.
- * Like gsu_core.o it is linked into the GSU overlay (snes_core.ld).
+ * This unit holds the table pointer and picks the game: each game's blocks are
+ * their own unit (gsu_blocks_<game>.c) and, on the device, their own overlay,
+ * so a cart loads only its game's code. A unit apart from gsu_core.c: GCC's
+ * inline growth limits are percentages of the unit. Like gsu_core.o it is
+ * linked into the GSU overlay (snes_core.ld).
  * ========================================================================== */
 
 #ifdef HOST_BUILD
@@ -17,25 +19,6 @@
 #include "gsu_types.h"
 #include "gsu_endmem.h"
 #include "gsu_blocks.h"
-
-/* the GSU state the blocks touch (defined in gsu_core.c) */
-extern u4 SfxR0[16], SfxSignZero, SfxCarry, SfxOverflow, SfxCBR, SfxCacheActive;
-extern u4 SfxRAMBR, SfxROMBR, SfxnRamBanks, SfxPOR, SfxCOLR, SfxRamMask, SfxCROMMask;
-extern u4 fxbit01pcal, fxbit23pcal, fxbit45pcal, fxbit67pcal;
-extern zreg SfxRAMMem, SfxLastRamAdr, SfxRomBuffer, SfxCROM;
-extern u4 FxSeamPC, FxSeamCX, FxCodeMask;
-extern u1 const *FxCodeBase;
-extern u1 *sfxgameram, *SCBRrel;
-extern zreg sfxclineloc;
-
-#ifdef SNES_PERF_GSU
-#include "../../snes_perf.h"
-#endif
-#include "unaligned.h"
-#include "fx_color.h"
-#include "fx_plot.h"
-
-#include "gsu_blocks_yoshi.inc"
 
 struct gsu_blk const *gsu_blk_tab;
 u4 gsu_blk_mask;
@@ -54,18 +37,32 @@ static u4 gsu_blk_hash(u4 const *const runs, u4 const n)
     return h;
 }
 
-#define GSU_BLK_GAME(name, NAME)                                                     \
-    if (gsu_blk_hash(gsu_blk_dep_##name, sizeof gsu_blk_dep_##name / 4) == GSU_BLK_##NAME##_HASH) { \
-        gsu_blk_tab = gsu_blk_tab_##name;                                            \
-        gsu_blk_mask = sizeof gsu_blk_tab_##name / sizeof gsu_blk_tab_##name[0] - 1; \
-        return;                                                                      \
-    }
+#ifdef HOST_BUILD
+/* the host links every game's blocks */
+extern struct gsu_blk_game const gsu_blk_game_yoshi, gsu_blk_game_starfox;
+static struct gsu_blk_game const *const gsu_blk_games[] = { &gsu_blk_game_yoshi, &gsu_blk_game_starfox };
+#else
+/* the device loads one game's overlay, if its cart has one (main_snes.c) */
+extern void const *snes_gsu_game;
+#endif
+
+static int gsu_blk_use(struct gsu_blk_game const *const g)
+{
+    if (!g || g->magic != GSU_BLK_GAME_MAGIC || gsu_blk_hash(g->dep, g->ndep) != g->hash)
+        return 0;
+    gsu_blk_tab = g->tab;
+    gsu_blk_mask = g->mask;
+    return 1;
+}
 
 void gsu_blk_select(void)
 {
     gsu_blk_tab = 0;
 #ifdef HOST_BUILD
     { char const *e = getenv("GSU_BLOCKS"); if (e && *e == '0') return; }
+    for (u4 i = 0; i != sizeof gsu_blk_games / sizeof gsu_blk_games[0]; ++i)
+        if (gsu_blk_use(gsu_blk_games[i])) return;
+#else
+    gsu_blk_use((struct gsu_blk_game const *)snes_gsu_game);
 #endif
-    GSU_BLK_GAME(yoshi, YOSHI)
 }

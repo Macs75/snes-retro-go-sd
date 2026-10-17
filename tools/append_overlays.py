@@ -14,6 +14,11 @@ copro_overlay_load() in main_snes.c walks the records to its chip's tag and
 checks the address and both sizes against its own linker symbols before
 copying, so a snes.bin and overlays from different links can never be combined.
 
+Each game's Super FX block code (.gsugame_<game>, found by its
+__GSUGAME_<game>_START__/_END__ symbols) follows as a GSGM record, its payload
+starting with the game's header (magic, cart id); the loader reads the one whose
+cart id matches the cart together with the Super FX overlay.
+
 Usage: append_overlays.py <elf> <snes.bin> [--nm NM] [--objcopy OBJCOPY]
 """
 import argparse
@@ -67,6 +72,18 @@ def main():
             if len(payload) != code:
                 sys.exit(f"error: {section} is {len(payload)} bytes, symbols say {code}")
             records.append((tag, start, code, bss, payload))
+        for game in sorted(k[len("__GSUGAME_"):-len("_START__")] for k in s
+                           if k.startswith("__GSUGAME_") and k.endswith("_START__")):
+            section = ".gsugame_" + game
+            start, end = s["__GSUGAME_%s_START__" % game], s["__GSUGAME_%s_END__" % game]
+            raw = Path(d) / (section.strip(".") + ".bin")
+            subprocess.run([a.objcopy, "-O", "binary", f"--only-section={section}", str(a.elf), str(raw)],
+                           check=True)
+            payload = raw.read_bytes() if raw.exists() else b""
+            if len(payload) != end - start or payload[:4] != b"GSGM":
+                sys.exit(f"error: {section}: {len(payload)} bytes (symbols say {end - start}), "
+                         f"header {payload[:4]!r}")
+            records.append((b"GSGM", start, end - start, 0, payload))
 
     with open(a.packed, "ab") as f:
         for tag, start, code, bss, payload in records:

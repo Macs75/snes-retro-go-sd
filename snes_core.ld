@@ -146,8 +146,8 @@ SECTIONS
     . = __APU_HOT_START__ + 0x1D800;
     . = ALIGN(4);
     /* The coprocessors' code is not part of the image: see the OVERLAY below. */
-    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o) .text*)
-    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o) .rodata*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o) .text*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o) .rodata*)
     *(.glue_7)
     *(.glue_7t)
 
@@ -160,7 +160,7 @@ SECTIONS
 
   .data :
   {
-    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o) .data*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o) .data*)
   } >RAM_EMU :data
 
   __CORE_CODE_END__ = .;
@@ -168,8 +168,8 @@ SECTIONS
   .bss (NOLOAD) :
   {
     . = ALIGN(8);
-    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o) .bss*)
-    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o) COMMON)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o) .bss*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o) COMMON)
     . = ALIGN(8);
   } >RAM_EMU :data
 
@@ -223,7 +223,8 @@ SECTIONS
          "Error: SNES core ITCM (65816 Thumb-2) overflows 64K ITCM")
 
   /* Coprocessor overlays: the code (and constant tables) of the Super FX
-   * (gsu_core.o + gsu_blocks.o), Cx4, S-DD1, SPC7110 and DSP-1 is linked to
+   * (gsu_core.o + gsu_blocks.o; each game's blocks are below), Cx4, S-DD1,
+   * SPC7110 and DSP-1 is linked to
    * run at the start of the RAM_EMU pool (ram_start = __CORE_BSS_END__, where
    * the firmware seeds the bump) and NOT loaded with the core. pack appends
    * each section to snes.bin (tools/append_overlays.py); for a cart with one
@@ -286,6 +287,37 @@ SECTIONS
          "SNES: Super FX overlay bss overlaps its code")
   ASSERT(__GSU_OVL_END__ <= __RAM_EMU_END__,
          "SNES: Super FX overlay does not fit the RAM_EMU pool")
+
+  /* Super FX block code, one overlay per game (gsu_blocks_<game>.c), all linked
+   * right behind the GSU overlay's bss: the loader reads the GSU code and the
+   * cart's game, if it has one, as one pool allocation. Each starts with its
+   * header (.gsu_game_hdr, struct gsu_blk_game in gsu_blocks.h) and is appended
+   * to snes.bin as a GSGM record (tools/append_overlays.py finds them by their
+   * __GSUGAME_<game>_START__/_END__ symbols). A new game: one section here. */
+  __GSU_GAME_OVL_START__ = ALIGN(__GSU_OVL_END__, 32);
+  OVERLAY __GSU_GAME_OVL_START__ : NOCROSSREFS AT(0xD8000000)
+  {
+    .gsugame_yoshi
+    {
+      __GSUGAME_yoshi_START__ = .;
+      KEEP(*gsu_blocks_yoshi.o(.gsu_game_hdr))
+      *gsu_blocks_yoshi.o(.text* .rodata* .data* .bss* COMMON)
+      . = ALIGN(4);
+      __GSUGAME_yoshi_END__ = .;
+    }
+    .gsugame_starfox
+    {
+      __GSUGAME_starfox_START__ = .;
+      KEEP(*gsu_blocks_starfox.o(.gsu_game_hdr))
+      *gsu_blocks_starfox.o(.text* .rodata* .data* .bss* COMMON)
+      . = ALIGN(4);
+      __GSUGAME_starfox_END__ = .;
+    }
+  }
+  ASSERT(__GSUGAME_yoshi_END__ <= __RAM_EMU_END__,
+         "SNES: Yoshi's Island's GSU blocks do not fit the RAM_EMU pool")
+  ASSERT(__GSUGAME_starfox_END__ <= __RAM_EMU_END__,
+         "SNES: Star Fox's GSU blocks do not fit the RAM_EMU pool")
 
   __exidx_start = .;
   __exidx_end = .;

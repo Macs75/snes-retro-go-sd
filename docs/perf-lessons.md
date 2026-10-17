@@ -248,6 +248,19 @@ histogram of the two bursts added to the selection compiled it (2.8% and 0.7%
 interpreted after): device, logs 17 → 18, those windows' heaviest frame
 229% → 104% and 198% → 94%, no time lost, underruns 590/603 → 0.
 
+**A second game, and one overlay per game.** The chains first lived in the
+GSU overlay, so every Super FX cart loaded Yoshi's 85 KB. Each game's blocks
+are now their own overlay record (GSGM), linked right behind the GSU overlay
+and read with it as one pool allocation for the cart whose internal-header hash
+matches; `gsu_blk_select` still checks the ROM bytes before using them
+(`tools/overlay_records.py` shows which record a cart loads). Star Fox's chains
+came from one device recording split into three phase histograms (intro, title,
+gameplay at 95%): 94% of its GSU instructions compiled, state identical with
+chains on and off. Device (Star Fox logs 2 → 3): GSU 67% → 20% (intro),
+32% → 8% (title), 56% → 16% (gameplay) of the frame budget; the title back to
+real time, intro and gameplay from ~1.65x to ~1.25x. What is left there is the
+PPU (41-43%) and the 65816 (37-40%), no longer the GSU.
+
 ### 4.6 SPC700: batch the opcodes inside the Thumb-2 engine
 
 In Yoshi's Island the SPC700 cost is real driver work, not polling: a host

@@ -2,7 +2,7 @@
  * 237 chains in 89 functions (59 -Os), 320 entries, from 1833 selected addresses.
  * Profiled top-level GSU instructions inside the chains: h_game.hist 94.7%, h_title.hist 95.4%, h_intro.hist 92.6%, h_spike.hist 90.0%, wf.hist 93.5%, h_burst.hist 98.9%.
  * Chain ends: c_FxOp00 1, c_FxOp3C 1, c_FxOp4CA1 1, c_FxOp9B 1, c_FxOpAFA1 1, c_FxOpd00 14, cold/length 131, delay 7, joins 19, prefix 19, transfer 42.
- * Included by gsu_blocks.c. */
+ * Included by gsu_blocks_yoshi.c. */
 
 /* fx_ram() through the locals: rmem = SfxRAMMem, gram = sfxgameram, gmask = SfxRamMask */
 #define BLK_RAM(a) (gram + ((rmem - (uintptr_t)gram + (a)) & gmask))
@@ -9735,5 +9735,6 @@ static u4 const gsu_blk_dep_yoshi[] = {
     0x0BD6300Eu, 0x0BD6B205u, 0x0BD7FC0Eu, 0x0BD87E05u, 0x0BDB1805u,
 };
 #define GSU_BLK_YOSHI_HASH 0xEF3CEDA4u /* FNV-1a of those bytes */
+#define GSU_BLK_YOSHI_ID 0x82E56ACAu /* FNV-1a of the internal header */
 #undef BLK_RAM
 #undef BLK_PLOT

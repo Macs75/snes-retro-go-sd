@@ -60,6 +60,8 @@ $(SNES)/spc7110.c \
 $(SNES)/gsu.c \
 $(SNES)/gsu_zsnes/gsu_core.c \
 $(SNES)/gsu_zsnes/gsu_blocks.c \
+$(SNES)/gsu_zsnes/gsu_blocks_yoshi.c \
+$(SNES)/gsu_zsnes/gsu_blocks_starfox.c \
 $(SNES)/input.c \
 $(SNES)/ppu.c \
 $(SNES)/snes.c \
