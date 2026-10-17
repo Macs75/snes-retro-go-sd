@@ -24,6 +24,16 @@
 
 ### Added
 
+- **Super FX save states.** The GSU's registers, flags, cache and scheduler
+  bookkeeping are the ZSNES core's globals, outside the serialized `Cart`;
+  `gsu_saveload` streams them after the Game Pak RAM (with the ROM-buffer and
+  last-RAM pointers as offsets, the host pointers rebuilt from the bank
+  registers on load). Other carts' state layout is unchanged; a Super FX state
+  saved before this has a different payload size and is refused, not loaded.
+  Host test: `tools/state_resume_test.py` saves at frame X of a replay
+  (`SNES_STATE_SAVE_AT`), resumes it in a fresh process (`SNES_STATE_RESUME`)
+  and compares the machine hashes, plus the per-frame GSU state log with
+  `--gsu`. `HOST_LOAD_STATE=1` boots the host straight into save slot 0.
 - **`PERF_SPC=1`**: the SPC700 figure split into the engine (net of its DSP
   ticks), its C fallback and the idle skip's count (`PROF/spc`).
 - **`APU_HIST=file`** (host, window `APU_HIST_FRAMES=a:b`): SPC700 opcodes per

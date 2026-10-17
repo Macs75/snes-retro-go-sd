@@ -26,7 +26,10 @@ Gsu *gsu_alloc(void) {
   return g;
 }
 
-uint32_t gsu_size(void) { return 0; }   /* Super FX carts do not save state */
+void gsu_saveload(Gsu *g, SaveLoadFunc *func, void *ctx) {
+  (void)g;
+  gsu_zsnes_saveload(func, ctx);
+}
 
 void gsu_link(Gsu *g, Snes *snes, uint8_t *rom, uint32_t rom_size,
               uint8_t *ram, uint32_t ram_size) {

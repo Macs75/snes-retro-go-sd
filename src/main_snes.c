@@ -2193,10 +2193,50 @@ static uint16_t rec_pad(uint16_t live)
   return live;
 }
 
+#ifdef HOST_BUILD
+/* Save-state test (host): SNES_STATE_SAVE_AT=N saves host_saves/statetest.sav
+ * when a replay reaches frame N; a later process run with SNES_STATE_RESUME=N
+ * loads it at boot and replays the recording's input from frame N on, so its
+ * hashes can be compared with the uninterrupted run's (tools/state_resume_test.py). */
+#define STATE_TEST_PATH "host_saves/statetest.sav"
+static bool snes_SaveState(const char *pathName);
+static bool snes_LoadState(const char *pathName);
+
+static bool rec_resume(uint32_t frame)
+{
+  char path[512];
+  rec_header_t h;
+  rec_path(path, sizeof path);
+  rec_f = fopen(path, "rb");
+  if (!rec_f || fread(&h, sizeof h, 1, rec_f) != 1 || h.magic != REC_MAGIC || h.version != REC_VERSION) {
+    printf("REC: cannot resume %s\n", path);
+    if (rec_f) fclose(rec_f);
+    rec_f = NULL;
+    return false;
+  }
+  fseek(rec_f, (long)(sizeof h + (size_t)frame * sizeof(uint16_t)), SEEK_SET);
+  rec_mode = REC_REPLAY;
+  rec_frame = frame;
+  rec_n = rec_pos = 0;
+  rec_sram_blocked = true;
+  printf("REC: resumed the replay at frame %lu\n", (unsigned long)frame);
+  return true;
+}
+#endif
+
 static void rec_frame_done(void)
 {
   if (rec_mode == REC_OFF) return;
   rec_frame++;
+#ifdef HOST_BUILD
+  {
+    static long save_at = -2;
+    if (save_at == -2) { const char *e = getenv("SNES_STATE_SAVE_AT"); save_at = e ? atol(e) : -1; }
+    if (save_at >= 0 && rec_frame == (uint32_t)save_at)
+      printf("REC: state saved at frame %lu: %s\n", (unsigned long)rec_frame,
+             snes_SaveState(STATE_TEST_PATH) ? "ok" : "FAILED");
+  }
+#endif
 #ifdef HOST_BUILD
   {
     const Ppu *p = snes->ppu;
@@ -2845,6 +2885,14 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 #endif
 #ifdef HOST_BUILD
   rec_host_start();
+  {
+    const char *e = getenv("SNES_STATE_RESUME");
+    if (e) {
+      bool ok = snes_LoadState(STATE_TEST_PATH);   /* stops the replay it started */
+      printf("REC: state loaded: %s\n", ok ? "ok" : "FAILED");
+      if (ok) rec_resume((uint32_t)atol(e));
+    }
+  }
 #endif
   while (1) {
 #ifdef SNES_DEVICE_PROFILE

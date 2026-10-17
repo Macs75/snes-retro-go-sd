@@ -13,9 +13,9 @@
  * our tree owns (a back-pointer for IRQs). The game RAM
  * is cart->ram, shared with the 65816.
  *
- * Save states: NOT supported for Super FX carts (the GSU state lives in the
- * ZSNES core's globals, outside our serialized Cart) — gsu_size() returns 0.
- * This is a deliberate Phase-1 trade; see docs / memory.
+ * Save states: the GSU's state lives in the ZSNES core's globals, outside the
+ * serialized Cart; gsu_saveload() streams it (cart_saveload calls it after
+ * the Game Pak RAM).
  *
  * CPU-visible map: see cart.c (cart_gsu_read) and snes.c (MMIO $3000-$32FF). */
 
@@ -28,7 +28,8 @@ typedef struct Gsu {
 } Gsu;
 
 Gsu     *gsu_alloc(void);
-uint32_t gsu_size(void);                 /* 0: FX carts don't save state */
+#include "saveload.h"
+void     gsu_saveload(Gsu *g, SaveLoadFunc *func, void *ctx);
 void     gsu_reset(Gsu *g);
 void     gsu_link(Gsu *g, Snes *snes, uint8_t *rom, uint32_t rom_size,
                   uint8_t *ram, uint32_t ram_size);

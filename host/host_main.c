@@ -53,7 +53,8 @@ int main(int argc, char **argv)
     else
         printf("host: no ROM — pass path or set HOST_ROM\n");
 
-    app_main_snes(0, 0, -1);
+    /* HOST_LOAD_STATE=1 boots straight into save slot 0 (host_saves/) */
+    app_main_snes(getenv("HOST_LOAD_STATE") ? 1 : 0, 0, getenv("HOST_LOAD_STATE") ? 0 : -1);
 
     host_platform_shutdown();
     return 0;

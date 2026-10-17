@@ -72,7 +72,7 @@ __attribute__((weak)) Spc7110* spc7110_alloc(void) { return NULL; }
 __attribute__((weak)) uint32_t spc7110_size(void) { return 0; }
 
 __attribute__((weak)) Gsu* gsu_alloc(void) { return NULL; }
-__attribute__((weak)) uint32_t gsu_size(void) { return 0; }
+__attribute__((weak)) void gsu_saveload(Gsu* g, SaveLoadFunc* func, void* ctx) { (void)g; (void)func; (void)ctx; }
 __attribute__((weak)) void gsu_reset(Gsu* g) { (void)g; }
 __attribute__((weak)) void gsu_link(Gsu* g, Snes* s, uint8_t* rom, uint32_t rs,
                                     uint8_t* ram, uint32_t as) {
@@ -315,9 +315,9 @@ void cart_saveload(Cart *cart, SaveLoadFunc *func, void *ctx) {
   if (cart->cx4) func(ctx, cart->cx4, cx4_size());
   if (cart->sdd1) func(ctx, cart->sdd1, sdd1_size());
   if (cart->spc7110) func(ctx, cart->spc7110, spc7110_size());
-  /* Super FX (GSU): no state saved — the ZSNES core keeps its registers in
-   * globals, outside this serialized Cart (Phase-1 PoC limitation). The shared
-   * Game Pak RAM above (cart->ram) is still saved. */
+  /* Super FX: the GSU's registers, flags and cache are the ZSNES core's
+   * globals; gsu_saveload streams them (the Game Pak RAM is cart->ram above). */
+  if (cart->gsu) gsu_saveload(cart->gsu, func, ctx);
 }
 
 void cart_load(Cart* cart, int type, uint8_t* rom, int romSize, int ramSize) {

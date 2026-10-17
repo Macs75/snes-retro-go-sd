@@ -2251,10 +2251,11 @@ static void gsu_pchist(void)
     gsu_pch[h].alt = (u1)(FxSeamCX >> 8);
     gsu_pch_total++;
 }
-/* State log for checking the block code against the interpreter (env
- * GSU_STATELOG=file): the whole GSU state at every MainLoop exit folds into a
- * running hash, written once a frame with a hash of the Game Pak RAM. Runs
- * with GSU_BLOCKS=0 and without must write the same file. */
+/* State log for checking the block code against the interpreter, and save
+ * states against an uninterrupted run (env GSU_STATELOG=file): the whole GSU
+ * state at every MainLoop exit of a frame folds into a hash, written once a
+ * frame with a hash of the Game Pak RAM. Runs with GSU_BLOCKS=0 and without
+ * must write the same file. */
 extern u1 *romdata;
 static int gsu_st_on = -1;
 static FILE *gsu_st_f;
@@ -2305,6 +2306,7 @@ void gsu_state_frame(long const frame)
     u4 h = 0x811C9DC5u;
     for (u4 i = 0; i <= SfxRamMask; i++) h = (h ^ sfxgameram[i]) * 0x01000193u;
     fprintf(gsu_st_f, "%ld %016llx %08x\n", frame, (unsigned long long)gsu_st_h, (unsigned)h);
+    gsu_st_h = 0xCBF29CE484222325ull;   /* per frame, not since the start */
 }
 #else
 static inline void gsu_trace_entry(void) {}

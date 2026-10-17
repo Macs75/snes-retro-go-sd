@@ -28,5 +28,8 @@ uint8_t gsu_zsnes_reg_read(uint16_t addr);
 void    gsu_zsnes_reg_write(uint16_t addr, uint8_t val);
 void    gsu_zsnes_startline(void);
 void    gsu_zsnes_vblank(void);
+/* stream the GSU's state (save, load or count, as SaveLoadFunc does) */
+#include "../saveload.h"
+void    gsu_zsnes_saveload(SaveLoadFunc *func, void *ctx);
 
 #endif
