@@ -22,6 +22,19 @@
   (4,105 frames) and Yoshi's Island (19,289 frames) replays; a negative control
   (DSP ticks removed) fails 64 of Castlevania's 68 hashes.
 
+### Changed
+
+- **Idle skip: one site per decode environment, found at IRQs too.** A wait
+  loop entered with a different M/X/E, DB or DP is now a site of its own
+  instead of being decoded again over the existing one; only a site whose code
+  changed is replaced in place. Yoshi's Island polls the GSU from the same WRAM
+  loop with DB $01 and DB $03 every frame, and the two kept evicting each other.
+  The table holds 8 sites (was 4). The site search also runs at every H/V-IRQ
+  and Super FX IRQ request, at the interrupted pc: a loop that waits for an IRQ
+  mid-frame (Yoshi's frame wait ends on the GSU's STOP IRQ) is never where the
+  CPU is at the NMI, so the NMI sample alone never found it. Host
+  `IDLE_TRACE=n` logs the first n site decisions.
+
 ### Added
 
 - **Super FX save states.** The GSU's registers, flags, cache and scheduler

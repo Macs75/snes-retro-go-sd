@@ -818,6 +818,9 @@ static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
    * about to leave, so no lap to skip and none worth a proof */
   if (g->gsu_poll && (gsu_sfr_peek() & g->gsu_mask) != g->gsu_snap) return dots;
   if (g->code_ram && !idle_code_ok(s, g)) {        /* its code was overwritten: drop it */
+#ifdef HOST_BUILD
+    if (getenv("IDLE_TRACE")) printf("IDLE: skip: code of %02x:%04x changed, site dropped\n", g->bank, g->head);
+#endif
     g->snap_ok = false; g->head = 0xffff; g->len = 0;
     return dots;
   }

@@ -355,6 +355,9 @@ void snes_handle_pos_stuff(Snes *snes) {
     if (match) {
       snes->inIrq = true;
       snes->cpu->irqWanted = true;
+#ifdef SNES_IDLE_SKIP
+      idle_irq_sample(snes);   /* where the CPU waits for it */
+#endif
     }
   }
 #endif
@@ -438,6 +441,9 @@ void snes_run_line(Snes *snes) {
   if (snes->vIrqEnabled && snes->vPos == snes->vTimer) {
     snes->inIrq = true;
     snes->cpu->irqWanted = true;
+#ifdef SNES_IDLE_SKIP
+    idle_irq_sample(snes);   /* where the CPU waits for it */
+#endif
   }
 
   /* hPos == 512: the line is rendered halfway across, for compatibility */

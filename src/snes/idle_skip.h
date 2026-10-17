@@ -56,7 +56,7 @@ typedef struct {
   uint8_t  img[IDLE_IMG_LEN + 1];   /* at offset 2: img+14 (the flags) is word-aligned */
 } __attribute__((aligned(4))) IdleState;
 
-#define IDLE_SITES 4
+#define IDLE_SITES 8
 #define IDLE_MAX_IDX 4
 
 typedef struct {
@@ -157,6 +157,10 @@ void idle_nmi_sample(Snes *s);
 /* Super FX: the CPU read the GSU status while the GSU is busy -- the same
  * site search at the current pc (no per-frame bookkeeping) */
 void idle_gsu_poll_sample(Snes *s);
+/* at an IRQ request: the same search at the interrupted pc. A loop waiting for
+ * an IRQ (Yoshi's Island's frame wait ends on the GSU's STOP IRQ, mid-frame)
+ * is never where the CPU is at the NMI, so the NMI sample alone never finds it. */
+void idle_irq_sample(Snes *s);
 /* Super FX, once a line: activate whichever known site holds the pc. Such a
  * game waits in two loops a frame -- its frame wait and the GSU poll -- and
  * only the NMI and the poll would otherwise switch between them. */

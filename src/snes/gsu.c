@@ -69,7 +69,12 @@ static inline void gsu_idle_select(Gsu *g) {
 static void gsu_service_irq(Gsu *g) {
   if (doirqnext) {
     doirqnext = 0;
-    if (g->snes && g->snes->cpu) g->snes->cpu->irqWanted = true;
+    if (g->snes && g->snes->cpu) {
+      g->snes->cpu->irqWanted = true;
+#ifdef SNES_IDLE_SKIP
+      idle_irq_sample(g->snes);   /* where the CPU waits for the GSU to stop */
+#endif
+    }
   }
 }
 

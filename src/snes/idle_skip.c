@@ -486,15 +486,24 @@ void idle_nmi_sample(Snes *s) {
   idle_sample(s);
 }
 
+/* A loop can be entered in more than one environment (Yoshi's Island polls
+ * the GSU from the same WRAM loop with DB $01 and with DB $03 every frame):
+ * each is a site of its own, so "already active" means the environment too. */
 void idle_gsu_poll_sample(Snes *s) {
   const Cpu *cpu = s->cpu;
-  if (site_has(&g_idle, cpu->k, cpu->pc)) return;   /* already the active site */
+  if (site_has(&g_idle, cpu->k, cpu->pc) && idle_env_ok(cpu, &g_idle)) return;   /* already the active site */
+  idle_sample(s);
+}
+
+void idle_irq_sample(Snes *s) {
+  const Cpu *cpu = s->cpu;
+  if (site_has(&g_idle, cpu->k, cpu->pc) && idle_env_ok(cpu, &g_idle)) return;
   idle_sample(s);
 }
 
 void idle_line_select(Snes *s) {
   const Cpu *cpu = s->cpu;
-  if (site_has(&g_idle, cpu->k, cpu->pc)) return;
+  if (site_has(&g_idle, cpu->k, cpu->pc) && idle_env_ok(cpu, &g_idle)) return;
   for (int i = 0; i < IDLE_SITES; i++) {
     IdleSkip *g = &g_idle_sites[i];
     if (g->len == 0 && g->head == 0xffff) continue;
@@ -502,19 +511,36 @@ void idle_line_select(Snes *s) {
   }
 }
 
+#ifdef HOST_BUILD
+/* IDLE_TRACE=n: log the first n site decisions (why a site is re-decoded) */
+#include <stdlib.h>
+static long idle_trace_n = -2;
+#define IDLE_TRACE(...) do { if (idle_trace_n == -2) { const char *e_ = getenv("IDLE_TRACE"); idle_trace_n = e_ ? atol(e_) : 0; } \
+                             if (idle_trace_n > 0) { idle_trace_n--; printf(__VA_ARGS__); } } while (0)
+#else
+#define IDLE_TRACE(...) do { } while (0)
+#endif
+
 static void idle_sample(Snes *s) {
   Cpu *cpu = s->cpu;
   if (cpu->stopped) return;
   const uint8_t bank = cpu->k;
   const uint16_t pc = cpu->pc;
-  /* the pc is in a known site: make it the active one, unless its decode
-   * environment changed (then it is decoded again, in the same slot) */
+  /* the pc is in a known site: make it the active one. A site of the same
+   * loop decoded in another environment (M/X/E, DB, DP) stays: this one gets
+   * a slot of its own. Only a site whose code changed is decoded again in
+   * place. */
   int slot = -1;
   for (int i = 0; i < IDLE_SITES; i++) {
     IdleSkip *g = &g_idle_sites[i];
     if (g->len == 0 && g->head == 0xffff) continue;
     if (!site_has(g, bank, pc)) continue;
     if (idle_env_ok(cpu, g) && idle_code_ok(s, g)) { g->used = s_frame; g_idlep = g; return; }
+    if (idle_code_ok(s, g)) continue;   /* another environment of this loop */
+    IDLE_TRACE("IDLE: frame %lu %02x:%04x in slot %d (%02x:%04x+%u) but %s: cpu e%d m%d x%d db%02x dp%04x, site e%d m%d x%d db%02x(%d) dp%04x(%d)\n",
+               (unsigned long)s_frame, bank, pc, i, g->bank, g->head, g->len,
+               !idle_env_ok(cpu, g) ? "env changed" : "code changed", cpu->e, cpu->mf, cpu->xf, cpu->db, cpu->dp,
+               g->e, g->mf, g->xf, g->db, g->uses_db, g->dp, g->uses_dp);
     slot = i;
     break;
   }
@@ -534,6 +560,9 @@ static void idle_sample(Snes *s) {
         }
       }
       cand.used = s_frame;
+      IDLE_TRACE("IDLE: frame %lu rearm %02x:%04x+%u gsu_poll=%d code_ram=%d in slot %d env e%d m%d x%d db%02x(%d) dp%04x(%d)\n",
+                 (unsigned long)s_frame, bank, cand.head, cand.len, cand.gsu_poll, cand.code_ram, slot,
+                 cand.e, cand.mf, cand.xf, cand.db, cand.uses_db, cand.dp, cand.uses_dp);
       g_idle_sites[slot] = cand;
       g_idlep = &g_idle_sites[slot];
       g_idle_stats.rearms++;
@@ -557,6 +586,7 @@ static void idle_sample(Snes *s) {
     return;
   }
 #endif
+  IDLE_TRACE("IDLE: frame %lu reject %02x:%04x (no idle loop decoded there)\n", (unsigned long)s_frame, bank, pc);
   g_idle_stats.rejects++;
   s_reject[s_reject_i++ & 3] = pc24;
 }
