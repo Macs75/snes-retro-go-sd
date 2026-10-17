@@ -2175,7 +2175,13 @@ static void gsu_maybe_dump(void)
  * prefetched opcode, so the instruction is at PC - 1. Written at exit,
  * hottest first, as "bank:addr count opcode alt". */
 extern long gsu_host_frame;
+#ifdef QEMU_BUILD   /* the 4 MB QEMU harness: no environment, the histograms never run */
+#define GSU_PCH_N 1u
+#define GSU_CHH_N 1u
+#else
 #define GSU_PCH_N 65536u
+#define GSU_CHH_N 65536u
+#endif
 static struct { u4 key, n; u1 op, alt; } gsu_pch[GSU_PCH_N];
 static int gsu_pch_on = -1;
 static long gsu_pch_f0, gsu_pch_f1;
@@ -2321,7 +2327,7 @@ static inline void gsu_state_exit(void) {}
 #ifdef HOST_BUILD
 /* GSU_CHAINHIST=file (window GSU_PCHIST_FRAMES): per entry address, chain
    calls and the instructions they ran; c == 0 is an interpreted instruction */
-static struct { u4 key, calls, ops, interp; } gsu_chh[65536];
+static struct { u4 key, calls, ops, interp; } gsu_chh[GSU_CHH_N];
 static int gsu_chh_on = -1;
 static int gsu_chh_cmp(void const *a, void const *b)
 {
@@ -2332,8 +2338,8 @@ static void gsu_chh_write(void)
 {
     FILE *f = fopen(getenv("GSU_CHAINHIST"), "w");
     if (!f) return;
-    qsort(gsu_chh, 65536, sizeof gsu_chh[0], gsu_chh_cmp);
-    for (u4 i = 0; i < 65536 && (gsu_chh[i].calls || gsu_chh[i].interp); i++)
+    qsort(gsu_chh, GSU_CHH_N, sizeof gsu_chh[0], gsu_chh_cmp);
+    for (u4 i = 0; i < GSU_CHH_N && (gsu_chh[i].calls || gsu_chh[i].interp); i++)
         fprintf(f, "%02x:%04x calls=%u ops=%u interp=%u\n", (unsigned)(gsu_chh[i].key >> 16), (unsigned)(gsu_chh[i].key & 0xFFFF),
                 gsu_chh[i].calls, gsu_chh[i].ops, gsu_chh[i].interp);
     fclose(f);
@@ -2353,7 +2359,7 @@ static void gsu_chainhist(u4 const pc, u4 const c)
     u4 const key = ((u4)(SfxPBR & 0x7F) << 16) | ((pc - 1) & 0xFFFFu);
     u4 h = (key * 2654435761u) >> 16;
     for (;; h++) {
-        h &= 65535;
+        h &= GSU_CHH_N - 1;
         if ((!gsu_chh[h].calls && !gsu_chh[h].interp) || gsu_chh[h].key == key) break;
     }
     gsu_chh[h].key = key;

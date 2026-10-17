@@ -238,6 +238,109 @@ static int apu_idleSkipCycles(Apu* apu, int budget) {
 }
 #endif
 
+#if defined(HOST_BUILD) && !defined(QEMU_BUILD)   /* not in the 4 MB QEMU harness */
+#define APU_HIST 1
+#endif
+#ifdef APU_HIST
+/* APU_HIST=file (host; window APU_HIST_FRAMES=a:b, emulated frames since power-on):
+ * where the APU's time goes. SPC700 opcodes interpreted per pc (after the idle
+ * skip), the cycles the idle skip took, and a DSP census per 32 kHz tick: voices
+ * playing, playing at zero volume, the echo unit's state. Written at exit; the
+ * pc rows are "pc count opcode cum% bytes" with the 6 ARAM bytes at pc then
+ * (tools/spc_hist_report.py groups them into loops). */
+uint32_t apu_hist_frame;   /* counted by main_snes.c at each frame end */
+static int apu_h_on = -1;
+static uint32_t apu_h_f0, apu_h_f1 = 0xffffffffu, apu_h_fn0 = 0xffffffffu, apu_h_fn1;
+static uint32_t apu_h_pc[0x10000];
+static unsigned long long apu_h_ops, apu_h_opcyc, apu_h_skips, apu_h_skipcyc;
+static unsigned long long apu_h_ticks, apu_h_nvoice[9], apu_h_v_idle, apu_h_v_silentenv,
+    apu_h_v_zerovol, apu_h_v_play, apu_h_echo_mix, apu_h_echo_wr, apu_h_v_echo, apu_h_mute;
+static const Apu *apu_h_apu;
+static void apu_h_write(void) {
+  FILE *f = fopen(getenv("APU_HIST"), "w");
+  if (!f) return;
+  unsigned long long vt = apu_h_ticks * 8;
+  fprintf(f, "# frames %u..%u (%u)\n", apu_h_fn0, apu_h_fn1, apu_h_fn1 - apu_h_fn0 + 1);
+  fprintf(f, "# spc opcodes %llu cycles %llu; idle skip %llu times, %llu cycles\n",
+          apu_h_ops, apu_h_opcyc, apu_h_skips, apu_h_skipcyc);
+  fprintf(f, "# dsp ticks %llu; voice-ticks: released+gain0 %llu, gain0 not released %llu,"
+          " playing at volume 0 %llu, playing %llu (of which echo-enabled %llu)\n",
+          apu_h_ticks, apu_h_v_idle, apu_h_v_silentenv, apu_h_v_zerovol, apu_h_v_play, apu_h_v_echo);
+  fprintf(f, "# dsp ticks: echo FIR+mix run %llu, echo writes %llu, mute %llu\n",
+          apu_h_echo_mix, apu_h_echo_wr, apu_h_mute);
+  fprintf(f, "# voices not idle per tick:");
+  for (int i = 0; i <= 8; i++) fprintf(f, " %d=%.1f%%", i, apu_h_ticks ? 100.0 * apu_h_nvoice[i] / apu_h_ticks : 0.0);
+  fprintf(f, "\n# voice-ticks total %llu\n", vt);
+  static uint32_t order[0x10000];
+  uint32_t n = 0;
+  for (uint32_t pc = 0; pc < 0x10000; pc++) if (apu_h_pc[pc]) order[n++] = pc;
+  for (uint32_t i = 1; i < n; i++) {   /* insertion sort, hottest first (n is small) */
+    uint32_t x = order[i], j = i;
+    while (j && apu_h_pc[order[j - 1]] < apu_h_pc[x]) { order[j] = order[j - 1]; j--; }
+    order[j] = x;
+  }
+  unsigned long long cum = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t pc = order[i];
+    cum += apu_h_pc[pc];
+    fprintf(f, "%04x %u %02x %.2f", pc, apu_h_pc[pc], apu_h_apu->ram[pc], 100.0 * cum / apu_h_ops);
+    for (int k = 0; k < 6; k++) fprintf(f, "%c%02x", k ? ' ' : '\t', apu_h_apu->ram[(uint16_t)(pc + k)]);
+    fputc('\n', f);
+  }
+  fclose(f);
+  char path[1024];   /* the whole ARAM at exit, for the report's disassembly */
+  snprintf(path, sizeof path, "%s.aram", getenv("APU_HIST"));
+  if ((f = fopen(path, "wb"))) { fwrite(apu_h_apu->ram, 1, 0x10000, f); fclose(f); }
+}
+static int apu_h_live(const Apu *apu) {
+  if (apu_h_on < 0) {
+    apu_h_on = getenv("APU_HIST") != NULL;
+    const char *e = getenv("APU_HIST_FRAMES");
+    if (e) sscanf(e, "%u:%u", &apu_h_f0, &apu_h_f1);
+    if (apu_h_on) atexit(apu_h_write);
+  }
+  if (!apu_h_on || apu_hist_frame < apu_h_f0 || apu_hist_frame >= apu_h_f1) return 0;
+  apu_h_apu = apu;
+  if (apu_h_fn0 == 0xffffffffu) apu_h_fn0 = apu_hist_frame;
+  apu_h_fn1 = apu_hist_frame;
+  return 1;
+}
+static void apu_h_dsp(const Dsp *d) {
+  int nv = 0;
+  apu_h_ticks++;
+  for (int i = 0; i < 8; i++) {
+    const DspChannel *c = &d->channel[i];
+    if (c->gain == 0 && c->adsrState == 4) { apu_h_v_idle++; continue; }
+    nv++;
+    if (c->gain == 0) apu_h_v_silentenv++;
+    else if (c->volumeL == 0 && c->volumeR == 0 && !(c->echoEnable && (d->echoWrites || d->echoVolumeL || d->echoVolumeR)))
+      apu_h_v_zerovol++;
+    else { apu_h_v_play++; if (c->echoEnable) apu_h_v_echo++; }
+  }
+  apu_h_nvoice[nv]++;
+  if (d->echoWrites || d->echoVolumeL || d->echoVolumeR) apu_h_echo_mix++;
+  if (d->echoWrites) apu_h_echo_wr++;
+  if (d->mute) apu_h_mute++;
+}
+#endif
+
+#if defined(SPC_THUMB2_SPC) && !SNES_ABLATE_SPC && !SNES_ABLATE_DSP
+#define APU_BATCH 1
+/* The DSP ticks of an opcode spanning [start, end): one for every multiple of
+ * 32 in it -- apu_run's own loop below, called by the Thumb-2 engine's batch
+ * (spc_thumb2_run) when an opcode crosses one. */
+void apu_dsp_ticks(Apu* apu, uint32_t start, uint32_t end) {
+#ifdef SNES_PERF
+  SNES_PERF_BEGIN(perf_d);
+#endif
+  for (uint32_t m = (start + 31u) & ~31u; m < end; m += 32u)
+    dsp_cycle(apu->dsp);
+#ifdef SNES_PERF
+  SNES_PERF_END(snes_perf_dsp, perf_d);
+#endif
+}
+#endif
+
 /* Advance the APU by `cyclesToRun` SPC cycles. Identical machine to calling
  * apu_cycle() that many times, but the per-cycle DSP tick and the three timers are
  * folded into closed-form bulk updates between opcode boundaries — the SPC700's idle
@@ -254,20 +357,59 @@ void apu_run(Apu* apu, int cyclesToRun) {
     int step;
     bool idle = false;
 
+#ifdef APU_BATCH
+    /* Whole opcodes and their DSP ticks inside the Thumb-2 engine, which
+     * keeps its registers across them. It hands back here only for what this
+     * loop does differently: the idle-wait pattern (the skip below), an
+     * opcode longer than the budget left (in cpuCyclesLeft), a stopped SPC. */
+    if (apu->cpuCyclesLeft == 0 && !apu->spc->stopped) {
+#ifdef SNES_PERF_SPC
+      uint32_t perf_s = snes_perf_now(), dsp0 = snes_perf_dsp;
+      cyclesToRun = spc_thumb2_run(apu->spc, cyclesToRun);
+      snes_perf_spc_step += snes_perf_now() - perf_s - (snes_perf_dsp - dsp0);
+      snes_perf_spc_ops++;
+#else
+      cyclesToRun = spc_thumb2_run(apu->spc, cyclesToRun);
+#endif
+      if (cyclesToRun <= 0) break;
+    }
+#endif
+
     if (apu->cpuCyclesLeft == 0) {
 #if SNES_SPC_IDLE_SKIP
       int skip = apu_idleSkipCycles(apu, cyclesToRun);
       if (skip > 0) {
         step = skip;             /* the SPC does nothing observable for this long */
         idle = true;
+#ifdef SNES_PERF_SPC
+        snes_perf_spc_skips++;
+#endif
       } else
 #endif
 #if SNES_ABLATE_SPC
         apu->cpuCyclesLeft = 2;
 #else
+      {
+#ifdef APU_HIST
+        uint16_t h_pc = apu->spc->pc;
+#endif
+#ifdef SNES_PERF_SPC
+        uint32_t perf_s = snes_perf_now();
+        apu->cpuCyclesLeft = spc_runOpcode(apu->spc);
+        snes_perf_spc_step += snes_perf_now() - perf_s;
+        snes_perf_spc_ops++;
+#else
         apu->cpuCyclesLeft = spc_runOpcode(apu->spc);
 #endif
+#ifdef APU_HIST
+        if (apu_h_live(apu)) { apu_h_pc[h_pc]++; apu_h_ops++; apu_h_opcyc += apu->cpuCyclesLeft; }
+#endif
+      }
+#endif
     }
+#ifdef APU_HIST
+    if (idle && apu_h_live(apu)) { apu_h_skips++; apu_h_skipcyc += step; }
+#endif
 
     if (!idle) {
       step = apu->cpuCyclesLeft < cyclesToRun ? apu->cpuCyclesLeft : cyclesToRun;
@@ -288,8 +430,12 @@ void apu_run(Apu* apu, int cyclesToRun) {
         SNES_PERF_END(snes_perf_dsp, perf_d);
       }
 #else
-      for (; m < end; m += 32u)
+      for (; m < end; m += 32u) {
+#ifdef APU_HIST
+        if (apu_h_live(apu)) apu_h_dsp(apu->dsp);
+#endif
         dsp_cycle(apu->dsp);
+      }
 #endif
     }
 #endif

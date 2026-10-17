@@ -49,7 +49,9 @@ SECTIONS
     . = ALIGN(32);
     *(.text.snes_catchupApu)
     . = ALIGN(32);
-    *(.text.spc_adcm .text.spc_sbcm .text.spc_doOpcode)
+    *(.text.spc_adcm .text.spc_sbcm .text.spc_doOpcode .text.spc_fallback)
+    . = ALIGN(32);
+    *(.text.apu_dsp_ticks)
     __APU_HOT_END__ = .;
     ASSERT(__APU_HOT_END__ <= __APU_HOT_START__ + 0x8000, "SNES: APU window (32K) overflows");
 

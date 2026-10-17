@@ -229,6 +229,40 @@ much as in the chains. The addresses are always even, so `ld16a`/`st16a`
 Gameplay's remaining late frames are an every-other-frame overrun (average busy
 86-93%, heaviest frame ~125%); the GSU is now ~8-10% of that frame.
 
+### 4.6 SPC700: batch the opcodes inside the Thumb-2 engine
+
+In Yoshi's Island the SPC700 cost is real driver work, not polling: a host
+histogram (`APU_HIST`, `tools/spc_hist_report.py`) put the driver ~97% busy in
+gameplay (DSP shadow-register loop, per-voice pitch maths), with the idle skip
+firing as designed. So skipping more was not the lever; the cost per opcode was.
+
+`PERF_SPC` measured that cost before changing anything (device log 12, waterfall
+room): ~130 cycles per SPC700 opcode, of which ~99 inside `spc_runOpcode` +
+engine and ~31 in `apu_run`'s C loop around it (cycle commit, DSP-boundary test,
+the call). 3,569 opcodes/frame × 130 ≈ 465K. The fix moves the loop into the
+assembly: the engine keeps `Spc*`, ARAM, `Apu*`, `&apu->cycles` and the budget in
+registers, commits each opcode's cycles itself, and calls `apu_dsp_ticks` only on
+opcodes that cross a 32-cycle boundary (at most ~533 DSP ticks a frame against
+3,569 opcodes). It returns to C for exactly
+the cases `apu_run` handles differently, so the C loop stays the single source
+of those rules (the idle-wait bytes are matched in asm only to stop the batch).
+
+| Yoshi waterfall, device, PERF_SPC | log 12 (per opcode) | log 13 (batch) |
+| --- | --- | --- |
+| engine calls / frame | 3,569 | 45 |
+| SPC700 / frame | 507K | 321K |
+| outside the engine (apu_run loop) | ~112K | ~6K |
+| inside the engine, per opcode | ~99 | ~88 |
+| busy | 103.3% | 100.0% |
+
+Two things to carry over. The probes themselves cost ~42K/frame at per-opcode
+granularity: compare a probed build only with a build probed the same way, and
+discount it against a normal one. And the per-opcode figure *inside* the engine
+also fell (99 → 88) — entry/exit (push/pop, re-deriving bases) was part of every
+opcode's cost, invisible until the loop moved. The C fallback (246 opcodes,
+~22.5K/frame, ~7% of the SPC700) is now the measured baseline for native
+handlers; the DSP (~530K) is the larger half of the APU.
+
 ---
 
 ## 5. Cross-cutting lessons

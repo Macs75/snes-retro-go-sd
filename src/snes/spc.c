@@ -9,6 +9,7 @@
 #include "spc.h"
 #include "apu.h"
 #include "snes_gnw_alloc.h"
+#include "../snes_perf.h"
 
 static const int cyclesPerOpcode[256] = {
   2, 8, 4, 5, 3, 4, 3, 6, 2, 6, 5, 4, 5, 4, 6, 8,
@@ -115,13 +116,9 @@ int spc_runOpcode(Spc* spc) {
   spc->cyclesUsed = 0;
   if(spc->stopped) return 1;
 #ifdef SPC_THUMB2_SPC
-  // The Thumb-2 engine fetches the opcode, charges cyclesUsed, and dispatches.
-  // On -1 it has fully handled the opcode; on a 0..255 return it has still
-  // advanced pc past the opcode and charged cyclesUsed, and the C dispatcher
-  // takes over for the operand/data semantics of the unhandled opcode.
-  int ret = spc_thumb2_step(spc);
-  if(ret < 0) return spc->cyclesUsed;
-  spc_doOpcode(spc, (uint8_t)ret);
+  // One opcode through the Thumb-2 engine (budget 0): fetch, cycle charge,
+  // native handler or spc_fallback. apu_run batches the rest (spc_thumb2_run).
+  spc_thumb2_run(spc, 0);
   return spc->cyclesUsed;
 #else
   uint8_t opcode = spc_readOpcode(spc);
@@ -1567,3 +1564,18 @@ static void spc_doOpcode(Spc* spc, uint8_t opcode) {
     }
   }
 }
+
+#ifdef SPC_THUMB2_SPC
+/* The Thumb-2 engine's C fallback: an opcode it has no handler for, already
+ * fetched and charged its base cycles (spc_thumb2_run). */
+void spc_fallback(Spc* spc, uint8_t opcode) {
+#ifdef SNES_PERF_SPC
+  uint32_t perf_f = snes_perf_now();
+  spc_doOpcode(spc, opcode);
+  snes_perf_spc_fb += snes_perf_now() - perf_f;
+  snes_perf_spc_fbs++;
+#else
+  spc_doOpcode(spc, opcode);
+#endif
+}
+#endif

@@ -211,6 +211,10 @@ uint32_t snes_perf_ops, snes_perf_gsu_reads;
 uint32_t snes_perf_gsu_plot, snes_perf_gsu_plots, snes_perf_gsu_chain;
 uint32_t snes_perf_gsu_chain_ops, snes_perf_gsu_ops;
 #endif
+#ifdef SNES_PERF_SPC
+uint32_t snes_perf_spc_step, snes_perf_spc_ops, snes_perf_spc_fb, snes_perf_spc_fbs;
+uint32_t snes_perf_spc_skips;
+#endif
 uint32_t snes_perf_ppu_part[SNES_PERF_PPU_N];
 uint32_t snes_perf_ppu_drawn, snes_perf_ppu_sub_lines, snes_perf_ppu_spr_lines;
 uint32_t snes_perf_ppu_math_lines, snes_perf_ppu_mode[8];
@@ -320,6 +324,20 @@ static void snes_perf_report(void)
   printf("PROF/apu: total=%lu [spc700=%lu dsp=%lu] in_emu=%lu in_pcm=%lu calls=%lu per emulated frame\n",
          (unsigned long)apu_all, (unsigned long)spc, (unsigned long)dsp, (unsigned long)apu_e,
          (unsigned long)(sp_apu_pcm / n), (unsigned long)(snes_perf_apu_calls / n));
+#ifdef SNES_PERF_SPC
+  {   /* the cost of one probe pair, to read the step figure net of it */
+    uint32_t pair = 0xffffffffu;
+    for (int i = 0; i < 32; i++) {
+      uint32_t t = snes_perf_now();
+      uint32_t d = snes_perf_now() - t;
+      if (d < pair) pair = d;
+    }
+    printf("PROF/spc: step=%lu cycles in %lu engine calls, fallback=%lu cycles in %lu opcodes, idle_skips=%lu, probe_pair=%lu per emulated frame\n",
+           (unsigned long)(snes_perf_spc_step / n), (unsigned long)(snes_perf_spc_ops / n),
+           (unsigned long)(snes_perf_spc_fb / n), (unsigned long)(snes_perf_spc_fbs / n),
+           (unsigned long)(snes_perf_spc_skips / n), (unsigned long)pair);
+  }
+#endif
   printf("PROF/present: present=%lu wait=%lu overlay=%lu swap=%lu per SHOWN frame\n",
          (unsigned long)(sp_phase[SP_KICK] / shown), (unsigned long)(sp_phase[SP_WAIT] / shown),
          (unsigned long)(sp_phase[SP_OVERLAY] / shown), (unsigned long)(sp_phase[SP_SWAP] / shown));
@@ -433,6 +451,9 @@ static void snes_perf_reset(void)
 #ifdef SNES_PERF_GSU
   snes_perf_gsu_plot = snes_perf_gsu_plots = snes_perf_gsu_chain = 0;
   snes_perf_gsu_chain_ops = snes_perf_gsu_ops = 0;
+#endif
+#ifdef SNES_PERF_SPC
+  snes_perf_spc_step = snes_perf_spc_ops = snes_perf_spc_fb = snes_perf_spc_fbs = snes_perf_spc_skips = 0;
 #endif
   memset(snes_perf_ppu_part, 0, sizeof(snes_perf_ppu_part));
   memset(snes_perf_ppu_mode, 0, sizeof(snes_perf_ppu_mode));
@@ -3106,6 +3127,12 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 #endif
     rec_frame_done();
 #ifdef HOST_BUILD
+#ifndef QEMU_BUILD
+    {
+      extern uint32_t apu_hist_frame;   /* APU_HIST's frame window (snes/apu.c) */
+      apu_hist_frame++;
+    }
+#endif
     {   /* SNES_FRAMES=N: exit normally after N emulated frames (closes a recording) */
       static long host_frames_left = -2;
       if (host_frames_left == -2) { const char *e = getenv("SNES_FRAMES"); host_frames_left = e ? atol(e) : -1; }

@@ -47,6 +47,7 @@ void apu_free(Apu* apu);
 void apu_reset(Apu* apu);
 void apu_cycle(Apu* apu);
 void apu_run(Apu* apu, int cyclesToRun);
+void apu_dsp_ticks(Apu* apu, uint32_t start, uint32_t end); /* Thumb-2 batch: an opcode's DSP ticks */
 uint8_t apu_cpuRead(Apu* apu, uint16_t adr);
 void apu_cpuWrite(Apu* apu, uint16_t adr, uint8_t val);
 void apu_saveload(Apu *apu, SaveLoadFunc *func, void *ctx);

@@ -1,5 +1,37 @@
 # Changelog
 
+## [Unreleased]
+
+### Performance
+
+- **SPC700: whole batches of opcodes inside the Thumb-2 engine.** `apu_run`
+  called the engine once per SPC700 opcode, through `spc_runOpcode`, and did the
+  cycle bookkeeping and DSP ticks in C between every two. The engine now runs
+  opcodes in a loop (`spc_thumb2_run(spc, budget)`) with its registers live
+  across them, commits `apu->cycles` itself and calls `apu_dsp_ticks` only when
+  an opcode crosses a 32-cycle DSP boundary. It hands back to `apu_run` only for
+  what that loop does differently: the idle-wait pattern (so the idle skip still
+  fires), an opcode longer than the budget left (in `cpuCyclesLeft`), and
+  STOP/SLEEP. Unhandled opcodes call the C fallback (`spc_fallback`) from inside
+  the loop. Generic: every game's sound driver runs through it. Yoshi's Island
+  waterfall room on device (PERF_SPC, logs 12 → 13): 3,569 engine calls → 45 per
+  frame, SPC700 507K → 321K cycles/frame, APU total 1.04M → 850K, busy 103.3% →
+  100.0% of the budget. Log 12's per-opcode probes cost ~42K, so against a
+  normal build the saving is estimated at ~145K/frame (~2.5% of the budget).
+  Output bit-identical on the Cortex-M7 QEMU harness over the full Castlevania
+  (4,105 frames) and Yoshi's Island (19,289 frames) replays; a negative control
+  (DSP ticks removed) fails 64 of Castlevania's 68 hashes.
+
+### Added
+
+- **`PERF_SPC=1`**: the SPC700 figure split into the engine (net of its DSP
+  ticks), its C fallback and the idle skip's count (`PROF/spc`).
+- **`APU_HIST=file`** (host, window `APU_HIST_FRAMES=a:b`): SPC700 opcodes per
+  pc after the idle skip, plus a DSP census per tick (voices playing, at zero
+  volume, echo state); `tools/spc_hist_report.py` groups it into routines and
+  disassembles them, `tools/spc_native_coverage.py` lists the opcodes that still
+  fall back to C.
+
 ## [v0.0.7]
 
 A targeted follow-up: a generic sub-screen compositing skip that cuts

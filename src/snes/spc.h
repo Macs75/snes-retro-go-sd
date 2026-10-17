@@ -42,11 +42,13 @@ int spc_runOpcode(Spc* spc);
 void spc_saveload(Spc *spc, SaveLoadFunc *func, void *ctx);
 
 // Thumb-2 SPC700 engine (defined in thumb2/spc_thumb2.S when SPC_THUMB2_SPC=1).
-// Single-opcode entry: performs the opcode fetch, base-cycle charge, and
-// dispatch itself. Returns -1 if the opcode was fully handled (cyclesUsed is
-// already charged), or the opcode byte (0..255) for the C dispatcher
-// (spc_doOpcode) to fall through on -- the engine has still advanced pc past
-// the opcode and charged cyclesUsed in that case.
-int spc_thumb2_step(Spc* spc);
+// Runs whole opcodes from apu->cycles, with the DSP ticks they span, while
+// the budget lasts; returns the budget left. It stops early at the idle-wait
+// pattern, after a STOP/SLEEP, or at an opcode longer than the budget left
+// (left in apu->cpuCyclesLeft). budget 0 runs exactly one opcode and commits
+// nothing: its cycles are in cyclesUsed. See the .S header.
+int spc_thumb2_run(Spc* spc, int budget);
+// The engine's C fallback: spc_doOpcode on an already fetched, charged opcode.
+void spc_fallback(Spc* spc, uint8_t opcode);
 
 #endif

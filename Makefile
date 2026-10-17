@@ -45,6 +45,7 @@ PERF_PPU ?= 0
 PERF_AUDIO ?= 0
 PERF_CPU ?= 0
 PERF_GSU ?= 0
+PERF_SPC ?= 0
 
 CORE_C_SOURCES := \
 $(SNES)/apu.c \
@@ -131,6 +132,12 @@ endif
 # reads per PLOT and per chain call.
 ifeq ($(PERF_GSU),1)
 CORE_C_DEFS += -DSNES_PERF_GSU
+endif
+# PERF_SPC=1 splits the SPC700 figure: cycles inside the Thumb-2 engine (net of
+# its DSP ticks), in its C fallback, and apu_run's loop as the rest.
+# Diagnostic: two timer reads per engine call and per fallback opcode.
+ifeq ($(PERF_SPC),1)
+CORE_C_DEFS += -DSNES_PERF_SPC
 endif
 # PERF_AUDIO=1 adds the stretcher / audio-rate diagnostics
 ifeq ($(PERF_AUDIO),1)

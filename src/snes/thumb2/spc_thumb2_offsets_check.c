@@ -37,3 +37,6 @@ APU_CK(spc,          APU_OFF_SPC);
 APU_CK(dsp,          APU_OFF_DSP);
 APU_CK(ram,          APU_OFF_RAM);
 APU_CK(romReadable,  APU_OFF_ROMREADABLE);
+APU_CK(cycles,       APU_OFF_CYCLES);
+APU_CK(cpuCyclesLeft, APU_OFF_CPUCYCLESLEFT);
+_Static_assert(APU_OFF_CYCLES_PAGE + APU_OFF_CYCLES_IN_PAGE == APU_OFF_CYCLES, "APU_OFF_CYCLES split");

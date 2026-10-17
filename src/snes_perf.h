@@ -73,6 +73,17 @@ extern uint32_t snes_perf_gsu_plot, snes_perf_gsu_plots, snes_perf_gsu_chain;
 extern uint32_t snes_perf_gsu_chain_ops, snes_perf_gsu_ops;
 #endif
 
+/* PERF_SPC=1, a diagnostic for the SPC700 figure (two timer reads per call
+ * into the Thumb-2 engine): cycles inside the engine (the batches of
+ * spc_thumb2_run net of their DSP ticks, and the single steps of
+ * spc_runOpcode) and the number of those calls; cycles inside the C fallback
+ * (spc_fallback) and its count; the idle skip's count. spc700 minus "step" is
+ * apu_run's own loop. */
+#ifdef SNES_PERF_SPC
+extern uint32_t snes_perf_spc_step, snes_perf_spc_ops, snes_perf_spc_fb, snes_perf_spc_fbs;
+extern uint32_t snes_perf_spc_skips;
+#endif
+
 /* the split costs probes on every drawn line: only with PERF_PPU=1 */
 #ifdef SNES_PERF_PPU
 #define SNES_PERF_PPU_BEGIN(t)     uint32_t t = snes_perf_now()
