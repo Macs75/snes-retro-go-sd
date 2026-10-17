@@ -234,6 +234,140 @@ void dma_write(Dma* dma, uint16_t adr, uint8_t val) {
 
 extern bool g_fail;
 
+/* A->B into the PPU's data ports (ppu_dma_ports) from a source without side
+ * effects: a flat array (src[(ofs | adr) & mask]) or the page map's plain
+ * pages. The bytes are read into a buffer and written as blocks by
+ * ppu_dma_write; a byte on a page the map does not serve is read through
+ * snes_read only after the bytes before it are written, so every read and
+ * write keeps its order. Writes to these ports touch nothing on the A bus.
+ * Returns aAdr after the transfer. Out of the BUS window: per transfer. */
+__attribute__((noinline))
+static uint16_t dma_to_ppu(Snes* sn, const uint8_t regs[4], unsigned oi, const uint8_t* src,
+                           uint32_t ofs, uint32_t mask, uint8_t aBank, uint16_t aAdr, int step, uint32_t n) {
+  uint8_t buf[128];
+#if SNES_PAGEMAP
+  uint8_t* const* map = &g_snes_rdmap[(uint32_t)aBank << 3];
+#endif
+  while (n) {
+    uint32_t k = 0, lim = n < sizeof buf ? n : sizeof buf;
+    if (src) {
+      for (; k < lim; k++, aAdr += step) buf[k] = src[(ofs | aAdr) & mask];
+    } else {
+#if SNES_PAGEMAP
+      for (; k < lim; k++, aAdr += step) {
+        const uint8_t* pg = map[aAdr >> 13];
+        if (!pg) break;
+        buf[k] = pg[aAdr & 0x1fff];
+      }
+#endif
+    }
+    if (k) { ppu_dma_write(sn->ppu, regs, oi, buf, k); oi += k; n -= k; }
+    if (k < lim) {   /* a page with no host pointer: this byte as before */
+      uint8_t v = snes_read(sn, ((uint32_t)aBank << 16) | aAdr);
+      ppu_dma_write(sn->ppu, regs, oi, &v, 1);
+      oi++; n--; aAdr += step;
+    }
+  }
+  return aAdr;
+}
+
+/* dma_doDma's A->B transfer, out of line so the BUS window keeps only the
+ * channel scan: it runs once a transfer (snes_core.ld pins it after the
+ * window). */
+__attribute__((noinline))
+static void dma_runAtoB(Dma* dma, DmaChannel* ch) {
+  /* A->B (the common VRAM/CGRAM/OAM upload): every write goes to the B-bus
+   * (snes_writeBBus, $2100-$21ff) and can never reach $420B, so there is NO
+   * re-entrancy, and nothing observes the intermediate per-byte channel state
+   * -- the CPU is stalled inside $420B's synchronous `while (dma_cycle(...)) {}`,
+   * the only caller that drives a general DMA (dma_cycle's other callers in
+   * main_snes.c's event loop only run when dmaBusy, which $420B always drains to
+   * false before returning; dmaBusy/dmaTimer are referenced nowhere outside
+   * dma.c and never feed the scanline scheduler). So drain the whole channel in
+   * one call with identical per-byte address math. Host CPU only: a 32 KB VRAM
+   * upload drops from ~40*N inner iterations (per-byte timer walk + an 8-way
+   * active-channel rescan every byte) to N transfers. The dma_transferByte
+   * sequence is byte-identical to the old loop (standalone equivalence test). */
+  const int* off = bAdrOffsets[ch->mode];
+  uint16_t aAdr = ch->aAdr;
+  const uint8_t aBank = ch->aBank;
+  const uint8_t bAdr = ch->bAdr;
+  const int step = ch->fixed ? 0 : (ch->decrement ? -1 : 1);
+  unsigned oi = ch->offIndex;
+  uint16_t size = ch->size;   // 0 means 0x10000, matching the old size-- wrap
+
+  /* The A-bus source bank is invariant across the transfer; only aAdr steps
+   * (16-bit wrap). Instead of snes_read's classification ladder per byte, the
+   * source is read from where snes_read would read it, byte-identical. Flat
+   * sources are one host array, byte adr at src[(ofs | adr) & mask]:
+   *   WRAM $7E/$7F        -> snes->ram + ((bank&1)<<16), mask 0xffff
+   *   plain HiROM bank    -> bankBase[bank&0x3f], mask 0xffff (romDmaDirect)
+   *   Super FX $70-$73    -> the Game Pak RAM (cart_gsu_dma_ram)
+   * Anything else reads through the CPU's page map, g_snes_rdmap: per 8 KB page
+   * a host pointer where snes_read reads plain memory (WRAM and its mirror,
+   * ROM), else NULL, and that byte goes through snes_read as before. Except
+   * where the page map serves ROM and cart_readLorom serves SRAM (banks
+   * $70-$7D/$F0-$FF:$8000-$FFFF of a LoROM cart under 2 MB with SRAM, see
+   * snes_pagemap_base): such a source keeps the per-byte snes_read.
+   * Dest stays snes_writeBBus (VRAM/CGRAM/OAM side effects). Values are read
+   * byte by byte as before, so a target that writes WRAM ($2180) is seen. */
+  Snes* sn = dma->snes;
+  Cart* cart = sn->cart;
+  const uint8_t* src = NULL;
+  uint32_t ofs = 0, mask = 0xffff;
+  bool paged = false;
+  if (aBank == 0x7e || aBank == 0x7f) {
+    src = &sn->ram[(aBank & 1) << 16];
+  } else if (cart->romDmaDirect && (aBank & 0x40) &&
+             ((((uint32_t)(aBank & 0x3f)) << 16) + 0x10000u) <= cart->romSize) {
+    /* a plain HiROM bank $40-$7D/$C0-$FF maps flat (no fold, no coprocessor,
+     * no SRAM): cart_read for every adr, wrap included, is one base pointer.
+     * The base is cart->bankBase[bank&0x3f], fold-baked at load. */
+    src = cart->bankBase[aBank & 0x3f];
+  } else {
+    src = cart_gsu_dma_ram(cart, aBank, &ofs, &mask);
+#if SNES_PAGEMAP
+    if (!src)
+      paged = !(cart->type == 1 && cart->ramSize > 0 && cart->romSize < 0x200000 &&
+                ((aBank >= 0x70 && aBank < 0x7e) || aBank >= 0xf0));
+#endif
+  }
+#ifdef DMA_HIST
+  dma_h_add(0, aBank, bAdr, ch->mode, (aBank == 0x7e || aBank == 0x7f) ? 0 : src ? (cart->gsu ? 2 : 1) : paged ? 5 : 3,
+            size ? size : 0x10000u);
+#endif
+  const uint8_t regs[4] = { (uint8_t)(bAdr + off[0]), (uint8_t)(bAdr + off[1]),
+                            (uint8_t)(bAdr + off[2]), (uint8_t)(bAdr + off[3]) };
+  if ((src || paged) && ppu_dma_ports(regs)) {
+    aAdr = dma_to_ppu(sn, regs, oi, src, ofs, mask, aBank, aAdr, step, size ? size : 0x10000u);
+  } else if (src) {
+    do {
+      snes_writeBBus(sn, bAdr + off[oi & 3], src[(ofs | aAdr) & mask]);
+      oi++; aAdr += step; size--;
+    } while(size != 0);
+#if SNES_PAGEMAP
+  } else if (paged) {
+    uint8_t* const* map = &g_snes_rdmap[(uint32_t)aBank << 3];
+    do {
+      const uint8_t* pg = map[aAdr >> 13];
+      uint8_t v = pg ? pg[aAdr & 0x1fff] : snes_read(sn, ((uint32_t)aBank << 16) | aAdr);
+      snes_writeBBus(sn, bAdr + off[oi & 3], v);
+      oi++; aAdr += step; size--;
+    } while(size != 0);
+#endif
+  } else {
+    do {
+      dma_transferByte(dma, aAdr, aBank, bAdr + off[oi & 3], false);
+      oi++; aAdr += step; size--;
+    } while(size != 0);
+  }
+
+  ch->offIndex = 0; // reset offset index
+  ch->aAdr = aAdr;
+  ch->size = 0;
+  ch->dmaActive = false;
+}
+
 void dma_doDma(Dma* dma) {
 #ifdef RIG_CALL_PROFILE
   extern uint64_t g_dma_doDma_calls;
@@ -299,92 +433,7 @@ void dma_doDma(Dma* dma) {
     return;
   }
 
-  /* A->B (the common VRAM/CGRAM/OAM upload): every write goes to the B-bus
-   * (snes_writeBBus, $2100-$21ff) and can never reach $420B, so there is NO
-   * re-entrancy, and nothing observes the intermediate per-byte channel state
-   * -- the CPU is stalled inside $420B's synchronous `while (dma_cycle(...)) {}`,
-   * the only caller that drives a general DMA (dma_cycle's other callers in
-   * main_snes.c's event loop only run when dmaBusy, which $420B always drains to
-   * false before returning; dmaBusy/dmaTimer are referenced nowhere outside
-   * dma.c and never feed the scanline scheduler). So drain the whole channel in
-   * one call with identical per-byte address math. Host CPU only: a 32 KB VRAM
-   * upload drops from ~40*N inner iterations (per-byte timer walk + an 8-way
-   * active-channel rescan every byte) to N transfers. The dma_transferByte
-   * sequence is byte-identical to the old loop (standalone equivalence test). */
-  const int* off = bAdrOffsets[ch->mode];
-  uint16_t aAdr = ch->aAdr;
-  const uint8_t aBank = ch->aBank;
-  const uint8_t bAdr = ch->bAdr;
-  const int step = ch->fixed ? 0 : (ch->decrement ? -1 : 1);
-  unsigned oi = ch->offIndex;
-  uint16_t size = ch->size;   // 0 means 0x10000, matching the old size-- wrap
-
-  /* The A-bus source bank is invariant across the transfer; only aAdr steps
-   * (16-bit wrap). Instead of snes_read's classification ladder per byte, the
-   * source is read from where snes_read would read it, byte-identical. Flat
-   * sources are one host array, byte adr at src[(ofs | adr) & mask]:
-   *   WRAM $7E/$7F        -> snes->ram + ((bank&1)<<16), mask 0xffff
-   *   plain HiROM bank    -> bankBase[bank&0x3f], mask 0xffff (romDmaDirect)
-   *   Super FX $70-$73    -> the Game Pak RAM (cart_gsu_dma_ram)
-   * Anything else reads through the CPU's page map, g_snes_rdmap: per 8 KB page
-   * a host pointer where snes_read reads plain memory (WRAM and its mirror,
-   * ROM), else NULL, and that byte goes through snes_read as before. Except
-   * where the page map serves ROM and cart_readLorom serves SRAM (banks
-   * $70-$7D/$F0-$FF:$8000-$FFFF of a LoROM cart under 2 MB with SRAM, see
-   * snes_pagemap_base): such a source keeps the per-byte snes_read.
-   * Dest stays snes_writeBBus (VRAM/CGRAM/OAM side effects). Values are read
-   * byte by byte as before, so a target that writes WRAM ($2180) is seen. */
-  Snes* sn = dma->snes;
-  Cart* cart = sn->cart;
-  const uint8_t* src = NULL;
-  uint32_t ofs = 0, mask = 0xffff;
-  bool paged = false;
-  if (aBank == 0x7e || aBank == 0x7f) {
-    src = &sn->ram[(aBank & 1) << 16];
-  } else if (cart->romDmaDirect && (aBank & 0x40) &&
-             ((((uint32_t)(aBank & 0x3f)) << 16) + 0x10000u) <= cart->romSize) {
-    /* a plain HiROM bank $40-$7D/$C0-$FF maps flat (no fold, no coprocessor,
-     * no SRAM): cart_read for every adr, wrap included, is one base pointer.
-     * The base is cart->bankBase[bank&0x3f], fold-baked at load. */
-    src = cart->bankBase[aBank & 0x3f];
-  } else {
-    src = cart_gsu_dma_ram(cart, aBank, &ofs, &mask);
-#if SNES_PAGEMAP
-    if (!src)
-      paged = !(cart->type == 1 && cart->ramSize > 0 && cart->romSize < 0x200000 &&
-                ((aBank >= 0x70 && aBank < 0x7e) || aBank >= 0xf0));
-#endif
-  }
-#ifdef DMA_HIST
-  dma_h_add(0, aBank, bAdr, ch->mode, (aBank == 0x7e || aBank == 0x7f) ? 0 : src ? (cart->gsu ? 2 : 1) : paged ? 5 : 3,
-            size ? size : 0x10000u);
-#endif
-  if (src) {
-    do {
-      snes_writeBBus(sn, bAdr + off[oi & 3], src[(ofs | aAdr) & mask]);
-      oi++; aAdr += step; size--;
-    } while(size != 0);
-#if SNES_PAGEMAP
-  } else if (paged) {
-    uint8_t* const* map = &g_snes_rdmap[(uint32_t)aBank << 3];
-    do {
-      const uint8_t* pg = map[aAdr >> 13];
-      uint8_t v = pg ? pg[aAdr & 0x1fff] : snes_read(sn, ((uint32_t)aBank << 16) | aAdr);
-      snes_writeBBus(sn, bAdr + off[oi & 3], v);
-      oi++; aAdr += step; size--;
-    } while(size != 0);
-#endif
-  } else {
-    do {
-      dma_transferByte(dma, aAdr, aBank, bAdr + off[oi & 3], false);
-      oi++; aAdr += step; size--;
-    } while(size != 0);
-  }
-
-  ch->offIndex = 0; // reset offset index
-  ch->aAdr = aAdr;
-  ch->size = 0;
-  ch->dmaActive = false;
+  dma_runAtoB(dma, ch);
 }
 
 void dma_initHdma(Dma* dma) {

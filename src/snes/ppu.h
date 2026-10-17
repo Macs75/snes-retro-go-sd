@@ -259,6 +259,13 @@ void ppu_handleVblank(Ppu* ppu);
 void ppu_runLine(Ppu* ppu, int line);
 uint8_t ppu_read(Ppu* ppu, uint8_t adr);
 void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val);
+/* A general DMA into the PPU's data ports, without ppu_write's dispatch:
+ * ppu_dma_ports says whether the four B-bus targets of a transfer (bAdr plus
+ * the mode's offsets) are all OAMDATA, all CGDATA or all VMDATAL/VMDATAH;
+ * ppu_dma_write then does exactly ppu_write(regs[(oi + i) & 3], buf[i]) for
+ * each byte, in order. */
+bool ppu_dma_ports(const uint8_t regs[4]);
+void ppu_dma_write(Ppu* ppu, const uint8_t regs[4], unsigned oi, const uint8_t* buf, uint32_t n);
 void ppu_saveload(Ppu *ppu, SaveLoadFunc *func, void *ctx);
 void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_flags);
 #ifdef SNES_LINE_REUSE_PROBE

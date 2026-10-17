@@ -5048,6 +5048,126 @@ uint8_t ppu_read(Ppu* ppu, uint8_t adr) {
   }
 }
 
+/* The data ports a DMA streams into, shared by ppu_write and ppu_dma_write:
+ * $2104 OAMDATA, $2118/$2119 VMDATAL/VMDATAH, $2122 CGDATA. */
+static inline __attribute__((always_inline)) void ppu_port_oamdata(Ppu* ppu, uint8_t val) {
+  if(ppu->oamInHigh) {
+    uint32_t high_index = ((ppu->oamAdr & 0xf) << 1) | ppu->oamSecondWrite;
+    uint8_t *dst = &ppu->highOam[high_index];
+#ifdef SNES_LINE_REUSE_PROBE
+    if (*dst != val) {
+      g_probe_oam_gen++;
+      for (int s = high_index * 4; s < high_index * 4 + 4; s++)
+        g_probe_oam_entry_gen[s]++;
+    }
+#endif
+#ifdef SNES_LINE_CACHE
+    if (*dst != val) {
+      int first = high_index * 4;
+      PpuLineCacheBump(&g_line_cache_oam_serial, &g_line_cache_oam_last[first]);
+      for (int s = first + 1; s < first + 4; s++)
+        g_line_cache_oam_last[s] = g_line_cache_oam_serial;
+    }
+#endif
+    *dst = val;
+    ppu->objCacheValid = 0;   /* size / x-high bits moved */
+    if(ppu->oamSecondWrite) {
+      ppu->oamAdr++;
+      if(ppu->oamAdr == 0) ppu->oamInHigh = false;
+    }
+  } else {
+    if(!ppu->oamSecondWrite) {
+      ppu->oamBuffer = val;
+    } else {
+      uint16_t value = (val << 8) | ppu->oamBuffer;
+#ifdef SNES_LINE_REUSE_PROBE
+      if (ppu->oam[ppu->oamAdr] != value) {
+        g_probe_oam_gen++;
+        g_probe_oam_entry_gen[ppu->oamAdr >> 1]++;
+      }
+#endif
+#ifdef SNES_LINE_CACHE
+      if (ppu->oam[ppu->oamAdr] != value)
+        PpuLineCacheBump(&g_line_cache_oam_serial,
+                         &g_line_cache_oam_last[ppu->oamAdr >> 1]);
+#endif
+      ppu->oam[ppu->oamAdr++] = value;
+      ppu->objCacheValid = 0;   /* a sprite may have moved vertically */
+      if(ppu->oamAdr == 0) ppu->oamInHigh = true;
+    }
+  }
+  ppu->oamSecondWrite = !ppu->oamSecondWrite;
+}
+
+static inline __attribute__((always_inline)) void ppu_port_vmdatal(Ppu* ppu, uint8_t val) {
+  // TODO: vram access during rendering (also cgram and oam)
+  uint16_t vramAdr = ppu_getVramRemap(ppu);
+  uint16_t *dst = &ppu->vram[vramAdr & 0x7fff];
+  uint16_t value = (*dst & 0xff00) | val;
+#ifdef SNES_LINE_REUSE_PROBE
+  if (*dst != value) {
+    g_probe_vram_gen++;
+    g_probe_vram_page_gen[(vramAdr & 0x7fff) >> 6]++;
+  }
+#endif
+#ifdef SNES_LINE_CACHE
+  if (*dst != value)
+    PpuLineCacheBump(&g_line_cache_vram_serial,
+                     &g_line_cache_vram_last[(vramAdr & 0x7fff) >> kLineCacheVramShift]);
+#endif
+  *dst = value;
+  if(!ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
+}
+
+static inline __attribute__((always_inline)) void ppu_port_vmdatah(Ppu* ppu, uint8_t val) {
+  uint16_t vramAdr = ppu_getVramRemap(ppu);
+  uint16_t *dst = &ppu->vram[vramAdr & 0x7fff];
+  uint16_t value = (*dst & 0x00ff) | (val << 8);
+#ifdef SNES_LINE_REUSE_PROBE
+  if (*dst != value) {
+    g_probe_vram_gen++;
+    g_probe_vram_page_gen[(vramAdr & 0x7fff) >> 6]++;
+  }
+#endif
+#ifdef SNES_LINE_CACHE
+  if (*dst != value)
+    PpuLineCacheBump(&g_line_cache_vram_serial,
+                     &g_line_cache_vram_last[(vramAdr & 0x7fff) >> kLineCacheVramShift]);
+#endif
+  *dst = value;
+  if(ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
+}
+
+static inline __attribute__((always_inline)) void ppu_port_cgdata(Ppu* ppu, uint8_t val) {
+  if(!ppu->cgramSecondWrite) {
+    ppu->cgramBuffer = val;
+  } else {
+    uint16_t value = (val << 8) | ppu->cgramBuffer;
+#ifdef SNES_LINE_REUSE_PROBE
+    if (ppu->cgram[ppu->cgramPointer] != value) {
+      g_probe_cgram_gen++;
+      g_probe_cgram_entry_gen[ppu->cgramPointer]++;
+    }
+#endif
+#ifdef SNES_LINE_CACHE
+    if (ppu->cgram[ppu->cgramPointer] != value)
+      PpuLineCacheBump(&g_line_cache_cgram_serial,
+                       &g_line_cache_cgram_last[ppu->cgramPointer]);
+#endif
+#ifdef PPU_RGB565
+    if (ppu->cgram[ppu->cgramPointer] != value) {
+      g_cgram_dirty[ppu->cgramPointer >> 5] |= 1u << (ppu->cgramPointer & 31);
+      g_cgram_dirty_any = true;
+    }
+#ifdef SNES_PPU_FULL_REBUILD_REF
+    ppu->paletteDirty = true;   /* A/B reference: the old full rebuild on every write */
+#endif
+#endif
+    ppu->cgram[ppu->cgramPointer++] = value;
+  }
+  ppu->cgramSecondWrite = !ppu->cgramSecondWrite;
+}
+
 void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
 //  if (adr != 24 && adr != 25)
 //    printf("ppu_write(%d, %d)\n", adr, val);
@@ -5081,52 +5201,7 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
       break;
     }
     case 0x04: {
-      if(ppu->oamInHigh) {
-        uint32_t high_index = ((ppu->oamAdr & 0xf) << 1) | ppu->oamSecondWrite;
-        uint8_t *dst = &ppu->highOam[high_index];
-#ifdef SNES_LINE_REUSE_PROBE
-        if (*dst != val) {
-          g_probe_oam_gen++;
-          for (int s = high_index * 4; s < high_index * 4 + 4; s++)
-            g_probe_oam_entry_gen[s]++;
-        }
-#endif
-#ifdef SNES_LINE_CACHE
-        if (*dst != val) {
-          int first = high_index * 4;
-          PpuLineCacheBump(&g_line_cache_oam_serial, &g_line_cache_oam_last[first]);
-          for (int s = first + 1; s < first + 4; s++)
-            g_line_cache_oam_last[s] = g_line_cache_oam_serial;
-        }
-#endif
-        *dst = val;
-        ppu->objCacheValid = 0;   /* size / x-high bits moved */
-        if(ppu->oamSecondWrite) {
-          ppu->oamAdr++;
-          if(ppu->oamAdr == 0) ppu->oamInHigh = false;
-        }
-      } else {
-        if(!ppu->oamSecondWrite) {
-          ppu->oamBuffer = val;
-        } else {
-          uint16_t value = (val << 8) | ppu->oamBuffer;
-#ifdef SNES_LINE_REUSE_PROBE
-          if (ppu->oam[ppu->oamAdr] != value) {
-            g_probe_oam_gen++;
-            g_probe_oam_entry_gen[ppu->oamAdr >> 1]++;
-          }
-#endif
-#ifdef SNES_LINE_CACHE
-          if (ppu->oam[ppu->oamAdr] != value)
-            PpuLineCacheBump(&g_line_cache_oam_serial,
-                             &g_line_cache_oam_last[ppu->oamAdr >> 1]);
-#endif
-          ppu->oam[ppu->oamAdr++] = value;
-          ppu->objCacheValid = 0;   /* a sprite may have moved vertically */
-          if(ppu->oamAdr == 0) ppu->oamInHigh = true;
-        }
-      }
-      ppu->oamSecondWrite = !ppu->oamSecondWrite;
+      ppu_port_oamdata(ppu, val);
       break;
     }
     case 0x05: {
@@ -5216,42 +5291,11 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
       break;
     }
     case 0x18: {
-      // TODO: vram access during rendering (also cgram and oam)
-      uint16_t vramAdr = ppu_getVramRemap(ppu);
-      uint16_t *dst = &ppu->vram[vramAdr & 0x7fff];
-      uint16_t value = (*dst & 0xff00) | val;
-#ifdef SNES_LINE_REUSE_PROBE
-      if (*dst != value) {
-        g_probe_vram_gen++;
-        g_probe_vram_page_gen[(vramAdr & 0x7fff) >> 6]++;
-      }
-#endif
-#ifdef SNES_LINE_CACHE
-      if (*dst != value)
-        PpuLineCacheBump(&g_line_cache_vram_serial,
-                         &g_line_cache_vram_last[(vramAdr & 0x7fff) >> kLineCacheVramShift]);
-#endif
-      *dst = value;
-      if(!ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
+      ppu_port_vmdatal(ppu, val);
       break;
     }
     case 0x19: {
-      uint16_t vramAdr = ppu_getVramRemap(ppu);
-      uint16_t *dst = &ppu->vram[vramAdr & 0x7fff];
-      uint16_t value = (*dst & 0x00ff) | (val << 8);
-#ifdef SNES_LINE_REUSE_PROBE
-      if (*dst != value) {
-        g_probe_vram_gen++;
-        g_probe_vram_page_gen[(vramAdr & 0x7fff) >> 6]++;
-      }
-#endif
-#ifdef SNES_LINE_CACHE
-      if (*dst != value)
-        PpuLineCacheBump(&g_line_cache_vram_serial,
-                         &g_line_cache_vram_last[(vramAdr & 0x7fff) >> kLineCacheVramShift]);
-#endif
-      *dst = value;
-      if(ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
+      ppu_port_vmdatah(ppu, val);
       break;
     }
     case 0x1a: {
@@ -5281,33 +5325,7 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
       break;
     }
     case 0x22: {
-      if(!ppu->cgramSecondWrite) {
-        ppu->cgramBuffer = val;
-      } else {
-        uint16_t value = (val << 8) | ppu->cgramBuffer;
-#ifdef SNES_LINE_REUSE_PROBE
-        if (ppu->cgram[ppu->cgramPointer] != value) {
-          g_probe_cgram_gen++;
-          g_probe_cgram_entry_gen[ppu->cgramPointer]++;
-        }
-#endif
-#ifdef SNES_LINE_CACHE
-        if (ppu->cgram[ppu->cgramPointer] != value)
-          PpuLineCacheBump(&g_line_cache_cgram_serial,
-                           &g_line_cache_cgram_last[ppu->cgramPointer]);
-#endif
-#ifdef PPU_RGB565
-        if (ppu->cgram[ppu->cgramPointer] != value) {
-          g_cgram_dirty[ppu->cgramPointer >> 5] |= 1u << (ppu->cgramPointer & 31);
-          g_cgram_dirty_any = true;
-        }
-#ifdef SNES_PPU_FULL_REBUILD_REF
-        ppu->paletteDirty = true;   /* A/B reference: the old full rebuild on every write */
-#endif
-#endif
-        ppu->cgram[ppu->cgramPointer++] = value;
-      }
-      ppu->cgramSecondWrite = !ppu->cgramSecondWrite;
+      ppu_port_cgdata(ppu, val);
       break;
     }
     case 0x23:
@@ -5429,6 +5447,27 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
     }
     default: {
       break;
+    }
+  }
+}
+
+bool ppu_dma_ports(const uint8_t regs[4]) {
+  int vram = 0;
+  for (int k = 0; k < 4; k++) vram += regs[k] == 0x18 || regs[k] == 0x19;
+  return vram == 4 ||
+         (regs[0] == 0x04 && regs[1] == 0x04 && regs[2] == 0x04 && regs[3] == 0x04) ||
+         (regs[0] == 0x22 && regs[1] == 0x22 && regs[2] == 0x22 && regs[3] == 0x22);
+}
+
+void ppu_dma_write(Ppu* ppu, const uint8_t regs[4], unsigned oi, const uint8_t* buf, uint32_t n) {
+  if (regs[0] == 0x04) {
+    for (uint32_t i = 0; i < n; i++) ppu_port_oamdata(ppu, buf[i]);
+  } else if (regs[0] == 0x22) {
+    for (uint32_t i = 0; i < n; i++) ppu_port_cgdata(ppu, buf[i]);
+  } else {
+    for (uint32_t i = 0; i < n; i++, oi++) {
+      if (regs[oi & 3] == 0x18) ppu_port_vmdatal(ppu, buf[i]);
+      else ppu_port_vmdatah(ppu, buf[i]);
     }
   }
 }

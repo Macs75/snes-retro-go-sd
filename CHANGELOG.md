@@ -26,12 +26,13 @@
   estimated 2.5% of the frame budget against a normal build. Output
   bit-identical (Castlevania and Yoshi's Island replays on the Cortex-M7
   harness).
-- **DMA reads its source directly**, instead of decoding the address for every
-  byte: plain memory through the CPU's page map (WRAM and its mirror, LoROM and
-  Super FX ROM) and the Super FX Game Pak RAM. Generic. Yoshi's Island
-  waterfall room: DMA 562K → 320K cycles/frame, busy 100% → 96% of the budget,
-  late frames halved. Output bit-identical (Super Mario Kart, Castlevania,
-  Batman, TMNT IV and Yoshi's Island replays).
+- **DMA without the per-byte bus decode and register dispatch.** The source is
+  read directly (plain memory through the CPU's page map: WRAM and its mirror,
+  LoROM and Super FX ROM; and the Super FX Game Pak RAM), and uploads to VRAM,
+  CGRAM and OAM are written as blocks into the PPU's data ports. Generic.
+  Yoshi's Island waterfall room: DMA 562K → 238K cycles/frame, busy 100% → 94%
+  of the budget, late frames halved. Output bit-identical (Super Mario Kart,
+  Castlevania, Batman, TMNT IV and Yoshi's Island replays).
 
 ### Changed
 

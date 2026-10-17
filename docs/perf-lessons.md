@@ -263,7 +263,7 @@ opcode's cost, invisible until the loop moved. The C fallback (246 opcodes,
 ~22.5K/frame, ~7% of the SPC700) is now the measured baseline for native
 handlers; the DSP (~530K) is the larger half of the APU.
 
-### 4.7 DMA: read the source where `snes_read` would, not through it
+### 4.7 DMA: read the source where `snes_read` would, and write ports as blocks
 
 Yoshi's waterfall room showed `dma=562K` a frame for only ~4,400 bytes moved
 (`DMA_HIST`, `tools/dma_hist_report.py`): ~128 device cycles a byte. Not the
@@ -287,6 +287,24 @@ Device, waterfall (logs 13 → 14, same PERF level): DMA 562K → 320K, busy 100
 count unchanged. The first build overflowed the 9 KB BUS window: the three flat
 loops became one (`src[(ofs | adr) & mask]`), and `ppu_write`/`ppu_read` are now
 pinned at their measured offset so DMA edits can't move them.
+
+**Then the write side.** Every byte still went `snes_writeBBus` → `ppu_write`'s
+switch → its port handler. The four data-port cases ($2104, $2118, $2119, $2122)
+moved, unchanged, into always-inline helpers that both `ppu_write` and a new
+`ppu_dma_write` use, so the side effects (remap, increments, palette dirty bits,
+line-cache bumps) are one piece of code. A transfer whose four B-bus targets
+are one port group, from a source without side effects, is read into a 128-byte
+buffer and written as blocks; a byte on a page the map does not serve is read
+only after the bytes before it are written. `ppu_write`'s instruction stream is
+unchanged (612 instructions, diffed). Device (logs 14 → 15): DMA 320K → 238K,
+busy 95.8% → 94.4%; late frames stayed at 60 (the overruns are the ~129% frames).
+
+Placement: the A→B transfer became its own function, placed with
+`ppu_dma_write` in the padding between the BUS and CPU windows, so `dma_doDma`
+shrank (1,016 → 424 bytes) instead of pushing the window; HDMA, `ppu_write` and
+`ppu_read` are pinned at their measured offsets. The first try was caught by
+that pin (`cannot move location counter backwards`) rather than shipping a
+shifted window.
 
 ---
 

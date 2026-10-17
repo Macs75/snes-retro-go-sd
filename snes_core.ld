@@ -118,13 +118,22 @@ SECTIONS
     . = ALIGN(32);
     *(.text.cart_read .text.cart_write .text.input_read)
     . = ALIGN(32);
-    *(.text.dma_doHdma .text.dma_doDma .text.dma_read .text.dma_write .text.dma_startDma .text.dma_initHdma)
-    /* the PPU registers at a fixed offset, where they measured: a DMA change
-     * no longer moves them (ld stops if the DMA code grows past it) */
+    *(.text.dma_doDma .text.dma_read .text.dma_write)
+    /* HDMA (every line) and the PPU registers at fixed offsets, where they
+     * measured: a DMA change no longer moves them (ld stops if the code
+     * before grows past them) */
+    . = __BUS_HOT_START__ + 0x15D4;
+    *(.text.dma_doHdma .text.dma_startDma .text.dma_initHdma)
     . = __BUS_HOT_START__ + 0x18A0;
     *(.text.ppu_write .text.ppu_read)
     __BUS_HOT_END__ = .;
     ASSERT(__BUS_HOT_END__ <= __BUS_HOT_START__ + 0x2400, "SNES: BUS window (9K) overflows");
+    /* A general DMA's transfer, once a transfer: in the padding before the CPU
+     * window (2.6K), so it has a fixed place without growing the BUS window */
+    . = ALIGN(32);
+    *(.text.dma_runAtoB .text.dma_to_ppu)
+    . = ALIGN(32);
+    *(.text.ppu_dma_write .text.ppu_dma_ports)
 
     . = __APU_HOT_START__ + 0x17800;
     __CPU_C_START__ = .;
