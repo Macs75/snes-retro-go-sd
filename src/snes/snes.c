@@ -953,22 +953,27 @@ uint8_t snes_cpuRead(Snes* snes, uint32_t adr) {
    * the host base of the last ROM page and serve a hit with one compare and
    * one index.
    *
-   * Only the ROM branch ever installs a tag, so a tag match implies ROM:
-   * WRAM, SRAM and MMIO all live below 0x8000 (or in banks 7e/7f) and keep
-   * the slow path, which is also why no write path has to invalidate this --
-   * ROM does not change under us. An 8 KB page cannot straddle a LoROM 32 KB
+   * Without the page map only the ROM branch installs a tag, so a tag match
+   * implies ROM: WRAM, SRAM and MMIO all live below 0x8000 (or in banks
+   * 7e/7f) and keep the slow path, which is also why no write path has to
+   * invalidate this -- ROM does not change under us. (The page map also
+   * installs WRAM pages; see there.) An 8 KB page cannot straddle a LoROM 32 KB
    * mapping boundary, and cannot straddle a romMask wrap either (romMask is
    * 2^n-1 with n >= 13 for any real cart), so base+offset stays linear for
    * the whole page. The tag holds the page-aligned address, so the sentinel
    * below (low bits set, and beyond the 24-bit bus) can never collide. */
 #if SNES_PAGEMAP
   {
-    /* One table load instead of the compare chain below. A ROM page also
-     * becomes the engine's inline fetch page (ROM_FETCH_FAST), exactly when
-     * the chain would have installed it. */
+    /* One table load instead of the compare chain below. A ROM page, or a WRAM
+     * page ($7E/$7F, and the $0000-$1FFF mirror in banks $00-$3F/$80-$BF),
+     * also becomes the engine's inline fetch page (ROM_FETCH_FAST): only
+     * fetches arrive here for those pages (cpu_thumb2_read serves the data
+     * reads), and code run from WRAM otherwise paid this call per byte. The
+     * page is a pointer to live memory and WRAM is never remapped, so a write
+     * to it -- self-modifying code, DMA into WRAM -- needs no invalidation. */
     uint8_t *base = g_snes_rdmap[(adr >> 13) & 0x7ff];
     if (base) {
-      if ((adr & 0x8000) && (adr >> 17) != 0x3f) {   /* ROM: not WRAM ($7E/$7F) */
+      if ((adr & 0x8000) || (adr >> 17) == 0x3f || !(adr & 0x40e000)) {
         uint32_t page = adr & ~(uint32_t)0x1fff;
         if (page != snes->romPageTag) {
           snes->romPageBase = base;
