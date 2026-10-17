@@ -306,6 +306,16 @@ shrank (1,016 → 424 bytes) instead of pushing the window; HDMA, `ppu_write` an
 that pin (`cannot move location counter backwards`) rather than shipping a
 shifted window.
 
+**Then the VRAM word pairs.** Before writing it, `DMA_HIST` recorded VMAIN for
+every VRAM transfer to count what would qualify: mode 1 to `$2118` with the
+increment after the high byte was 76% of the waterfall's DMA bytes, 53% of the
+whole Yoshi replay, 27-31% in Castlevania and Batman, and the cases that cannot
+pair (increment after low, byte-only, odd start) ~2 bytes a frame in all six
+runs -- a general case, not a per-game one. Such a pair lands on one word, so
+it is one remap and one store instead of two read-modify-writes. Device (logs
+15 → 16): DMA 238K → 191K, busy 94.4% → 93.8% (the other figures +7K, within
+what two logs can tell apart). Over the three steps: DMA 562K → 191K (-66%).
+
 ---
 
 ## 5. Cross-cutting lessons

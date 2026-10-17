@@ -5465,6 +5465,24 @@ void ppu_dma_write(Ppu* ppu, const uint8_t regs[4], unsigned oi, const uint8_t* 
   } else if (regs[0] == 0x22) {
     for (uint32_t i = 0; i < n; i++) ppu_port_cgdata(ppu, buf[i]);
   } else {
+#if !defined(SNES_LINE_CACHE) && !defined(SNES_LINE_REUSE_PROBE)
+    /* A word upload (VMDATAL, VMDATAH alternating; VMAIN increments after the
+     * high byte): each low/high pair writes one VRAM word, the pointer moving
+     * only after the high byte, so the pair is one remap and one store. Same
+     * end state as the two read-modify-writes (the diagnostics above are the
+     * only ones that see the half-written word). A transfer starting on the
+     * high byte or ending on a low one does that byte alone. */
+    if (ppu->vramIncrementOnHigh && regs[0] == 0x18 && regs[1] == 0x19 && regs[2] == 0x18 && regs[3] == 0x19) {
+      uint32_t i = 0;
+      if (oi & 1) ppu_port_vmdatah(ppu, buf[i++]);
+      for (; i + 1 < n; i += 2) {
+        ppu->vram[ppu_getVramRemap(ppu) & 0x7fff] = (uint16_t)(buf[i] | (buf[i + 1] << 8));
+        ppu->vramPointer += ppu->vramIncrement;
+      }
+      if (i < n) ppu_port_vmdatal(ppu, buf[i]);
+      return;
+    }
+#endif
     for (uint32_t i = 0; i < n; i++, oi++) {
       if (regs[oi & 3] == 0x18) ppu_port_vmdatal(ppu, buf[i]);
       else ppu_port_vmdatah(ppu, buf[i]);

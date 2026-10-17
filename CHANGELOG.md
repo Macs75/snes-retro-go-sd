@@ -28,10 +28,11 @@
   harness).
 - **DMA without the per-byte bus decode and register dispatch.** The source is
   read directly (plain memory through the CPU's page map: WRAM and its mirror,
-  LoROM and Super FX ROM; and the Super FX Game Pak RAM), and uploads to VRAM,
-  CGRAM and OAM are written as blocks into the PPU's data ports. Generic.
-  Yoshi's Island waterfall room: DMA 562K → 238K cycles/frame, busy 100% → 94%
-  of the budget, late frames halved. Output bit-identical (Super Mario Kart,
+  LoROM and Super FX ROM; and the Super FX Game Pak RAM), uploads to VRAM,
+  CGRAM and OAM are written as blocks into the PPU's data ports, and a VRAM
+  word upload writes each low/high pair as one word. Generic. Yoshi's Island
+  waterfall room: DMA 562K → 191K cycles/frame, busy 100% → 94% of the budget,
+  late frames halved. Output bit-identical (Super Mario Kart,
   Castlevania, Batman, TMNT IV and Yoshi's Island replays).
 
 ### Changed

@@ -45,23 +45,34 @@ static void dma_h_write(void) {
   FILE *f = fopen(getenv("DMA_HIST"), "w");
   if (!f) return;
   fprintf(f, "# frames %u..%u (%u)\n", dma_h_f0, dma_h_f1, dma_h_f1 - dma_h_f0 + 1);
+  fprintf(f, "# kind bank badr mode path transfers bytes vmain\n");
   fprintf(f, "# dma_cycle calls %lu: hdma stall %lu, dma busy %lu (dma_doDma %lu)\n",
           dma_h_cycles, dma_h_cycles_hdma, dma_h_cycles_dma, dma_h_doDma);
   for (int i = 0; i < DMA_H_N; i++) {
     uint32_t k = dma_h[i].key;
     if (!dma_h[i].n) continue;
-    fprintf(f, "%s %02x %02x %u %u %lu %lu\n", (k >> 31) ? "hdma" : "dma", (k >> 16) & 0xff, (k >> 8) & 0xff,
-            (k >> 4) & 7, k & 0xf, dma_h[i].n, dma_h[i].bytes);
+    fprintf(f, "%s %02x %02x %u %u %lu %lu %02x\n", (k >> 31) ? "hdma" : "dma", (k >> 16) & 0xff, (k >> 8) & 0xff,
+            (k >> 4) & 7, k & 0xf, dma_h[i].n, dma_h[i].bytes, (k >> 24) & 0x3f);
   }
   fclose(f);
 }
+/* VRAM transfers ($2118/$2119 targets): VMAIN at the start, the low 6 bits of
+ * the key's top byte -- bit 0 increment after the high byte, bits 1-2 remap
+ * mode, bits 3-4 increment (1, 32, 128), bit 5 the transfer starts on an odd
+ * offset index. 0 for every other target. */
+static unsigned dma_h_vmain(const Snes *sn, uint8_t badr, unsigned oi) {
+  if (badr != 0x18 && badr != 0x19) return 0;
+  const Ppu *p = sn->ppu;
+  unsigned inc = p->vramIncrement == 1 ? 0 : p->vramIncrement == 32 ? 1 : p->vramIncrement == 128 ? 2 : 3;
+  return (p->vramIncrementOnHigh ? 1u : 0u) | ((p->vramRemapMode & 3u) << 1) | (inc << 3) | ((oi & 1u) << 5);
+}
 /* hdma: 1/0; path: 0 WRAM, 1 HiROM base, 2 Game Pak RAM, 3 snes_read, 4 B->A, 5 page map */
-static void dma_h_add(int hdma, uint8_t bank, uint8_t badr, uint8_t mode, int path, unsigned long bytes) {
+static void dma_h_add(int hdma, uint8_t bank, uint8_t badr, uint8_t mode, int path, unsigned long bytes, unsigned vm) {
   if (dma_h_on < 0) { dma_h_on = getenv("DMA_HIST") != NULL; if (dma_h_on) atexit(dma_h_write); }
   if (!dma_h_on) return;
   if (dma_h_f0 == 0xffffffffu) dma_h_f0 = apu_hist_frame;
   dma_h_f1 = apu_hist_frame;
-  uint32_t key = ((uint32_t)hdma << 31) | ((uint32_t)bank << 16) | ((uint32_t)badr << 8) | ((uint32_t)(mode & 7) << 4) | (uint32_t)path;
+  uint32_t key = ((uint32_t)hdma << 31) | ((uint32_t)(vm & 0x3f) << 24) | ((uint32_t)bank << 16) | ((uint32_t)badr << 8) | ((uint32_t)(mode & 7) << 4) | (uint32_t)path;
   uint32_t h = (key * 2654435761u) >> 24;
   for (;; h = (h + 1) & (DMA_H_N - 1))
     if (!dma_h[h].n || dma_h[h].key == key) break;
@@ -334,7 +345,7 @@ static void dma_runAtoB(Dma* dma, DmaChannel* ch) {
   }
 #ifdef DMA_HIST
   dma_h_add(0, aBank, bAdr, ch->mode, (aBank == 0x7e || aBank == 0x7f) ? 0 : src ? (cart->gsu ? 2 : 1) : paged ? 5 : 3,
-            size ? size : 0x10000u);
+            size ? size : 0x10000u, dma_h_vmain(sn, bAdr, oi));
 #endif
   const uint8_t regs[4] = { (uint8_t)(bAdr + off[0]), (uint8_t)(bAdr + off[1]),
                             (uint8_t)(bAdr + off[2]), (uint8_t)(bAdr + off[3]) };
@@ -421,7 +432,7 @@ void dma_doDma(Dma* dma) {
      * state from the struct between bytes, byte-for-byte as before. This
      * direction (reading PPU/APU back into RAM) is rare; the hot path is A->B. */
 #ifdef DMA_HIST
-    dma_h_add(0, ch->aBank, ch->bAdr, ch->mode, 4, 1);
+    dma_h_add(0, ch->aBank, ch->bAdr, ch->mode, 4, 1, 0);
 #endif
     dma_transferByte(
       dma, ch->aAdr, ch->aBank,
@@ -488,7 +499,7 @@ void dma_doHdma(Dma* dma) {
       if(dma->channel[i].doTransfer) {
 #ifdef DMA_HIST
         dma_h_add(1, dma->channel[i].indirect ? dma->channel[i].indBank : dma->channel[i].aBank,
-                  dma->channel[i].bAdr, dma->channel[i].mode, 0, transferLength[dma->channel[i].mode]);
+                  dma->channel[i].bAdr, dma->channel[i].mode, 0, transferLength[dma->channel[i].mode], 0);
 #endif
         for(int j = 0; j < transferLength[dma->channel[i].mode]; j++) {
           dma->hdmaTimer += 8; // 8 cycles for each byte transferred
