@@ -95,7 +95,7 @@ struct Snes {
   // joypad handling
   uint16_t portAutoReadX[4]; // as read by auto-joypad read
   bool autoJoyRead;
-  uint16_t autoJoyTimer; // times how long until reading is done
+  uint16_t autoJoyTimer; // line the auto-joypad read started on, 0 = none
   bool ppuLatch;
   // multiplication/division
   uint8_t multiplyA;

@@ -318,7 +318,7 @@ void snes_handle_pos_stuff(Snes *snes) {
 #endif
       if (snes->autoJoyRead) {
         // TODO: this starts a little after start of vblank
-        snes->autoJoyTimer = 0;
+        snes->autoJoyTimer = snes->vPos;   /* busy flag: see $4212 */
         /* After 16 hardware clocks the leftover serial bits are 1. */
         snes->input1->latchedState = 0xffff;
         snes->input2->latchedState = 0xffff;
@@ -368,8 +368,6 @@ void snes_handle_pos_stuff(Snes *snes) {
     }
   }
 #endif
-  // handle autoJoyRead-timer
-  //if (snes->autoJoyTimer > 0) snes->autoJoyTimer -= 2;
   // increment position
   // TODO: exact frame timing (line 240 on odd frame is 4 cycles shorter,
   //   even frames in interlace is 1 extra line)
@@ -431,7 +429,7 @@ void snes_run_line(Snes *snes) {
     if (snes->nmiEnabled)
       snes->cpu->nmiWanted = true;
     if (snes->autoJoyRead) {
-      snes->autoJoyTimer = 0;
+      snes->autoJoyTimer = snes->vPos;   /* busy flag: see $4212 */
       snes->input1->latchedState = 0xffff;
       snes->input2->latchedState = 0xffff;
     }
@@ -587,6 +585,16 @@ static uint16_t SwapInputBits(uint16_t x) {
   return r;
 }
 
+/* $4212 bit 0: the auto-joypad read is in progress, for 4224 master clocks
+ * from the start of vblank (the line autoJoyTimer holds). Computed when read
+ * rather than counted down every dot. Star Fox's briefing waits for it to SET
+ * before reading the pad, and hung while it never did. Out of line, placed
+ * after the BUS window (snes_core.ld), so snes_read keeps its size. */
+__attribute__((noinline)) static uint8_t snes_autoJoyBusy(const Snes* snes) {
+  return snes->autoJoyTimer &&
+         (uint32_t)(uint16_t)(snes->vPos - snes->autoJoyTimer) * 1364 + snes->hPos < 4224;
+}
+
 static uint8_t snes_readReg(Snes* snes, uint16_t adr) {
   switch(adr) {
     case 0x4210: {
@@ -628,7 +636,7 @@ static uint8_t snes_readReg(Snes* snes, uint16_t adr) {
                (int)snes->inVblank, (int)(snes->hPos >= 1024),
                (unsigned)snes->cpu->k, (unsigned)snes->cpu->pc);
 #endif
-      uint8_t val = (snes->autoJoyTimer > 0);
+      uint8_t val = snes_autoJoyBusy(snes);
       val |= (snes->hPos >= 1024) << 6;
       val |= snes->inVblank << 7;
       return val | (snes->openBus & 0x3e);

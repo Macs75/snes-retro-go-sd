@@ -58,6 +58,9 @@
 
 ### Fixed
 
+- The auto-joypad read's busy flag (`$4212` bit 0) now sets for ~3 lines at
+  the start of vblank; it never did. Star Fox hung on the mission briefing,
+  which waits for it before reading the pad.
 - PROFLITE no longer reports the audio as slowed for the stretcher's normal
   ±1% trimming, only below 0.99x.
 

@@ -140,6 +140,7 @@ SECTIONS
     *(.text.dma_runAtoB .text.dma_to_ppu)
     . = ALIGN(32);
     *(.text.ppu_dma_write .text.ppu_dma_ports)
+    *(.text.snes_autoJoyBusy*)
 
     . = __APU_HOT_START__ + 0x17800;
     __CPU_C_START__ = .;
