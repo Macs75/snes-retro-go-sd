@@ -2376,6 +2376,7 @@ unsigned long gsu_plotstat[64];
    came from (sched.inc sets gsu_src): 0 per-line, 1 vblank catch-up, 2 start */
 int gsu_src;
 unsigned long gsu_src_ops[3];
+unsigned long gsu_fs_ops;   /* FRAME_STATS (main_snes.c): GSU instructions this frame */
 #endif
 
 static inline __attribute__((always_inline)) u4 gsu_blk_run(void)
@@ -2438,6 +2439,7 @@ void MainLoop(void)
 #ifdef HOST_BUILD
                 gsu_blk_ops += c;
                 gsu_src_ops[gsu_src] += c;
+                gsu_fs_ops += c;
 #endif
                 /* the loop test below spends the last one */
                 NumberOfOpcodes -= c - 1;
@@ -2447,6 +2449,7 @@ void MainLoop(void)
 #ifdef HOST_BUILD
         gsu_hs[1]++;
         gsu_src_ops[gsu_src]++;
+        gsu_fs_ops++;
 #endif
         FxDispatch(FxTabled);
     } while (fx_loop_next());

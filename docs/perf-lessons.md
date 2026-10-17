@@ -229,6 +229,25 @@ much as in the chains. The addresses are always even, so `ld16a`/`st16a`
 Gameplay's remaining late frames are an every-other-frame overrun (average busy
 86-93%, heaviest frame ~125%); the GSU is now ~8-10% of that frame.
 
+**"late" is not lost time.** `PROF/pace late=` counts frames that reach the
+audio-DMA wait after its tick. At 30 fps the drawn frame is the heavy one, and
+the undrawn one after it absorbs a sub-period overrun: `wall_ms` stays at 1995
+per 120 frames (real time) and the audio at 1.000 with dozens of "late" frames.
+Real time is lost only where one frame overruns by more than a period; the
+pacing resets its reference every frame, so those ticks are never repaid and the
+audio ring drains (`underruns`, `step_min` 0.84-0.89). Read `wall_ms` and
+`underruns`, not `late`, to find the frames that matter.
+
+**A spike is often code nobody profiled.** Host `FRAME_STATS` (per-frame 65816,
+SPC700, GSU instructions and DMA bytes) put the intro's worst window (229%) on
+four frames of the "THE BABIES ARE MINE!" panel, when Kamek flies off: GSU
+96K instructions against ~13K, 48% of them interpreted (`GSU_CHAINHIST`), nearly
+all one 7-instruction GETC/PLOT loop at `08:9055` run 46,870 times. The intro
+histogram had been taken at 75% coverage, which left this rare scene out. A
+histogram of the two bursts added to the selection compiled it (2.8% and 0.7%
+interpreted after): device, logs 17 → 18, those windows' heaviest frame
+229% → 104% and 198% → 94%, no time lost, underruns 590/603 → 0.
+
 ### 4.6 SPC700: batch the opcodes inside the Thumb-2 engine
 
 In Yoshi's Island the SPC700 cost is real driver work, not polling: a host

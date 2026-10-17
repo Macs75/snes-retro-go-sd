@@ -295,9 +295,15 @@ void cpu_saveload(Cpu *cpu, SaveLoadFunc *func, void *ctx) {
 #if defined(SNES_BUS_IN_ITCM) && !defined(SNES_THUMB2_CPU)
 __attribute__((section(".itcm_snes_interp.thumb2.bus")))
 #endif
+#ifdef HOST_BUILD
+uint32_t snes_fs_cpu;   /* FRAME_STATS (main_snes.c): 65816 instructions this frame */
+#endif
 int SNES_RUNOPCODE_IMPL(Cpu* cpu) {
   cpu->cyclesUsed = 0;
   if(cpu->stopped) return 1;
+#ifdef HOST_BUILD
+  snes_fs_cpu++;
+#endif
 
   if(cpu->waiting) {
     /* WAI holds the CPU until an interrupt is pending — including one the I flag

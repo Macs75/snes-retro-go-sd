@@ -249,6 +249,7 @@ static int apu_idleSkipCycles(Apu* apu, int budget) {
  * pc rows are "pc count opcode cum% bytes" with the 6 ARAM bytes at pc then
  * (tools/spc_hist_report.py groups them into loops). */
 uint32_t apu_hist_frame;   /* counted by main_snes.c at each frame end */
+uint32_t snes_fs_spc;      /* FRAME_STATS (main_snes.c): SPC700 opcodes this frame */
 static int apu_h_on = -1;
 static uint32_t apu_h_f0, apu_h_f1 = 0xffffffffu, apu_h_fn0 = 0xffffffffu, apu_h_fn1;
 static uint32_t apu_h_pc[0x10000];
@@ -402,6 +403,7 @@ void apu_run(Apu* apu, int cyclesToRun) {
         apu->cpuCyclesLeft = spc_runOpcode(apu->spc);
 #endif
 #ifdef APU_HIST
+        snes_fs_spc++;
         if (apu_h_live(apu)) { apu_h_pc[h_pc]++; apu_h_ops++; apu_h_opcyc += apu->cpuCyclesLeft; }
 #endif
       }

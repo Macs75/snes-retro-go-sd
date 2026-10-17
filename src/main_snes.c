@@ -3183,6 +3183,21 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
       extern uint32_t apu_hist_frame;   /* APU_HIST's frame window (snes/apu.c) */
       apu_hist_frame++;
     }
+    {   /* FRAME_STATS=file: per emulated frame, the work each part did -- 65816
+         * and SPC700 instructions, general-DMA bytes, GSU instructions -- to
+         * find what a device PROF window's heaviest frame was made of
+         * (tools/frame_spikes.py) */
+      extern uint32_t snes_fs_cpu, snes_fs_spc, snes_fs_dma;
+      extern unsigned long gsu_fs_ops;
+      static FILE *fs_f;
+      static int fs_on = -1;
+      static uint32_t fs_n;
+      if (fs_on < 0) { const char *e = getenv("FRAME_STATS"); fs_f = e ? fopen(e, "w") : NULL; fs_on = fs_f != NULL; }
+      if (fs_on) fprintf(fs_f, "%lu %lu %lu %lu %lu\n", (unsigned long)++fs_n, (unsigned long)snes_fs_cpu,
+                         (unsigned long)snes_fs_spc, (unsigned long)snes_fs_dma, gsu_fs_ops);
+      snes_fs_cpu = snes_fs_spc = snes_fs_dma = 0;
+      gsu_fs_ops = 0;
+    }
 #endif
     {   /* SNES_FRAMES=N: exit normally after N emulated frames (closes a recording) */
       static long host_frames_left = -2;

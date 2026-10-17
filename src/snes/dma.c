@@ -36,6 +36,7 @@ static void dma_transferByte(Dma* dma, uint16_t aAdr, uint8_t aBank, uint8_t bAd
  * transfers and bytes, and per HDMA channel target the bytes; written at exit
  * with the frames seen (tools/dma_hist_report.py). */
 extern uint32_t apu_hist_frame;   /* counted by main_snes.c at each frame end */
+uint32_t snes_fs_dma;             /* FRAME_STATS (main_snes.c): general-DMA bytes this frame */
 #define DMA_H_N 256
 static struct { uint32_t key; unsigned long n, bytes; } dma_h[DMA_H_N];
 static int dma_h_on = -1;
@@ -344,6 +345,7 @@ static void dma_runAtoB(Dma* dma, DmaChannel* ch) {
 #endif
   }
 #ifdef DMA_HIST
+  snes_fs_dma += size ? size : 0x10000u;
   dma_h_add(0, aBank, bAdr, ch->mode, (aBank == 0x7e || aBank == 0x7f) ? 0 : src ? (cart->gsu ? 2 : 1) : paged ? 5 : 3,
             size ? size : 0x10000u, dma_h_vmain(sn, bAdr, oi));
 #endif
@@ -432,6 +434,7 @@ void dma_doDma(Dma* dma) {
      * state from the struct between bytes, byte-for-byte as before. This
      * direction (reading PPU/APU back into RAM) is rare; the hot path is A->B. */
 #ifdef DMA_HIST
+    snes_fs_dma++;
     dma_h_add(0, ch->aBank, ch->bAdr, ch->mode, 4, 1, 0);
 #endif
     dma_transferByte(
