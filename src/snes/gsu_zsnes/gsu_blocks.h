@@ -43,6 +43,17 @@ static inline u4 gsu_blk_cart_id(u1 const *const rom, u4 const len)
 extern struct gsu_blk const *gsu_blk_tab; /* NULL: no blocks for this game */
 extern u4 gsu_blk_mask;                   /* table size - 1 */
 
+/* One bit per (program bank, PC) hash, set for every key in the table: a clear
+   bit means no chain starts there, so MainLoop skips the table probe. That is
+   what every interpreted instruction asks, and a miss in the table costs a
+   multiply and two or more probes. A set bit only means "maybe". */
+#define GSU_BLK_FILT_BITS 4096u
+extern u4 gsu_blk_filt[GSU_BLK_FILT_BITS / 32u];
+static inline __attribute__((always_inline)) u4 gsu_blk_filt_bit(u4 const bank, u4 const pc)
+{
+    return (pc ^ (bank << 7)) & (GSU_BLK_FILT_BITS - 1u);
+}
+
 /* Point gsu_blk_tab at the table of the loaded game, if its ROM matches. Needs
    the bank tables (InitFxTables) filled. */
 void gsu_blk_select(void);

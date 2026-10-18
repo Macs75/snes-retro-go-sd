@@ -512,8 +512,8 @@ the pagemap path is "HiROM, no coprocessor"; the Mode 7 paths trigger on PPU
 register state, not on which game is running.
 
 **The one exception is the Super FX (§4.5).** Seven titles (plus regional
-copies) use the GSU, and generic speed-ups of the interpreter were exhausted
-(the one-switch dispatch lost on the device: `experiments/superfx-gsu-dispatch-switch.md`).
+copies) use the GSU, and a generic speed-up of the interpreter's dispatch did
+not pay (the one-switch dispatch lost on the device: `experiments/superfx-gsu-dispatch-switch.md`).
 There, per-game compiled block code is allowed — gated on a hash of the exact
 ROM bytes it was compiled from, with the generic interpreter as the exact
 fallback.

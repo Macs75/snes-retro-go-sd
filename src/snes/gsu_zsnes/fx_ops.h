@@ -2384,10 +2384,14 @@ unsigned long gsu_fs_ops;   /* FRAME_STATS (main_snes.c): GSU instructions this 
 
 static inline __attribute__((always_inline)) u4 gsu_blk_run(void)
 {
-    u4 const pc = FxSeamPC, cx = FxSeamCX;
+    u4 const pc = FxSeamPC, bank = SfxPBR & 0x7Fu;
+    u4 const f = gsu_blk_filt_bit(bank, pc);
+    if (!(gsu_blk_filt[f >> 5] & (1u << (f & 31u))))
+        return 0;   /* no chain starts at this PC */
+    u4 const cx = FxSeamCX;
     if (pc > 0xFFFFu || cx > 0xFFu || FxSeamSrc != SfxR0 || FxSeamDst != SfxR0)
         return 0;
-    u4 const key = ((SfxPBR & 0x7Fu) << 24) | (pc << 8) | cx;
+    u4 const key = (bank << 24) | (pc << 8) | cx;
     for (u4 h = (key * 2654435761u) >> 16;; h++) {
         struct gsu_blk const *const e = &gsu_blk_tab[h & gsu_blk_mask];
         if (!e->key)

@@ -22,6 +22,7 @@
 
 struct gsu_blk const *gsu_blk_tab;
 u4 gsu_blk_mask;
+u4 gsu_blk_filt[GSU_BLK_FILT_BITS / 32u];
 
 /* FNV-1a of the ROM bytes a game's blocks were compiled from, read as the GSU
    sees them; the runs are bank << 24 | address << 8 | count. */
@@ -52,6 +53,14 @@ static int gsu_blk_use(struct gsu_blk_game const *const g)
         return 0;
     gsu_blk_tab = g->tab;
     gsu_blk_mask = g->mask;
+    for (u4 i = 0; i != GSU_BLK_FILT_BITS / 32u; ++i) gsu_blk_filt[i] = 0;
+    for (u4 i = 0; i <= g->mask; ++i) {
+        u4 const key = g->tab[i].key;
+        if (key) {
+            u4 const f = gsu_blk_filt_bit(key >> 24, (key >> 8) & 0xFFFFu);
+            gsu_blk_filt[f >> 5] |= 1u << (f & 31u);
+        }
+    }
     return 1;
 }
 
