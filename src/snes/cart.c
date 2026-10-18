@@ -10,12 +10,25 @@
 #include "cx4_hle.h"
 #include "sdd1.h"
 #include "spc7110.h"
+#include "gsu.h"
 #include "snes_gnw_alloc.h"
 
 /* Weak fallbacks so build scripts that list snes/*.c files explicitly and
  * predate dsp1_hle.c still link; without the strong definitions a DSP cart
  * just behaves as before (status reads 0). Harness globs pick up the real
  * implementation automatically. */
+/* main_snes.c overrides this on the device, where each coprocessor's code is an
+   overlay loaded only for its carts; elsewhere all of it is linked in. */
+__attribute__((weak)) bool snes_copro_overlay_ready(int kind) { (void)kind; return true; }
+
+/* A chip whose code is not loaded is not attached: cart->x stays NULL, and
+   every call into its code is behind that pointer. */
+static bool cart_copro_ready(int kind, const char *name) {
+  if (snes_copro_overlay_ready(kind)) return true;
+  printf("snes: %s code not loaded, chip not attached\n", name);
+  return false;
+}
+
 __attribute__((weak)) void dsp1_reset(Dsp1* d) { (void)d; }
 __attribute__((weak)) uint8_t dsp1_readDR(Dsp1* d) { (void)d; return 0; }
 __attribute__((weak)) void dsp1_writeDR(Dsp1* d, uint8_t v) { (void)d; (void)v; }
@@ -58,6 +71,20 @@ __attribute__((weak)) uint8_t spc7110_read(Spc7110* s, uint32_t a, const uint8_t
 __attribute__((weak)) Spc7110* spc7110_alloc(void) { return NULL; }
 __attribute__((weak)) uint32_t spc7110_size(void) { return 0; }
 
+__attribute__((weak)) Gsu* gsu_alloc(void) { return NULL; }
+__attribute__((weak)) void gsu_saveload(Gsu* g, SaveLoadFunc* func, void* ctx) { (void)g; (void)func; (void)ctx; }
+__attribute__((weak)) void gsu_reset(Gsu* g) { (void)g; }
+__attribute__((weak)) void gsu_link(Gsu* g, Snes* s, uint8_t* rom, uint32_t rs,
+                                    uint8_t* ram, uint32_t as) {
+  (void)g; (void)s; (void)rom; (void)rs; (void)ram; (void)as;
+}
+__attribute__((weak)) uint8_t gsu_mmio_read(Gsu* g, uint16_t a) { (void)g; (void)a; return 0; }
+__attribute__((weak)) void gsu_mmio_write(Gsu* g, uint16_t a, uint8_t v) { (void)g; (void)a; (void)v; }
+__attribute__((weak)) bool gsu_cpu_ram_blocked(Gsu* g) { (void)g; return false; }
+__attribute__((weak)) bool gsu_cpu_rom_blocked(Gsu* g) { (void)g; return false; }
+__attribute__((weak)) void gsu_runLine(Gsu* g) { (void)g; }
+__attribute__((weak)) void gsu_vblank(Gsu* g) { (void)g; }
+
 #ifdef GNW_SNES_CORE
 #include <assert.h>
 #include "gw_malloc.h"
@@ -67,7 +94,9 @@ __attribute__((weak)) uint32_t spc7110_size(void) { return 0; }
  * leaving the RAM_EMU pool to the hot data. The RAM_EMU pool is the fallback
  * when AHB is short. Allocated once (the core exits by switching app, nothing
  * is freed); a later cart_load reuses it. */
-enum { kGnwCartSramMax = 0x8000 };
+/* 64 KB: the largest Super FX Game Pak RAM (Doom, Stunt Race FX, Winter
+ * Gold); normal carts request their header size, at most 32 KB in practice. */
+enum { kGnwCartSramMax = 0x10000 };
 static uint8_t *gnw_cart_sram;
 static int gnw_cart_sram_size;
 #endif
@@ -160,6 +189,7 @@ Cart* cart_init(Snes* snes) {
   cart->cx4 = NULL;
   cart->sdd1 = NULL;
   cart->spc7110 = NULL;
+  cart->gsu = NULL;
   cart->romPageOk = 0;
   memset(cart->bankLowRom, 0, sizeof(cart->bankLowRom));
   for(int b = 0; b < 128; b++) cart->bankBase[b] = NULL;
@@ -167,6 +197,7 @@ Cart* cart_init(Snes* snes) {
 }
 
 void cart_attachDsp1(Cart* cart) {
+  if (!cart_copro_ready(SNES_COPRO_DSP1, "DSP-1")) return;
   if (cart->dsp1 == NULL) cart->dsp1 = dsp1_alloc();
   if (cart->dsp1) {
     dsp1_reset(cart->dsp1);
@@ -181,6 +212,7 @@ void cart_attachDsp1(Cart* cart) {
 }
 
 void cart_attachCx4(Cart* cart) {
+  if (!cart_copro_ready(SNES_COPRO_CX4, "Cx4")) return;
   if (cart->cx4 == NULL) cart->cx4 = cx4_alloc();
   if (cart->cx4) {
     cx4_init(cart->cx4);
@@ -196,6 +228,7 @@ void cart_attachCx4(Cart* cart) {
 }
 
 void cart_attachSdd1(Cart* cart) {
+  if (!cart_copro_ready(SNES_COPRO_SDD1, "S-DD1")) return;
   if (cart->sdd1 == NULL) cart->sdd1 = sdd1_alloc();
   if (cart->sdd1) {
     sdd1_reset(cart->sdd1);
@@ -215,6 +248,7 @@ void cart_attachSdd1(Cart* cart) {
 }
 
 void cart_attachSpc7110(Cart* cart) {
+  if (!cart_copro_ready(SNES_COPRO_SPC7110, "SPC7110")) return;
   if (cart->spc7110 == NULL) cart->spc7110 = spc7110_alloc();
   if (cart->spc7110) {
     spc7110_reset(cart->spc7110);
@@ -233,6 +267,27 @@ void cart_attachSpc7110(Cart* cart) {
 #endif
 }
 
+void cart_attachGsu(Cart* cart) {
+  if (!cart_copro_ready(SNES_COPRO_GSU, "Super FX")) return;
+  if (cart->gsu == NULL) cart->gsu = gsu_alloc();
+  if (cart->gsu) {
+    /* The GSU shares ROM and Game Pak RAM with the 65816, so the fetch-page
+     * cache and DMA ROM fast path must not bypass it. */
+    cart->romPageOk = 0;
+    cart_buildBankBases(cart);
+    gsu_link(cart->gsu, cart->snes, cart->rom, cart->romSize,
+             cart->ram, cart->ramSize);
+    gsu_reset(cart->gsu);
+#ifdef GNW_SNES_CORE
+    printf("snes: Super FX (GSU) attached (%d KB ROM, %d KB RAM)\n",
+           (int)(cart->romSize / 1024), (int)(cart->ramSize / 1024));
+#endif
+  }
+#ifdef GNW_SNES_CORE
+  else printf("snes: GSU alloc failed\n");
+#endif
+}
+
 void cart_free(Cart* cart) {
   snes_zfree(cart);
 }
@@ -243,10 +298,12 @@ void cart_reset(Cart* cart) {
   if (cart->cx4) cx4_init(cart->cx4);
   if (cart->sdd1) sdd1_reset(cart->sdd1);
   if (cart->spc7110) spc7110_reset(cart->spc7110);
+  if (cart->gsu) gsu_reset(cart->gsu);
   /* Fold the DMA ROM fast path's run-fixed conditions now that coprocessors
    * (if any) are attached. */
   cart->romDmaDirect = (cart->type == 2 && cart->romPageOk &&
-                        !cart->dsp1 && !cart->cx4 && !cart->sdd1 && !cart->spc7110);
+                        !cart->dsp1 && !cart->cx4 && !cart->sdd1 &&
+                        !cart->spc7110 && !cart->gsu);
 }
 
 void cart_saveload(Cart *cart, SaveLoadFunc *func, void *ctx) {
@@ -258,6 +315,9 @@ void cart_saveload(Cart *cart, SaveLoadFunc *func, void *ctx) {
   if (cart->cx4) func(ctx, cart->cx4, cx4_size());
   if (cart->sdd1) func(ctx, cart->sdd1, sdd1_size());
   if (cart->spc7110) func(ctx, cart->spc7110, spc7110_size());
+  /* Super FX: the GSU's registers, flags and cache are the ZSNES core's
+   * globals; gsu_saveload streams them (the Game Pak RAM is cart->ram above). */
+  if (cart->gsu) gsu_saveload(cart->gsu, func, ctx);
 }
 
 void cart_load(Cart* cart, int type, uint8_t* rom, int romSize, int ramSize) {
@@ -334,7 +394,68 @@ void cart_write(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val) {
 
 void DumpCpuHistory();
 
+/* Super FX CPU-side map: ROM at $00-$3F/$80-$BF:$8000-$FFFF (LoROM halves) and
+ * $40-$5F/$C0-$DF:$0000-$FFFF (64 KB-linear view of the same image); Game Pak
+ * RAM at $70-$71:$0000-$FFFF and $00-$3F/$80-$BF:$6000-$7FFF. While the GSU owns
+ * the shared bus the CPU sees open bus. Returns 1 and sets *out if it handled
+ * the address. */
+/* Out of line: cart_read sits in the fixed BUS window (snes_core.ld), and
+ * normal carts pay only the cart->gsu test. */
+__attribute__((noinline))
+static int cart_gsu_read(Cart* cart, uint8_t bank, uint16_t adr, uint8_t* out) {
+  uint8_t b = bank & 0x7f;                  /* fold $80-$FF mirrors */
+  /* GSU registers and cache $3000-$32FF: here rather than in snes_read, which
+   * sits in the fixed BUS window with every other game's hot handlers */
+  if(b <= 0x3f && adr >= 0x3000 && adr < 0x3300) {
+    *out = gsu_mmio_read(cart->gsu, adr);
+    return 1;
+  }
+  if(cart->ramSize > 0) {
+    if(b >= 0x70 && b <= 0x73) {            /* $70-$73 Game Pak RAM (4x64KB) */
+      *out = gsu_cpu_ram_blocked(cart->gsu) ? cart->snes->openBus
+           : cart->ram[(((b & 3) << 16) | adr) & (cart->ramSize - 1)];
+      return 1;
+    }
+  }
+  /* $00-$3F:$6000-$7FFF mirrors the first 8 KB of Game Pak RAM into every bank
+   * (the Super FX MMC window the CPU and GSU share as scratch). bsnes maps this
+   * to Game Pak RAM, not WRAM; ZSNES's map_sfx routes it to WRAM, which is an
+   * acknowledged inaccuracy and corrupted Yoshi's story text + title transition
+   * here. The fixed first-8KB mirror (not a banked b*8KB window) is what renders
+   * correctly. */
+  if(b <= 0x3f && adr >= 0x6000 && adr < 0x8000 && cart->ramSize > 0) {
+    *out = cart->ram[(adr & 0x1fff) & (cart->ramSize - 1)];
+    return 1;
+  }
+  if(b <= 0x3f && adr >= 0x8000) {          /* LoROM halves */
+    *out = gsu_cpu_rom_blocked(cart->gsu) ? cart->snes->openBus
+         : cart->rom[cart_romIndex(cart, ((uint32_t)b << 15) | (adr & 0x7fff))];
+    return 1;
+  }
+  if(b >= 0x40 && b <= 0x5f) {              /* 64 KB-linear */
+    *out = gsu_cpu_rom_blocked(cart->gsu) ? cart->snes->openBus
+         : cart->rom[cart_romIndex(cart, ((uint32_t)(b & 0x1f) << 16) | adr)];
+    return 1;
+  }
+  return 0;
+}
+
+const uint8_t* cart_gsu_dma_ram(Cart* cart, uint8_t bank, uint32_t* ofs, uint32_t* mask) {
+  uint8_t b = bank & 0x7f;
+  /* cart_gsu_read's $70-$73 case, the first one that matches in those banks */
+  if(!cart->gsu || cart->ramSize == 0 || b < 0x70 || b > 0x73 || gsu_cpu_ram_blocked(cart->gsu))
+    return NULL;
+  *ofs = (uint32_t)(b & 3) << 16;
+  *mask = (uint32_t)cart->ramSize - 1;
+  return cart->ram;
+}
+
 static uint8_t cart_readLorom(Cart* cart, uint8_t bank, uint16_t adr) {
+  if(cart->gsu) {
+    uint8_t v;
+    if(cart_gsu_read(cart, bank, adr, &v)) return v;
+    return cart->snes->openBus;
+  }
   /* S-DD1 MMC/decompress window on upper banks. Keep full 24-bit address
    * for DMA source address matching in sdd1_read(). */
   if(cart->sdd1 && bank >= 0xc0) {
@@ -376,7 +497,30 @@ static uint8_t cart_readLorom(Cart* cart, uint8_t bank, uint16_t adr) {
 #endif
 }
 
+/* Super FX CPU-side writes: Game Pak RAM only (see cart_gsu_read). Out of
+ * line for the same reason. */
+__attribute__((noinline))
+static void cart_gsu_write(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val) {
+  uint8_t b = bank & 0x7f;
+  if(b <= 0x3f && adr >= 0x3000 && adr < 0x3300) {   /* GSU registers / cache */
+    gsu_mmio_write(cart->gsu, adr, val);
+    return;
+  }
+  if(b <= 0x3f && adr >= 0x6000 && adr < 0x8000) {
+    if(cart->ramSize > 0)            /* first-8KB Game Pak RAM mirror; see cart_gsu_read */
+      cart->ram[(adr & 0x1fff) & (cart->ramSize - 1)] = val;
+  } else if(cart->ramSize > 0 && !gsu_cpu_ram_blocked(cart->gsu) &&
+            b >= 0x70 && b <= 0x73) {
+    cart->ram[(((b & 3) << 16) | adr) & (cart->ramSize - 1)] = val;
+  }
+  /* ROM region is not writable */
+}
+
 static void cart_writeLorom(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val) {
+  if(cart->gsu) {
+    cart_gsu_write(cart, bank, adr, val);
+    return;
+  }
   if(((bank >= 0x70 && bank < 0x7e) || bank >= 0xf0) &&
      ((cart->romSize >= 0x200000 && adr < 0x8000) || cart->romSize < 0x200000) &&
      cart->ramSize > 0) {

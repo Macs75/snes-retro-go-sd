@@ -15,7 +15,7 @@ IdleSkip *g_idle_sites = s_sites_static;
 IdleSkip *g_idlep = &s_sites_static[0];
 #endif
 IdleStats g_idle_stats;
-uint8_t g_idle_budget;
+uint8_t g_idle_budget, g_idle_gsu_budget;
 static uint32_t s_frame;
 
 #ifdef TARGET_GNW
@@ -59,7 +59,7 @@ void idle_reset(void) {
   for (int i = 0; i < IDLE_SITES; i++) site_clear(&g_idle_sites[i]);
   g_idlep = &g_idle_sites[0];
   g_idle_stats = (IdleStats){0};
-  g_idle_budget = 0;
+  g_idle_budget = g_idle_gsu_budget = 0;
   s_frame = 0;
   for (int i = 0; i < 4; i++) s_reject[i] = 0xffffffffu;
   s_reject_i = 0;
@@ -71,7 +71,7 @@ static uint8_t mirror_bank(uint8_t bank) {
   return (uint8_t)(bank ^ 0x80);
 }
 
-enum { MEM_NO = 0, MEM_WRAM, MEM_ROM, MEM_RDNMI };
+enum { MEM_NO = 0, MEM_WRAM, MEM_ROM, MEM_RDNMI, MEM_GSUSFR };
 
 /* What a read at bank:off reaches. WRAM gives its offset into Snes.ram. ROM is
  * accepted only for the two plain mappings, where it is constant. $4210 is
@@ -85,6 +85,12 @@ static int classify(const Snes *s, uint8_t bank, uint16_t off, uint32_t *ram_off
   if (bank == 0x7e || bank == 0x7f) { *ram_off = ((uint32_t)(bank & 1) << 16) | off; return MEM_WRAM; }
   if (b < 0x40 && off < 0x2000)      { *ram_off = off; return MEM_WRAM; }
   if (b < 0x40 && off == 0x4210)     return MEM_RDNMI;
+  if (s->cart && s->cart->gsu) {            /* Super FX: its own map (cart_gsu_read) */
+    if (b < 0x40 && (off == 0x3030 || off == 0x3031)) return MEM_GSUSFR;
+    if (b < 0x40 && off >= 0x8000) return MEM_ROM;
+    if (b >= 0x40 && b < 0x60) return MEM_ROM;
+    return MEM_NO;                          /* Game Pak RAM, other GSU registers */
+  }
   uint8_t type = s->cart ? s->cart->type : 0;
   if (type == 1) {                          /* LoROM */
     if (b < 0x7e && off >= 0x8000) return MEM_ROM;
@@ -173,6 +179,9 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
   int nb = 0, nf = 0;
   bool saw_pc = false, modx = false, mody = false, sep_rep = false;
   out->nmem = 0; out->nidx = 0; out->rdnmi = false; out->uses_db = false; out->uses_dp = false;
+  out->gsu_poll = false;
+  out->gsu_and = 0;
+  uint16_t gsu_lda_next = 0xffff;                  /* the instruction after a status LDA */
   uint32_t ro;
   const int ccls = classify(s, bank, head, &ro);
   if (ccls != MEM_ROM && ccls != MEM_WRAM) return false;
@@ -199,6 +208,12 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
       default: return false;
     }
     modx |= in.modx; mody |= in.mody;
+    if (q == gsu_lda_next && op == 0x29) {            /* AND #imm right after the status LDA */
+      uint16_t imm = code_at(s, bank, (uint16_t)(q + 1));
+      if (w == 2) imm |= (uint16_t)(code_at(s, bank, (uint16_t)(q + 2)) << 8);
+      if (w == out->gsu_w)
+        out->gsu_and = out->gsu_w == 1 && out->gsu_base == 0x3031 ? (uint16_t)(imm << 8) : imm;
+    }
     if (in.kind == K_IMM8) {                                   /* SEP/REP */
       if (cpu->e) return false;
       uint8_t v = code_at(s, bank, (uint16_t)(q + 1));
@@ -238,6 +253,17 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
           if (c == MEM_RDNMI) {
             if (w != 1) return false;                            /* a 16-bit read takes $4211 too */
             out->rdnmi = true;
+          }
+          if (c == MEM_GSUSFR) {
+            if (k == 0) {                                        /* one GSU status read a loop */
+              if (out->gsu_poll) return false;
+              out->gsu_poll = true;
+              out->gsu_pc = q;
+              out->gsu_base = ma;
+              out->gsu_w = (uint8_t)w;
+              out->gsu_bit = op == 0x2c || op == 0x24 || op == 0x3c || op == 0x34;
+              if (op == 0xad || op == 0xaf) gsu_lda_next = (uint16_t)(q + len);   /* LDA abs / long */
+            }
           }
           if (c == MEM_WRAM) {
             int j;
@@ -312,7 +338,7 @@ bool idle_prepare_reads(Snes *s, IdleSkip *g) {
       uint16_t a = (uint16_t)(ea + k);
       if (a < ea) return false;
       int c = classify(s, mb, a, &off);
-      if (c == MEM_NO || c == MEM_RDNMI) return false;
+      if (c == MEM_NO || c == MEM_RDNMI || c == MEM_GSUSFR) return false;
       if (c == MEM_WRAM) {
         if (n == (int)(sizeof g->pmem_off / sizeof g->pmem_off[0])) return false;
         g->pmem_off[n++] = off;
@@ -461,21 +487,69 @@ bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
 }
 #endif
 
+static void idle_sample(Snes *s);
 void idle_nmi_sample(Snes *s) {
-  Cpu *cpu = s->cpu;
   g_idle_budget = 2;
+  g_idle_gsu_budget = 2;
   s_frame++;
+  idle_sample(s);
+}
+
+/* A loop can be entered in more than one environment (Yoshi's Island polls
+ * the GSU from the same WRAM loop with DB $01 and with DB $03 every frame):
+ * each is a site of its own, so "already active" means the environment too. */
+void idle_gsu_poll_sample(Snes *s) {
+  const Cpu *cpu = s->cpu;
+  if (site_has(&g_idle, cpu->k, cpu->pc) && idle_env_ok(cpu, &g_idle)) return;   /* already the active site */
+  idle_sample(s);
+}
+
+void idle_irq_sample(Snes *s) {
+  const Cpu *cpu = s->cpu;
+  if (site_has(&g_idle, cpu->k, cpu->pc) && idle_env_ok(cpu, &g_idle)) return;
+  idle_sample(s);
+}
+
+void idle_line_select(Snes *s) {
+  const Cpu *cpu = s->cpu;
+  if (site_has(&g_idle, cpu->k, cpu->pc) && idle_env_ok(cpu, &g_idle)) return;
+  for (int i = 0; i < IDLE_SITES; i++) {
+    IdleSkip *g = &g_idle_sites[i];
+    if (g->len == 0 && g->head == 0xffff) continue;
+    if (site_has(g, cpu->k, cpu->pc) && idle_env_ok(cpu, g) && idle_code_ok(s, g)) { g_idlep = g; return; }
+  }
+}
+
+#ifdef HOST_BUILD
+/* IDLE_TRACE=n: log the first n site decisions (why a site is re-decoded) */
+#include <stdlib.h>
+static long idle_trace_n = -2;
+#define IDLE_TRACE(...) do { if (idle_trace_n == -2) { const char *e_ = getenv("IDLE_TRACE"); idle_trace_n = e_ ? atol(e_) : 0; } \
+                             if (idle_trace_n > 0) { idle_trace_n--; printf(__VA_ARGS__); } } while (0)
+#else
+#define IDLE_TRACE(...) do { } while (0)
+#endif
+
+static void idle_sample(Snes *s) {
+  Cpu *cpu = s->cpu;
   if (cpu->stopped) return;
   const uint8_t bank = cpu->k;
   const uint16_t pc = cpu->pc;
-  /* the pc is in a known site: make it the active one, unless its decode
-   * environment changed (then it is decoded again, in the same slot) */
+  /* the pc is in a known site: make it the active one. A site of the same
+   * loop decoded in another environment (M/X/E, DB, DP) stays: this one gets
+   * a slot of its own. Only a site whose code changed is decoded again in
+   * place. */
   int slot = -1;
   for (int i = 0; i < IDLE_SITES; i++) {
     IdleSkip *g = &g_idle_sites[i];
     if (g->len == 0 && g->head == 0xffff) continue;
     if (!site_has(g, bank, pc)) continue;
     if (idle_env_ok(cpu, g) && idle_code_ok(s, g)) { g->used = s_frame; g_idlep = g; return; }
+    if (idle_code_ok(s, g)) continue;   /* another environment of this loop */
+    IDLE_TRACE("IDLE: frame %lu %02x:%04x in slot %d (%02x:%04x+%u) but %s: cpu e%d m%d x%d db%02x dp%04x, site e%d m%d x%d db%02x(%d) dp%04x(%d)\n",
+               (unsigned long)s_frame, bank, pc, i, g->bank, g->head, g->len,
+               !idle_env_ok(cpu, g) ? "env changed" : "code changed", cpu->e, cpu->mf, cpu->xf, cpu->db, cpu->dp,
+               g->e, g->mf, g->xf, g->db, g->uses_db, g->dp, g->uses_dp);
     slot = i;
     break;
   }
@@ -495,6 +569,9 @@ void idle_nmi_sample(Snes *s) {
         }
       }
       cand.used = s_frame;
+      IDLE_TRACE("IDLE: frame %lu rearm %02x:%04x+%u gsu_poll=%d code_ram=%d in slot %d env e%d m%d x%d db%02x(%d) dp%04x(%d)\n",
+                 (unsigned long)s_frame, bank, cand.head, cand.len, cand.gsu_poll, cand.code_ram, slot,
+                 cand.e, cand.mf, cand.xf, cand.db, cand.uses_db, cand.dp, cand.uses_dp);
       g_idle_sites[slot] = cand;
       g_idlep = &g_idle_sites[slot];
       g_idle_stats.rearms++;
@@ -518,6 +595,7 @@ void idle_nmi_sample(Snes *s) {
     return;
   }
 #endif
+  IDLE_TRACE("IDLE: frame %lu reject %02x:%04x (no idle loop decoded there)\n", (unsigned long)s_frame, bank, pc);
   g_idle_stats.rejects++;
   s_reject[s_reject_i++ & 3] = pc24;
 }

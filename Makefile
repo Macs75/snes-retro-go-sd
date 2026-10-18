@@ -39,11 +39,20 @@ SNES_SPC_IDLE_SKIP ?= 1
 # silent DSP voices leave the per-sample loop, caught up when they wake (src/snes/dsp.c)
 SNES_DSP_IDLE_SKIP_VOICE ?= 1
 SNES_BUS_IN_ITCM ?= 1
+# stretcher path only: frames of audio-tick debt the loop may repay by not waiting; 0 = none
+SNES_CATCHUP_MAX ?= 3
+# 1 = no audio stretcher: each frame's samples go straight to the ISR ring, which the
+# frame wait keeps SNES_DIRECT_SPARE frames ahead; silence when it runs dry. 0 = the stretcher
+SNES_AUDIO_DIRECT ?= 1
 # PERF=1: per-component cycle profiler, PROF/... log lines every 120 frames (src/snes_perf.h)
 PERF ?= 0
 PERF_PPU ?= 0
 PERF_AUDIO ?= 0
 PERF_CPU ?= 0
+PERF_CPUB ?= 0
+PERF_GSU ?= 0
+PERF_GSU_PLOT ?= 0
+PERF_SPC ?= 0
 
 CORE_C_SOURCES := \
 $(SNES)/apu.c \
@@ -55,6 +64,11 @@ $(SNES)/dsp1_hle.c \
 $(SNES)/cx4_hle.c \
 $(SNES)/sdd1.c \
 $(SNES)/spc7110.c \
+$(SNES)/gsu.c \
+$(SNES)/gsu_zsnes/gsu_core.c \
+$(SNES)/gsu_zsnes/gsu_blocks.c \
+$(SNES)/gsu_zsnes/gsu_blocks_yoshi.c \
+$(SNES)/gsu_zsnes/gsu_blocks_starfox.c \
 $(SNES)/input.c \
 $(SNES)/ppu.c \
 $(SNES)/snes.c \
@@ -122,6 +136,29 @@ endif
 ifeq ($(PERF_CPU),1)
 CORE_C_DEFS += -DSNES_PERF_CPU -DSNES_OP_CENSUS=1
 endif
+# PERF_CPUB=1 splits the 65816 figure with the engine batch left on: one probe
+# pair per batch, per opcode handed back to C, per frame event and per spin-bake
+# span (PROF/cpub). Use it instead of PERF_CPU to measure the normal path.
+ifeq ($(PERF_CPUB),1)
+CORE_C_DEFS += -DSNES_PERF_CPUB
+endif
+# PERF_GSU=1 splits the Super FX figure: cycles in the compiled chains and how
+# many GSU instructions they ran, for the whole frame and for the vblank
+# catch-up. Diagnostic: two timer reads per chain call. PERF_GSU_PLOT=1 adds
+# the cycles in PLOT (two more per pixel, inlined into every chain: it grows a
+# game's block code by ~3 KB, which Star Fox's may not have room for).
+ifeq ($(PERF_GSU),1)
+CORE_C_DEFS += -DSNES_PERF_GSU
+ifeq ($(PERF_GSU_PLOT),1)
+CORE_C_DEFS += -DSNES_PERF_GSU_PLOT
+endif
+endif
+# PERF_SPC=1 splits the SPC700 figure: cycles inside the Thumb-2 engine (net of
+# its DSP ticks), in its C fallback, and apu_run's loop as the rest.
+# Diagnostic: two timer reads per engine call and per fallback opcode.
+ifeq ($(PERF_SPC),1)
+CORE_C_DEFS += -DSNES_PERF_SPC
+endif
 # PERF_AUDIO=1 adds the stretcher / audio-rate diagnostics
 ifeq ($(PERF_AUDIO),1)
 CORE_C_DEFS += -DSNES_PERF_AUDIO
@@ -133,6 +170,7 @@ endif
 ifeq ($(SNES_SPIN_BAKE),1)
 CORE_C_DEFS += -DSNES_SPIN_BAKE
 endif
+CORE_C_DEFS += -DSNES_CATCHUP_MAX=$(SNES_CATCHUP_MAX) -DSNES_AUDIO_DIRECT=$(SNES_AUDIO_DIRECT)
 ifeq ($(SNES_IDLE_SKIP),1)
 CORE_C_DEFS += -DSNES_IDLE_SKIP
 endif
@@ -211,6 +249,8 @@ pack: $(TARGET_BIN)
 		--header-logo $(HEADER_LOGO) \
 		--logo-invert \
 		--out $(PACKED_BIN)
+	$(V)python3 tools/append_overlays.py $(TARGET_ELF) $(PACKED_BIN) \
+		--nm $(subst objcopy,nm,$(CP)) --objcopy $(CP)
 
 all: pack
 

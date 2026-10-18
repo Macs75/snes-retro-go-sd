@@ -40,6 +40,10 @@
 #define APU_OFF_DSP           4          /* Dsp* dsp          */
 #define APU_OFF_RAM           8          /* uint8_t ram[0x10000] -- base offset */
 #define APU_OFF_ROMREADABLE   0x10008    /* bool romReadable  */
+#define APU_OFF_CYCLES        0x1000C    /* uint32_t cycles   */
+#define APU_OFF_CYCLES_PAGE   0x10000    /* APU_OFF_CYCLES in two Thumb-2 immediates */
+#define APU_OFF_CYCLES_IN_PAGE 0xC
+#define APU_OFF_CPUCYCLESLEFT 0x10029    /* uint8_t cpuCyclesLeft */
 /* ram occupies [8 .. 0x10007] */
 
 #endif

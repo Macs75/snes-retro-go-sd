@@ -28,6 +28,8 @@ extern uint32_t snes_perf_ppu, snes_perf_ppu_lines;
 extern uint32_t snes_perf_apu, snes_perf_apu_calls;   /* apu_run, inclusive (SPC700 + DSP) */
 extern uint32_t snes_perf_dsp;                        /* DSP ticks inside apu_run */
 extern uint32_t snes_perf_dma, snes_perf_dma_calls;   /* DMA, minus any APU work inside it */
+extern uint32_t snes_perf_gsu;                        /* Super FX: every GSU slice (line, vblank, start) */
+extern uint32_t snes_perf_ops, snes_perf_gsu_reads;   /* 65816 opcodes run; CPU reads of GSU registers */
 
 /* the PPU split (cycles, both inside snes_perf_ppu): sprite evaluation runs
  * on every line of every frame; the rest only on drawn lines. main/sub are
@@ -60,6 +62,28 @@ extern uint32_t snes_perf_cpu_rd_slow, snes_perf_cpu_rd_page, snes_perf_cpu_wr_s
 #define SNES_PERF_CPU_INC(c) ((c)++)
 #else
 #define SNES_PERF_CPU_INC(c) do { } while (0)
+#endif
+
+/* PERF_GSU=1, a diagnostic for the Super FX figure (two timer reads per chain
+ * call): cycles inside the compiled chains, GSU top-level instructions run by
+ * the chains / in all, and the same for the vblank catch-up alone (gsu.c).
+ * PERF_GSU_PLOT=1 adds the cycles inside PLOT and the PLOT count (two timer
+ * reads per pixel). */
+#ifdef SNES_PERF_GSU
+extern uint32_t snes_perf_gsu_plot, snes_perf_gsu_plots, snes_perf_gsu_chain;
+extern uint32_t snes_perf_gsu_chain_ops, snes_perf_gsu_ops;
+extern uint32_t snes_perf_gsu_vbl, snes_perf_gsu_vbl_ops, snes_perf_gsu_vbl_plot, snes_perf_gsu_vbl_chain, snes_perf_gsu_vbl_chain_ops;
+#endif
+
+/* PERF_SPC=1, a diagnostic for the SPC700 figure (two timer reads per call
+ * into the Thumb-2 engine): cycles inside the engine (the batches of
+ * spc_thumb2_run net of their DSP ticks, and the single steps of
+ * spc_runOpcode) and the number of those calls; cycles inside the C fallback
+ * (spc_fallback) and its count; the idle skip's count. spc700 minus "step" is
+ * apu_run's own loop. */
+#ifdef SNES_PERF_SPC
+extern uint32_t snes_perf_spc_step, snes_perf_spc_ops, snes_perf_spc_fb, snes_perf_spc_fbs;
+extern uint32_t snes_perf_spc_skips;
 #endif
 
 /* the split costs probes on every drawn line: only with PERF_PPU=1 */

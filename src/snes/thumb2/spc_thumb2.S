@@ -1,29 +1,37 @@
 @ Cortex-M7 Thumb-2 SPC700 engine -- native interpreter for the APU's spc700.
 @
-@ spc_thumb2_step(Spc *spc) -> int
-@   r0 = Spc*
-@   Returns -1 if the opcode was fully handled (Spc state updated in place),
-@   or the opcode byte (0..255) if NOT handled, so the C dispatcher falls
-@   through to spc_doOpcode(spc, opcode) on the fetched byte.
+@ spc_thumb2_run(Spc *spc, int budget) -> int (the budget left)
+@   Runs whole SPC700 opcodes from apu->cycles, the per-opcode part of
+@   apu_run (apu.c) moved inside the engine so it keeps its registers across
+@   opcodes. After each opcode of n cycles started at apu->cycles:
+@     n > budget left   -> apu->cpuCyclesLeft = n, return (apu_run consumes it)
+@     otherwise         -> the DSP ticks of [start, start+n) (apu_dsp_ticks),
+@                          apu->cycles += n, budget -= n; loop while budget > 0
+@   It also returns, BEFORE running it, at the idle-wait pattern
+@   (EC FD 00 F0 FB, apu_idleSkipCycles), and after a STOP/SLEEP.
+@   budget == 0 runs exactly one opcode and leaves it to the caller
+@   (spc_runOpcode, the single step apu_run takes at those exits): its cycles
+@   in cyclesUsed and apu->cpuCyclesLeft, nothing committed.
 @
-@ Contract: the caller (spc_runOpcode in spc.c) has ALREADY cleared
-@ cyclesUsed and checked spc->stopped.  This leaf owns exactly one opcode
-@ fetch (pc++), the base-cycle charge from spc_cycles_per_opcode, and the
-@ direct/fallback decision.  Each native handler performs exactly the
-@ operand/data fetches and extra cycle charges its opcode semantics require.
+@ Contract: the caller has checked spc->stopped. Each opcode: one fetch
+@ (pc++), the base-cycle charge from spc_cycles_per_opcode into cyclesUsed,
+@ the handler, which performs exactly the operand/data fetches and extra
+@ cycle charges of its opcode. apu->cycles holds the opcode's start while it
+@ runs, which is what the lazy timers read (apu_timers_sync).
 @
 @ Memory model: apu->ram is a flat 64 KB array at Apu offset 8.  Addresses
-@ outside [0xf0,0xff] (IO) and [0xffc0,0xffff] (boot ROM, only when
-@ romReadable) are served directly from ram -- no function call.  IO and
-@ boot-ROM accesses fall through to bl apu_cpuRead / apu_cpuWrite.
+@ outside [0xf0,0xff] (IO) and [0xff00,0xffff] (boot ROM range) are served
+@ directly from ram -- no function call.  IO and boot-ROM accesses fall
+@ through to bl apu_cpuRead / apu_cpuWrite.
 @
-@ Every handler is bit-exact with spc.c's spc_doOpcode; unhandled opcodes
-@ return the opcode byte and the C path runs unchanged.  The hybrid model
+@ Every handler is bit-exact with spc.c's spc_doOpcode; opcodes without one
+@ call spc_fallback (spc_doOpcode) from inside the loop.  The hybrid model
 @ guarantees STATEHASH / AUDIOHASH bit-identity.
 @
-@ AAPCS: r0-r3 caller-saved (clobbered by BL); r4-r11 callee-saved.
+@ AAPCS: r0-r3, r12, lr caller-saved (clobbered by BL); r4-r11 callee-saved.
 @ Register assignment: r4 = Spc*, r5 = ram_base (apu->ram), r6 = opcode,
-@ r7 = Apu* (for C bridge args), r8/r9 = scratch callee-saved temps.
+@ r7 = Apu* (for C bridge args), r8/r9 = scratch callee-saved temps,
+@ r10 = &apu->cycles, r11 = budget left (0 = single opcode).
 
 #include "spc_thumb2_offsets.h"
 
@@ -266,19 +274,24 @@
 
         .section .itcm_snes_interp.thumb2_spc,"ax",%progbits
         .align  2
-        .global spc_thumb2_step
-        .type   spc_thumb2_step,%function
+        .global spc_thumb2_run
+        .type   spc_thumb2_run,%function
         .thumb_func
-spc_thumb2_step:
-        push    {r4, r5, r6, r7, r8, r9, lr}
+spc_thumb2_run:
+        push    {r3, r4, r5, r6, r7, r8, r9, r10, r11, lr}  @ 10 regs: sp stays 8-aligned for the C calls
         mov     r4, r0
-
+        mov     r11, r1
         ldr     r7, [r4, #SPC_OFF_APU]
         add     r5, r7, #APU_OFF_RAM
+        add     r10, r7, #APU_OFF_CYCLES_PAGE
+        add     r10, r10, #APU_OFF_CYCLES_IN_PAGE
 
+.Lrun_loop:
         FETCH_BYTE
         uxtb    r6, r0
-
+        cmp     r6, #0xec
+        beq     .Lrun_ec
+.Lrun_dispatch:
         movw    r2, #:lower16:spc_cycles_per_opcode
         movt    r2, #:upper16:spc_cycles_per_opcode
         ldrb    r3, [r2, r6]
@@ -287,6 +300,39 @@ spc_thumb2_step:
         adr     r2, .Lspc_dispatch_table
         ldr     r3, [r2, r6, lsl #2]
         bx      r3
+
+@ MOV Y,!$00FD; BEQ -5 (EC FD 00 F0 FB) is the idle wait apu_run may skip:
+@ hand it back unrun. Bytes compared in ram exactly as apu_idleSkipCycles
+@ does (which also rejects the boot-ROM range), so a non-match here would
+@ also be a non-match there. A single step (budget 0) just runs it.
+.Lrun_ec:
+        cmp     r11, #0
+        beq     .Lrun_dispatch
+        ldrh    r1, [r4, #SPC_OFF_PC]
+        subs    r1, r1, #1
+        uxth    r1, r1                   @ the opcode's own pc
+        adds    r2, r1, #1
+        uxth    r2, r2
+        ldrb    r3, [r5, r2]
+        cmp     r3, #0xfd
+        bne     .Lrun_dispatch
+        adds    r2, r1, #2
+        uxth    r2, r2
+        ldrb    r3, [r5, r2]
+        cmp     r3, #0x00
+        bne     .Lrun_dispatch
+        adds    r2, r1, #3
+        uxth    r2, r2
+        ldrb    r3, [r5, r2]
+        cmp     r3, #0xf0
+        bne     .Lrun_dispatch
+        adds    r2, r1, #4
+        uxth    r2, r2
+        ldrb    r3, [r5, r2]
+        cmp     r3, #0xfb
+        bne     .Lrun_dispatch
+        strh    r1, [r4, #SPC_OFF_PC]    @ unfetch: apu_run takes it from here
+        b       .Lrun_exit
 
 
 @ ===========================================================================
@@ -2115,7 +2161,7 @@ spc_thumb2_step:
 .Lopef:
         movs    r0, #1
         strb    r0, [r4, #SPC_OFF_STOPPED]
-        b       .L_handled
+        b       .L_handled_stop
 
 
 .Lopf0:
@@ -2211,19 +2257,52 @@ spc_thumb2_step:
 .Lopff:
         movs    r0, #1
         strb    r0, [r4, #SPC_OFF_STOPPED]
-        b       .L_handled
+        b       .L_handled_stop
 
 
 @ ===========================================================================
 @ Exit labels
 @ ===========================================================================
 
+@ The opcode is done; its cycles are in cyclesUsed. apu_run's step, inside.
+        .macro COMMIT_OPCODE next
+        ldrb    r0, [r4, #SPC_OFF_CYCLESUSED]
+        cmp     r0, r11
+        bgt     .Lrun_partial            @ runs past the budget (always, for a single step)
+        ldr     r1, [r10]                @ start
+        add     r8, r1, r0               @ end
+        sub     r11, r11, r0
+        add     r3, r1, #31
+        bic     r3, r3, #31              @ the first multiple of 32 at or after start
+        cmp     r3, r8
+        bhs     1f
+        mov     r0, r7                   @ a DSP tick in [start, end)
+        mov     r2, r8
+        bl      apu_dsp_ticks
+1:
+        str     r8, [r10]
+        cmp     r11, #0
+        bgt     \next
+        b       .Lrun_exit
+        .endm
+
 .L_handled:
-        mov     r0, #-1
-        pop     {r4, r5, r6, r7, r8, r9, pc}
+        COMMIT_OPCODE .Lrun_loop
+
+@ STOP / SLEEP: commit, then leave (spc->stopped is set; apu_run takes over)
+.L_handled_stop:
+        COMMIT_OPCODE .Lrun_exit
 
 .L_noteb:
-        mov     r0, r6          @ return opcode byte for C fallback
-        pop     {r4, r5, r6, r7, r8, r9, pc}
+        mov     r0, r4
+        mov     r1, r6
+        bl      spc_fallback            @ spc_doOpcode on the fetched opcode
+        b       .L_handled
 
-        .size   spc_thumb2_step, .-spc_thumb2_step
+.Lrun_partial:
+        strb    r0, [r10, #APU_OFF_CPUCYCLESLEFT - APU_OFF_CYCLES]
+.Lrun_exit:
+        mov     r0, r11
+        pop     {r3, r4, r5, r6, r7, r8, r9, r10, r11, pc}
+
+        .size   spc_thumb2_run, .-spc_thumb2_run

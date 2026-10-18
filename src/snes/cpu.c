@@ -69,6 +69,46 @@ static void cpu_writeWord(Cpu* cpu, uint32_t adrl, uint32_t adrh, uint16_t value
 static void cpu_doInterrupt(Cpu* cpu, bool irq);
 static void cpu_doOpcode(Cpu* cpu, uint8_t opcode);
 
+#ifdef HOST_BUILD
+/* CPU_PCHIST=file (host): 65816 instructions executed per (bank, pc) -- after
+ * the idle skip, so the work that really runs. Written at exit, hottest first,
+ * as "bank:addr count opcode cum%". */
+#include <stdio.h>
+#define CPU_PCH_N 131072u
+static struct { uint32_t key, n; uint8_t op; } cpu_pch[CPU_PCH_N];
+static int cpu_pch_on = -1;
+static unsigned long cpu_pch_total;
+static int cpu_pch_cmp(const void *a, const void *b) {
+  uint32_t x = ((const uint32_t *)a)[1], y = ((const uint32_t *)b)[1];
+  return x < y ? 1 : x > y ? -1 : 0;
+}
+static void cpu_pch_write(void) {
+  FILE *f = fopen(getenv("CPU_PCHIST"), "w");
+  if (!f) return;
+  qsort(cpu_pch, CPU_PCH_N, sizeof cpu_pch[0], cpu_pch_cmp);
+  unsigned long cum = 0;
+  fprintf(f, "# total %lu 65816 instructions\n", cpu_pch_total);
+  for (uint32_t i = 0; i < CPU_PCH_N && cpu_pch[i].n; i++) {
+    cum += cpu_pch[i].n;
+    fprintf(f, "%02x:%04x %u %02x %.2f\n", (unsigned)(cpu_pch[i].key >> 16), (unsigned)(cpu_pch[i].key & 0xffff),
+            (unsigned)cpu_pch[i].n, cpu_pch[i].op, 100.0 * cum / cpu_pch_total);
+  }
+  fclose(f);
+}
+static void cpu_pchist(uint32_t key, uint8_t op) {
+  if (cpu_pch_on < 0) { cpu_pch_on = getenv("CPU_PCHIST") != NULL; if (cpu_pch_on) atexit(cpu_pch_write); }
+  if (!cpu_pch_on) return;
+  uint32_t h = (key * 2654435761u) >> 15;
+  for (;; h++) {
+    h &= CPU_PCH_N - 1;
+    if (!cpu_pch[h].n || cpu_pch[h].key == key) break;
+  }
+  if (!cpu_pch[h].n) { cpu_pch[h].key = key; cpu_pch[h].op = op; }
+  cpu_pch[h].n++;
+  cpu_pch_total++;
+}
+#endif
+
 extern Snes *g_snes; // for debugging
 
 // addressing modes and opcode functions not declared, only used after defintions
@@ -255,9 +295,15 @@ void cpu_saveload(Cpu *cpu, SaveLoadFunc *func, void *ctx) {
 #if defined(SNES_BUS_IN_ITCM) && !defined(SNES_THUMB2_CPU)
 __attribute__((section(".itcm_snes_interp.thumb2.bus")))
 #endif
+#ifdef HOST_BUILD
+uint32_t snes_fs_cpu;   /* FRAME_STATS (main_snes.c): 65816 instructions this frame */
+#endif
 int SNES_RUNOPCODE_IMPL(Cpu* cpu) {
   cpu->cyclesUsed = 0;
   if(cpu->stopped) return 1;
+#ifdef HOST_BUILD
+  snes_fs_cpu++;
+#endif
 
   if(cpu->waiting) {
     /* WAI holds the CPU until an interrupt is pending — including one the I flag
@@ -283,7 +329,13 @@ int SNES_RUNOPCODE_IMPL(Cpu* cpu) {
     uint16_t id = rc_dispatch_lookup(cpu->k, cpu->pc);
     if (id) { rc_dispatch_call(id, cpu); return cpu->cyclesUsed; }
   }
+#ifdef HOST_BUILD
+  const uint32_t pch_key = ((uint32_t)cpu->k << 16) | cpu->pc;
+#endif
   uint8_t opcode = cpu_readOpcode(cpu);
+#ifdef HOST_BUILD
+  cpu_pchist(pch_key, opcode);
+#endif
   cpu->cyclesUsed = cyclesPerOpcode[opcode];
   cpu_doOpcode(cpu, opcode);
   return cpu->cyclesUsed;

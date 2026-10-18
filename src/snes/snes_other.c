@@ -40,15 +40,9 @@ typedef struct CartHeader {
 
 static void readHeader(const uint8_t* data, int length, int location, CartHeader* header);
 
-bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
-  // if smaller than smallest possible, don't load
-  if(length < 0x8000) {
-    printf("Failed to load rom: rom to small (%d bytes)\n", length);
-    return false;
-  }
-  // check headers
-  CartHeader headers[4];
-  memset(headers, 0, sizeof(headers));
+/* Score the four header candidates; returns the one used (odd = copier-headered). */
+static int pickHeader(const uint8_t* data, int length, CartHeader headers[4]) {
+  memset(headers, 0, 4 * sizeof(CartHeader));
   for(int i = 0; i < 4; i++) {
     headers[i].score = -50;
   }
@@ -56,7 +50,6 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   if(length >= 0x8200) readHeader(data, length, 0x81c0, &headers[1]);
   if(length >= 0x10000) readHeader(data, length, 0xffc0, &headers[2]);
   if(length >= 0x10200) readHeader(data, length, 0x101c0, &headers[3]);
-  // see which it is
   int max = 0;
   int used = 0;
   for(int i = 0; i < 4; i++) {
@@ -65,6 +58,35 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
       used = i;
     }
   }
+  return used;
+}
+
+/* The first coprocessor snes_loadRom's attach tests below match, in their order. */
+static int coproOf(const CartHeader* h) {
+  if(h->coprocessor == 0 && h->chips >= 3 && h->chips <= 5) return SNES_COPRO_DSP1;
+  if(h->coprocessor == 15 && h->exCoprocessor == 16) return SNES_COPRO_CX4;
+  if(h->coprocessor == 4 && h->chips >= 3 && h->chips <= 5) return SNES_COPRO_SDD1;
+  if(h->coprocessor == 15 && h->chips == 9) return SNES_COPRO_SPC7110;
+  if(h->coprocessor == 1) return SNES_COPRO_GSU;
+  return SNES_COPRO_NONE;
+}
+
+int snes_rom_coprocessor(const uint8_t* data, int length) {
+  if(length < 0x8000) return SNES_COPRO_NONE;
+  CartHeader headers[4];
+  return coproOf(&headers[pickHeader(data, length, headers)]);
+}
+
+bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
+  // if smaller than smallest possible, don't load
+  if(length < 0x8000) {
+    printf("Failed to load rom: rom to small (%d bytes)\n", length);
+    return false;
+  }
+  // check headers
+  CartHeader headers[4];
+  // see which it is
+  int used = pickHeader(data, length, headers);
   if(used & 1) {
     // odd-numbered ones are for headered roms
     data += 0x200; // move pointer past header
@@ -75,6 +97,16 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     printf("Failed to load rom: unsupported type (%d)\n", headers[used].cartType);
     return false;
   }
+  int loadRamSize = headers[used].chips > 0 ? (int)headers[used].ramSize : 0;
+  if(headers[used].coprocessor == 1) {
+    /* Super FX: the Game Pak RAM (the GSU's framebuffer and work RAM, shared
+     * with the 65816 as cart->ram) is the expansion RAM of a v3 header ($FFBD:
+     * 32 KB Yoshi/Vortex, 64 KB Doom/Stunt Race/Winter Gold...); the old Star
+     * Fox header has none and the board carries 32 KB. The GSU wraps its
+     * addresses to this size, as the chip does. */
+    uint32_t ex = headers[used].headerVersion == 3 ? headers[used].exRamSize : 0;
+    loadRamSize = ex >= 0x8000 && ex <= 0x20000 ? (int)ex : 0x8000;
+  }
 #ifdef GNW_SNES_CORE
   // Device: the ROM is memory-mapped from flash (the launcher caches it there)
   // and is megabytes large — the pow2 expand+malloc+copy below cannot fit the
@@ -83,7 +115,7 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   // by cart_fold(), so nothing is allocated or copied.
   cart_load(
     snes->cart, headers[used].cartType,
-    (uint8_t*)data, length, headers[used].chips > 0 ? headers[used].ramSize : 0
+    (uint8_t*)data, length, loadRamSize
   );
   // $ffd6: low nibble 3-5 = cart carries a coprocessor; high nibble 0 = the
   // DSP family. Attach the DSP-1 HLE (Mario Kart / Pilotwings class). DSP-2/3/4
@@ -103,6 +135,10 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   }
   if(headers[used].coprocessor == 15 && headers[used].chips == 9) {
     cart_attachSpc7110(snes->cart);
+  }
+  // $ffd6 high nibble $1 = Super FX / GSU (Star Fox, Yoshi's Island...).
+  if(headers[used].coprocessor == 1) {
+    cart_attachGsu(snes->cart);
   }
   snes_reset(snes, true); // reset after loading
   snes_set_region(snes, headers[used].pal);
@@ -129,7 +165,7 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   // load it
   cart_load(
     snes->cart, headers[used].cartType,
-    newData, newLength, headers[used].chips > 0 ? headers[used].ramSize : 0
+    newData, newLength, loadRamSize
   );
   // $ffd6: low nibble 3-5 = cart carries a coprocessor; high nibble 0 = the
   // DSP family. Attach the DSP-1 HLE (Mario Kart / Pilotwings class). DSP-2/3/4
@@ -145,6 +181,9 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   }
   if(headers[used].coprocessor == 15 && headers[used].chips == 9) {
     cart_attachSpc7110(snes->cart);
+  }
+  if(headers[used].coprocessor == 1) {
+    cart_attachGsu(snes->cart);
   }
   snes_reset(snes, true); // reset after loading
   snes_set_region(snes, headers[used].pal);

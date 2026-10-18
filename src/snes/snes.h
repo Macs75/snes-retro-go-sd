@@ -95,7 +95,7 @@ struct Snes {
   // joypad handling
   uint16_t portAutoReadX[4]; // as read by auto-joypad read
   bool autoJoyRead;
-  uint16_t autoJoyTimer; // times how long until reading is done
+  uint16_t autoJoyTimer; // line the auto-joypad read started on, 0 = none
   bool ppuLatch;
   // multiplication/division
   uint8_t multiplyA;
@@ -151,6 +151,13 @@ void snes_handle_pos_stuff(Snes *snes);
 // snes_other.c functions:
 
 bool snes_loadRom(Snes* snes, const uint8_t* data, int length);
+/* The coprocessor snes_loadRom attaches for this image (same header pick). */
+enum { SNES_COPRO_NONE, SNES_COPRO_DSP1, SNES_COPRO_CX4, SNES_COPRO_SDD1,
+       SNES_COPRO_SPC7110, SNES_COPRO_GSU };
+int snes_rom_coprocessor(const uint8_t* data, int length);
+/* Whether the code for coprocessor `kind` is present (device: its overlay is
+   loaded). cart_attach* refuse the chip otherwise. Weak default: true. */
+bool snes_copro_overlay_ready(int kind);
 void snes_setPixels(Snes* snes, uint8_t* pixelData);
 void snes_setSamples(Snes* snes, int16_t* sampleData, int samplesPerFrame);
 void snes_saveload(Snes *snes, SaveLoadFunc *func, void *ctx);

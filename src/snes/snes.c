@@ -18,6 +18,7 @@
 #include "cart.h"
 #include "sdd1.h"
 #include "spc7110.h"
+#include "gsu.h"
 #include "input.h"
 #include "tracing.h"
 #include "snes_gnw_alloc.h"
@@ -48,6 +49,27 @@ static uint8_t *snes_pagemap_base(Snes *snes, uint32_t adr) {
   if (bank == 0x7e || bank == 0x7f) return &snes->ram[((bank & 1) << 16) | off];
   if (off < 0x2000 && (bank < 0x40 || (bank >= 0x80 && bank < 0xc0))) return &snes->ram[off];
   Cart *cart = snes->cart;
+  /* Super FX: exactly the ROM that cart_gsu_read serves -- $00-$3F/$80-$BF
+   * upper halves as LoROM, $40-$5F/$C0-$DF as linear 64 KB banks. Game Pak RAM,
+   * the RAM mirror and the GSU registers keep the slow path. (romPageOk is off
+   * for these carts; the CPU is never locked out of ROM in this port.) */
+  if (cart && cart->gsu) {
+    if (!cart->romMask) return NULL;   /* Super FX ROMs are 512 KB-2 MB, all 2^n */
+    uint8_t b = bank & 0x7f;
+    uint32_t page = adr & ~(uint32_t)0x1fff;
+    if (b <= 0x3f && off >= 0x8000)
+      return cart->rom + ((((uint32_t)b << 15) | (page & 0x7fff)) & cart->romMask);
+    if (b >= 0x40 && b <= 0x5f)
+      return cart->rom + ((((uint32_t)(b & 0x1f) << 16) | (page & 0xffff)) & cart->romMask);
+    return NULL;
+  }
+  /* NOT the same as cart_readLorom in one place: a LoROM cart under 2 MB with
+   * SRAM has its SRAM across the whole of banks $70-$7D/$F0-$FF (dinkc64
+   * e9e1139, PGA Tour), but this maps their $8000-$FFFF to ROM. So the 65816's
+   * data reads there get ROM while snes_read (and DMA) get SRAM, and the PGA
+   * Tour fix holds only for those. dma_doDma excludes these banks from its
+   * page-map path to stay with snes_read. Making this agree means NULL pages
+   * there (or SRAM pointers); it changes what the CPU reads on such carts. */
   if (cart && off >= 0x8000 && SNES_ROM_PAGE_OK(cart) && !SNES_DSP_LOROM_WINDOW(cart, bank)) {
     uint32_t page = adr & ~(uint32_t)0x1fff;
 #if SNES_ROMPAGE_FOLD
@@ -296,14 +318,18 @@ void snes_handle_pos_stuff(Snes *snes) {
 #endif
       if (snes->autoJoyRead) {
         // TODO: this starts a little after start of vblank
-        snes->autoJoyTimer = 0;
+        snes->autoJoyTimer = snes->vPos;   /* busy flag: see $4212 */
         /* After 16 hardware clocks the leftover serial bits are 1. */
         snes->input1->latchedState = 0xffff;
         snes->input2->latchedState = 0xffff;
       }
       if (snes->cart && snes->cart->spc7110)
         spc7110_tick(snes->cart->spc7110);
+      if (snes->cart && snes->cart->gsu)
+        gsu_vblank(snes->cart->gsu);   /* finish the frame's GSU work */
     }
+    if (snes->cart && snes->cart->gsu)
+      gsu_runLine(snes->cart->gsu);    /* one scanline's GSU slice */
   } else if (snes->hPos == 512) {
     // render the line halfway of the screen for better compatibility
     if (!snes->inVblank && !snes->disableRender) {
@@ -336,11 +362,12 @@ void snes_handle_pos_stuff(Snes *snes) {
     if (match) {
       snes->inIrq = true;
       snes->cpu->irqWanted = true;
+#ifdef SNES_IDLE_SKIP
+      idle_irq_sample(snes);   /* where the CPU waits for it */
+#endif
     }
   }
 #endif
-  // handle autoJoyRead-timer
-  //if (snes->autoJoyTimer > 0) snes->autoJoyTimer -= 2;
   // increment position
   // TODO: exact frame timing (line 240 on odd frame is 4 cycles shorter,
   //   even frames in interlace is 1 extra line)
@@ -402,19 +429,26 @@ void snes_run_line(Snes *snes) {
     if (snes->nmiEnabled)
       snes->cpu->nmiWanted = true;
     if (snes->autoJoyRead) {
-      snes->autoJoyTimer = 0;
+      snes->autoJoyTimer = snes->vPos;   /* busy flag: see $4212 */
       snes->input1->latchedState = 0xffff;
       snes->input2->latchedState = 0xffff;
     }
     if (snes->cart && snes->cart->spc7110)
       spc7110_tick(snes->cart->spc7110);
+    if (snes->cart && snes->cart->gsu)
+      gsu_vblank(snes->cart->gsu);     /* finish the frame's GSU work */
   }
+  if (snes->cart && snes->cart->gsu)
+    gsu_runLine(snes->cart->gsu);      /* one scanline's GSU slice */
 
   /* The V-timer matches on every dot of its line; setting the flag once is the
    * same thing to everyone who reads it. */
   if (snes->vIrqEnabled && snes->vPos == snes->vTimer) {
     snes->inIrq = true;
     snes->cpu->irqWanted = true;
+#ifdef SNES_IDLE_SKIP
+    idle_irq_sample(snes);   /* where the CPU waits for it */
+#endif
   }
 
   /* hPos == 512: the line is rendered halfway across, for compatibility */
@@ -551,6 +585,16 @@ static uint16_t SwapInputBits(uint16_t x) {
   return r;
 }
 
+/* $4212 bit 0: the auto-joypad read is in progress, for 4224 master clocks
+ * from the start of vblank (the line autoJoyTimer holds). Computed when read
+ * rather than counted down every dot. Star Fox's briefing waits for it to SET
+ * before reading the pad, and hung while it never did. Out of line, placed
+ * after the BUS window (snes_core.ld), so snes_read keeps its size. */
+__attribute__((noinline)) static uint8_t snes_autoJoyBusy(const Snes* snes) {
+  return snes->autoJoyTimer &&
+         (uint32_t)(uint16_t)(snes->vPos - snes->autoJoyTimer) * 1364 + snes->hPos < 4224;
+}
+
 static uint8_t snes_readReg(Snes* snes, uint16_t adr) {
   switch(adr) {
     case 0x4210: {
@@ -592,7 +636,7 @@ static uint8_t snes_readReg(Snes* snes, uint16_t adr) {
                (int)snes->inVblank, (int)(snes->hPos >= 1024),
                (unsigned)snes->cpu->k, (unsigned)snes->cpu->pc);
 #endif
-      uint8_t val = (snes->autoJoyTimer > 0);
+      uint8_t val = snes_autoJoyBusy(snes);
       val |= (snes->hPos >= 1024) << 6;
       val |= snes->inVblank << 7;
       return val | (snes->openBus & 0x3e);
@@ -627,6 +671,15 @@ static uint8_t snes_readReg(Snes* snes, uint16_t adr) {
   }
 }
 
+/* $4207/$4208 (HTIME), out of line: written a few times a frame, and
+ * snes_write fills its fixed BUS window (snes_core.ld). */
+__attribute__((noinline))
+static void snes_write_htime(Snes* snes, uint16_t adr, uint8_t val) {
+  if (adr == 0x4207) snes->hTimer = (snes->hTimer & 0x100) | val;
+  else               snes->hTimer = (snes->hTimer & 0x0ff) | ((val & 1) << 8);
+  snes->dma->hclip = 1;   /* the H-IRQ dot moved: end the span there */
+}
+
 static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
   switch(adr) {
     case 0x4200: {
@@ -637,6 +690,7 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
       if(!snes->autoJoyRead) snes->autoJoyTimer = 0;
       snes->hIrqEnabled = val & 0x10;
       snes->vIrqEnabled = val & 0x20;
+      snes->dma->hclip = 1;   /* the H-IRQ may now match inside this span */
       snes->nmiEnabled = val & 0x80;
       if(!snes->hIrqEnabled && !snes->vIrqEnabled) {
         snes->inIrq = false;
@@ -693,14 +747,10 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
       }
       break;
     }
-    case 0x4207: {
-      snes->hTimer = (snes->hTimer & 0x100) | val;
+    case 0x4207:
+    case 0x4208:
+      snes_write_htime(snes, adr, val);
       break;
-    }
-    case 0x4208: {
-      snes->hTimer = (snes->hTimer & 0x0ff) | ((val & 1) << 8);
-      break;
-    }
     case 0x4209: {
       snes->vTimer = (snes->vTimer & 0x100) | val;
       break;
@@ -719,11 +769,26 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
                t, snes->dma->channel[1].bAdr,
                snes->ppu->vramPointer, snes->dma->channel[1].size, data);
       }
-      dma_startDma(snes->dma, val, false);
       {
+        /* The data moves now, but the CPU is halted for the transfer's bus time
+         * on hardware: 8 master cycles a byte plus 8 a channel. Leave that in
+         * dmaTimer with dmaBusy set; the scheduler runs it out as a DMA stall,
+         * so interrupts raised meanwhile are taken only when it ends (Dirt Trax
+         * FX's WAI after a 14 KB VRAM upload relies on the NMI landing first). */
+        Dma *dma = snes->dma;
+        uint32_t stall = 0;
+        for (int c = 0; c < 8; c++)
+          if (val & (1 << c)) stall += 8 * (dma->channel[c].size ? dma->channel[c].size : 0x10000u) + 8;
+        dma_startDma(dma, val, false);
         SNES_PERF_DMA_BEGIN(perf_t, perf_a);
-        while (dma_cycle(snes->dma)) {}
+        for (;;) {
+          int c = 0;
+          while (c < 8 && !dma->channel[c].dmaActive) c++;
+          if (c == 8) break;
+          dma_cycle(dma);
+        }
         SNES_PERF_DMA_END(perf_t, perf_a);
+        if (dma->dmaBusy) dma->dmaTimer += stall;
       }
       break;
     }
@@ -888,22 +953,27 @@ uint8_t snes_cpuRead(Snes* snes, uint32_t adr) {
    * the host base of the last ROM page and serve a hit with one compare and
    * one index.
    *
-   * Only the ROM branch ever installs a tag, so a tag match implies ROM:
-   * WRAM, SRAM and MMIO all live below 0x8000 (or in banks 7e/7f) and keep
-   * the slow path, which is also why no write path has to invalidate this --
-   * ROM does not change under us. An 8 KB page cannot straddle a LoROM 32 KB
+   * Without the page map only the ROM branch installs a tag, so a tag match
+   * implies ROM: WRAM, SRAM and MMIO all live below 0x8000 (or in banks
+   * 7e/7f) and keep the slow path, which is also why no write path has to
+   * invalidate this -- ROM does not change under us. (The page map also
+   * installs WRAM pages; see there.) An 8 KB page cannot straddle a LoROM 32 KB
    * mapping boundary, and cannot straddle a romMask wrap either (romMask is
    * 2^n-1 with n >= 13 for any real cart), so base+offset stays linear for
    * the whole page. The tag holds the page-aligned address, so the sentinel
    * below (low bits set, and beyond the 24-bit bus) can never collide. */
 #if SNES_PAGEMAP
   {
-    /* One table load instead of the compare chain below. A ROM page also
-     * becomes the engine's inline fetch page (ROM_FETCH_FAST), exactly when
-     * the chain would have installed it. */
+    /* One table load instead of the compare chain below. A ROM page, or a WRAM
+     * page ($7E/$7F, and the $0000-$1FFF mirror in banks $00-$3F/$80-$BF),
+     * also becomes the engine's inline fetch page (ROM_FETCH_FAST): only
+     * fetches arrive here for those pages (cpu_thumb2_read serves the data
+     * reads), and code run from WRAM otherwise paid this call per byte. The
+     * page is a pointer to live memory and WRAM is never remapped, so a write
+     * to it -- self-modifying code, DMA into WRAM -- needs no invalidation. */
     uint8_t *base = g_snes_rdmap[(adr >> 13) & 0x7ff];
     if (base) {
-      if ((adr & 0x8000) && (adr >> 17) != 0x3f) {   /* ROM: not WRAM ($7E/$7F) */
+      if ((adr & 0x8000) || (adr >> 17) == 0x3f || !(adr & 0x40e000)) {
         uint32_t page = adr & ~(uint32_t)0x1fff;
         if (page != snes->romPageTag) {
           snes->romPageBase = base;

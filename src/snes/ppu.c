@@ -86,6 +86,7 @@ static int ppu_getPixel(Ppu* ppu, int x, int y, bool sub, int* r, int* g, int* b
 static uint16_t ppu_getOffsetValue(Ppu* ppu, int col, int row);
 static bool PpuMode4HasOpt(Ppu *ppu);
 static bool PpuMode2HasOpt(Ppu *ppu);
+static uint16_t g_opt_word[2][32];   /* see PpuMode2HasOpt */
 static int ppu_getPixelForBgLayer(Ppu* ppu, int x, int y, int layer, bool priority);
 static void ppu_handleOPT(Ppu* ppu, int layer, int* lx, int* ly);
 static void ppu_calculateMode7Starts(Ppu* ppu, int y);
@@ -1974,8 +1975,31 @@ static void PpuDrawBackground_mosaic(Ppu *ppu, uint y, bool sub, uint layer,
 }
 
 /* Mode 2/4 offset-per-tile: each 8px screen column can replace H and/or V
- * scroll from BG3. One tile fetch per BG tile. Mode 4 packs H/V in one word
- * (ppu_handleOPT). column 0 never applies OPT. */
+ * scroll from BG3. ppu_handleOPT for Modes 2 and 4, on the offset words
+ * PpuMode2HasOpt/PpuMode4HasOpt just read (g_opt_word). Column 0 never
+ * applies OPT. */
+static inline void PpuOptApply(const Ppu *ppu, uint layer, int *lx, int *ly) {
+  const int x = *lx, y = *ly;
+  const int column = ((x - (x & 0x7)) - (ppu->bgLayer[layer].hScroll & 0xfff8)) >> 3;
+  if (column > 0) {
+    const int valid = layer == 0 ? 0x2000 : 0x4000;
+    uint16_t hOffset = g_opt_word[0][column - 1];
+    uint16_t vOffset = 0;
+    if (ppu->mode == 4) {
+      if (hOffset & 0x8000) {
+        vOffset = hOffset;
+        hOffset = 0;
+      }
+    } else {
+      vOffset = g_opt_word[1][column - 1];
+    }
+    if (hOffset & valid) *lx = ((hOffset & 0x3f8) + (column * 8)) | (x & 0x7);
+    if (vOffset & valid) *ly = (vOffset & 0x3ff) + (y - ppu->bgLayer[layer].vScroll);
+  }
+}
+
+/* One tile fetch per BG tile, decoded once to chunky nibbles (pixel column c
+ * is nibble 7 - c, or c when h-flipped); a tile with no set bit draws nothing. */
 static void PpuDrawBackground_opt(Ppu *ppu, uint y, bool sub, uint layer,
                                   PpuZbufType zhi, PpuZbufType zlo, int bpp) {
   if (!IS_SCREEN_ENABLED(ppu, sub, layer))
@@ -2003,7 +2027,7 @@ static void PpuDrawBackground_opt(Ppu *ppu, uint y, bool sub, uint layer,
       run = IntMin(8 - ((x + bglayer->hScroll) & 7), x2 - x);
       int lx = x + bglayer->hScroll;
       int ly = (int)y + bglayer->vScroll;
-      ppu_handleOPT(ppu, (int)layer, &lx, &ly);
+      PpuOptApply(ppu, layer, &lx, &ly);
       lx &= 0x3ff;
       ly &= 0x3ff;
 
@@ -2029,20 +2053,21 @@ static void PpuDrawBackground_opt(Ppu *ppu, uint y, bool sub, uint layer,
       if (bpp >= 8)
         bits_hi = ppu->vram[(adr + 16) & 0x7fff]
                 | (uint32)ppu->vram[(adr + 24) & 0x7fff] << 16;
-      PpuZbufType z = (tile & 0x2000) ? zhi : zlo;
-      if (bpp < 8)
-        z += (tile & 0x1c00) >> pal_shift;
-
-      for (int i = 0; i < run; i++) {
-        int col = (tile & 0x4000) ? ((lx + i) & 7) : 7 - ((lx + i) & 7);
-        int pixel = ((bits >> col) & 1) | ((bits >> (7 + col)) & 2);
-        if (bpp >= 4)
-          pixel |= ((bits >> (14 + col)) & 4) | ((bits >> (21 + col)) & 8);
-        if (bpp >= 8)
-          pixel |= (((bits_hi >> col) & 1) | ((bits_hi >> (7 + col)) & 2)
-                 | ((bits_hi >> (14 + col)) & 4) | ((bits_hi >> (21 + col)) & 8)) << 4;
-        if (pixel && z > dstz[i])
-          dstz[i] = z + (PpuZbufType)pixel;
+      if (bits | bits_hi) {
+        PpuZbufType z = (tile & 0x2000) ? zhi : zlo;
+        if (bpp < 8)
+          z += (tile & 0x1c00) >> pal_shift;
+        const uint32 lo = (bpp >= 4) ? PpuDecode4bpp(bits) : PpuDecode2bpp(bits);
+        const uint32 hi = (bpp >= 8) ? PpuDecode4bpp(bits_hi) : 0;
+        const unsigned flip = (tile & 0x4000) ? 0u : 7u;
+        for (int i = 0; i < run; i++) {
+          const unsigned sh = 4u * (((unsigned)(lx + i) & 7u) ^ flip);
+          int pixel = (int)((lo >> sh) & 0xf);
+          if (bpp >= 8)
+            pixel |= (int)((hi >> sh) & 0xf) << 4;
+          if (pixel && z > dstz[i])
+            dstz[i] = z + (PpuZbufType)pixel;
+        }
       }
     } while (x += run, dstz += run, x < x2);
   }
@@ -4575,20 +4600,26 @@ static uint16_t ppu_getOffsetValue(Ppu* ppu, int col, int row) {
   return ppu->vram[tilemapAdr & 0x7fff];
 }
 
-static bool PpuMode4HasOpt(Ppu *ppu) {
-  for (int c = 0; c < 32; c++) {
-    if (ppu_getOffsetValue(ppu, c, 0) & 0x6000)
-      return true;
-  }
-  return false;
+/* Mode 2/4 decide per pass whether any column applies OPT, which reads the
+ * whole offset table anyway: they keep it in g_opt_word (row 0 = the H words,
+ * row 1 = the V words; Mode 4 has row 0 only) for PpuDrawBackground_opt, which
+ * draws the same pass right after -- nothing writes VRAM or BG3's registers in
+ * between. Out of line: once a pass, and inlined they grew PpuDrawBackgrounds
+ * past its slot in the PPU window (snes_core.ld). */
+__attribute__((noinline)) static bool PpuMode4HasOpt(Ppu *ppu) {
+  uint16_t any = 0;
+  for (int c = 0; c < 32; c++)
+    any |= g_opt_word[0][c] = ppu_getOffsetValue(ppu, c, 0);
+  return (any & 0x6000) != 0;
 }
 
-static bool PpuMode2HasOpt(Ppu *ppu) {
+__attribute__((noinline)) static bool PpuMode2HasOpt(Ppu *ppu) {
+  uint16_t any = 0;
   for (int c = 0; c < 32; c++) {
-    if ((ppu_getOffsetValue(ppu, c, 0) | ppu_getOffsetValue(ppu, c, 1)) & 0x6000)
-      return true;
+    any |= g_opt_word[0][c] = ppu_getOffsetValue(ppu, c, 0);
+    any |= g_opt_word[1][c] = ppu_getOffsetValue(ppu, c, 1);
   }
-  return false;
+  return (any & 0x6000) != 0;
 }
 
 static int ppu_getPixelForBgLayer(Ppu* ppu, int x, int y, int layer, bool priority) {
@@ -5048,6 +5079,126 @@ uint8_t ppu_read(Ppu* ppu, uint8_t adr) {
   }
 }
 
+/* The data ports a DMA streams into, shared by ppu_write and ppu_dma_write:
+ * $2104 OAMDATA, $2118/$2119 VMDATAL/VMDATAH, $2122 CGDATA. */
+static inline __attribute__((always_inline)) void ppu_port_oamdata(Ppu* ppu, uint8_t val) {
+  if(ppu->oamInHigh) {
+    uint32_t high_index = ((ppu->oamAdr & 0xf) << 1) | ppu->oamSecondWrite;
+    uint8_t *dst = &ppu->highOam[high_index];
+#ifdef SNES_LINE_REUSE_PROBE
+    if (*dst != val) {
+      g_probe_oam_gen++;
+      for (int s = high_index * 4; s < high_index * 4 + 4; s++)
+        g_probe_oam_entry_gen[s]++;
+    }
+#endif
+#ifdef SNES_LINE_CACHE
+    if (*dst != val) {
+      int first = high_index * 4;
+      PpuLineCacheBump(&g_line_cache_oam_serial, &g_line_cache_oam_last[first]);
+      for (int s = first + 1; s < first + 4; s++)
+        g_line_cache_oam_last[s] = g_line_cache_oam_serial;
+    }
+#endif
+    *dst = val;
+    ppu->objCacheValid = 0;   /* size / x-high bits moved */
+    if(ppu->oamSecondWrite) {
+      ppu->oamAdr++;
+      if(ppu->oamAdr == 0) ppu->oamInHigh = false;
+    }
+  } else {
+    if(!ppu->oamSecondWrite) {
+      ppu->oamBuffer = val;
+    } else {
+      uint16_t value = (val << 8) | ppu->oamBuffer;
+#ifdef SNES_LINE_REUSE_PROBE
+      if (ppu->oam[ppu->oamAdr] != value) {
+        g_probe_oam_gen++;
+        g_probe_oam_entry_gen[ppu->oamAdr >> 1]++;
+      }
+#endif
+#ifdef SNES_LINE_CACHE
+      if (ppu->oam[ppu->oamAdr] != value)
+        PpuLineCacheBump(&g_line_cache_oam_serial,
+                         &g_line_cache_oam_last[ppu->oamAdr >> 1]);
+#endif
+      ppu->oam[ppu->oamAdr++] = value;
+      ppu->objCacheValid = 0;   /* a sprite may have moved vertically */
+      if(ppu->oamAdr == 0) ppu->oamInHigh = true;
+    }
+  }
+  ppu->oamSecondWrite = !ppu->oamSecondWrite;
+}
+
+static inline __attribute__((always_inline)) void ppu_port_vmdatal(Ppu* ppu, uint8_t val) {
+  // TODO: vram access during rendering (also cgram and oam)
+  uint16_t vramAdr = ppu_getVramRemap(ppu);
+  uint16_t *dst = &ppu->vram[vramAdr & 0x7fff];
+  uint16_t value = (*dst & 0xff00) | val;
+#ifdef SNES_LINE_REUSE_PROBE
+  if (*dst != value) {
+    g_probe_vram_gen++;
+    g_probe_vram_page_gen[(vramAdr & 0x7fff) >> 6]++;
+  }
+#endif
+#ifdef SNES_LINE_CACHE
+  if (*dst != value)
+    PpuLineCacheBump(&g_line_cache_vram_serial,
+                     &g_line_cache_vram_last[(vramAdr & 0x7fff) >> kLineCacheVramShift]);
+#endif
+  *dst = value;
+  if(!ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
+}
+
+static inline __attribute__((always_inline)) void ppu_port_vmdatah(Ppu* ppu, uint8_t val) {
+  uint16_t vramAdr = ppu_getVramRemap(ppu);
+  uint16_t *dst = &ppu->vram[vramAdr & 0x7fff];
+  uint16_t value = (*dst & 0x00ff) | (val << 8);
+#ifdef SNES_LINE_REUSE_PROBE
+  if (*dst != value) {
+    g_probe_vram_gen++;
+    g_probe_vram_page_gen[(vramAdr & 0x7fff) >> 6]++;
+  }
+#endif
+#ifdef SNES_LINE_CACHE
+  if (*dst != value)
+    PpuLineCacheBump(&g_line_cache_vram_serial,
+                     &g_line_cache_vram_last[(vramAdr & 0x7fff) >> kLineCacheVramShift]);
+#endif
+  *dst = value;
+  if(ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
+}
+
+static inline __attribute__((always_inline)) void ppu_port_cgdata(Ppu* ppu, uint8_t val) {
+  if(!ppu->cgramSecondWrite) {
+    ppu->cgramBuffer = val;
+  } else {
+    uint16_t value = (val << 8) | ppu->cgramBuffer;
+#ifdef SNES_LINE_REUSE_PROBE
+    if (ppu->cgram[ppu->cgramPointer] != value) {
+      g_probe_cgram_gen++;
+      g_probe_cgram_entry_gen[ppu->cgramPointer]++;
+    }
+#endif
+#ifdef SNES_LINE_CACHE
+    if (ppu->cgram[ppu->cgramPointer] != value)
+      PpuLineCacheBump(&g_line_cache_cgram_serial,
+                       &g_line_cache_cgram_last[ppu->cgramPointer]);
+#endif
+#ifdef PPU_RGB565
+    if (ppu->cgram[ppu->cgramPointer] != value) {
+      g_cgram_dirty[ppu->cgramPointer >> 5] |= 1u << (ppu->cgramPointer & 31);
+      g_cgram_dirty_any = true;
+    }
+#ifdef SNES_PPU_FULL_REBUILD_REF
+    ppu->paletteDirty = true;   /* A/B reference: the old full rebuild on every write */
+#endif
+#endif
+    ppu->cgram[ppu->cgramPointer++] = value;
+  }
+  ppu->cgramSecondWrite = !ppu->cgramSecondWrite;
+}
+
 void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
 //  if (adr != 24 && adr != 25)
 //    printf("ppu_write(%d, %d)\n", adr, val);
@@ -5081,52 +5232,7 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
       break;
     }
     case 0x04: {
-      if(ppu->oamInHigh) {
-        uint32_t high_index = ((ppu->oamAdr & 0xf) << 1) | ppu->oamSecondWrite;
-        uint8_t *dst = &ppu->highOam[high_index];
-#ifdef SNES_LINE_REUSE_PROBE
-        if (*dst != val) {
-          g_probe_oam_gen++;
-          for (int s = high_index * 4; s < high_index * 4 + 4; s++)
-            g_probe_oam_entry_gen[s]++;
-        }
-#endif
-#ifdef SNES_LINE_CACHE
-        if (*dst != val) {
-          int first = high_index * 4;
-          PpuLineCacheBump(&g_line_cache_oam_serial, &g_line_cache_oam_last[first]);
-          for (int s = first + 1; s < first + 4; s++)
-            g_line_cache_oam_last[s] = g_line_cache_oam_serial;
-        }
-#endif
-        *dst = val;
-        ppu->objCacheValid = 0;   /* size / x-high bits moved */
-        if(ppu->oamSecondWrite) {
-          ppu->oamAdr++;
-          if(ppu->oamAdr == 0) ppu->oamInHigh = false;
-        }
-      } else {
-        if(!ppu->oamSecondWrite) {
-          ppu->oamBuffer = val;
-        } else {
-          uint16_t value = (val << 8) | ppu->oamBuffer;
-#ifdef SNES_LINE_REUSE_PROBE
-          if (ppu->oam[ppu->oamAdr] != value) {
-            g_probe_oam_gen++;
-            g_probe_oam_entry_gen[ppu->oamAdr >> 1]++;
-          }
-#endif
-#ifdef SNES_LINE_CACHE
-          if (ppu->oam[ppu->oamAdr] != value)
-            PpuLineCacheBump(&g_line_cache_oam_serial,
-                             &g_line_cache_oam_last[ppu->oamAdr >> 1]);
-#endif
-          ppu->oam[ppu->oamAdr++] = value;
-          ppu->objCacheValid = 0;   /* a sprite may have moved vertically */
-          if(ppu->oamAdr == 0) ppu->oamInHigh = true;
-        }
-      }
-      ppu->oamSecondWrite = !ppu->oamSecondWrite;
+      ppu_port_oamdata(ppu, val);
       break;
     }
     case 0x05: {
@@ -5216,42 +5322,11 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
       break;
     }
     case 0x18: {
-      // TODO: vram access during rendering (also cgram and oam)
-      uint16_t vramAdr = ppu_getVramRemap(ppu);
-      uint16_t *dst = &ppu->vram[vramAdr & 0x7fff];
-      uint16_t value = (*dst & 0xff00) | val;
-#ifdef SNES_LINE_REUSE_PROBE
-      if (*dst != value) {
-        g_probe_vram_gen++;
-        g_probe_vram_page_gen[(vramAdr & 0x7fff) >> 6]++;
-      }
-#endif
-#ifdef SNES_LINE_CACHE
-      if (*dst != value)
-        PpuLineCacheBump(&g_line_cache_vram_serial,
-                         &g_line_cache_vram_last[(vramAdr & 0x7fff) >> kLineCacheVramShift]);
-#endif
-      *dst = value;
-      if(!ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
+      ppu_port_vmdatal(ppu, val);
       break;
     }
     case 0x19: {
-      uint16_t vramAdr = ppu_getVramRemap(ppu);
-      uint16_t *dst = &ppu->vram[vramAdr & 0x7fff];
-      uint16_t value = (*dst & 0x00ff) | (val << 8);
-#ifdef SNES_LINE_REUSE_PROBE
-      if (*dst != value) {
-        g_probe_vram_gen++;
-        g_probe_vram_page_gen[(vramAdr & 0x7fff) >> 6]++;
-      }
-#endif
-#ifdef SNES_LINE_CACHE
-      if (*dst != value)
-        PpuLineCacheBump(&g_line_cache_vram_serial,
-                         &g_line_cache_vram_last[(vramAdr & 0x7fff) >> kLineCacheVramShift]);
-#endif
-      *dst = value;
-      if(ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
+      ppu_port_vmdatah(ppu, val);
       break;
     }
     case 0x1a: {
@@ -5281,33 +5356,7 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
       break;
     }
     case 0x22: {
-      if(!ppu->cgramSecondWrite) {
-        ppu->cgramBuffer = val;
-      } else {
-        uint16_t value = (val << 8) | ppu->cgramBuffer;
-#ifdef SNES_LINE_REUSE_PROBE
-        if (ppu->cgram[ppu->cgramPointer] != value) {
-          g_probe_cgram_gen++;
-          g_probe_cgram_entry_gen[ppu->cgramPointer]++;
-        }
-#endif
-#ifdef SNES_LINE_CACHE
-        if (ppu->cgram[ppu->cgramPointer] != value)
-          PpuLineCacheBump(&g_line_cache_cgram_serial,
-                           &g_line_cache_cgram_last[ppu->cgramPointer]);
-#endif
-#ifdef PPU_RGB565
-        if (ppu->cgram[ppu->cgramPointer] != value) {
-          g_cgram_dirty[ppu->cgramPointer >> 5] |= 1u << (ppu->cgramPointer & 31);
-          g_cgram_dirty_any = true;
-        }
-#ifdef SNES_PPU_FULL_REBUILD_REF
-        ppu->paletteDirty = true;   /* A/B reference: the old full rebuild on every write */
-#endif
-#endif
-        ppu->cgram[ppu->cgramPointer++] = value;
-      }
-      ppu->cgramSecondWrite = !ppu->cgramSecondWrite;
+      ppu_port_cgdata(ppu, val);
       break;
     }
     case 0x23:
@@ -5429,6 +5478,45 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
     }
     default: {
       break;
+    }
+  }
+}
+
+bool ppu_dma_ports(const uint8_t regs[4]) {
+  int vram = 0;
+  for (int k = 0; k < 4; k++) vram += regs[k] == 0x18 || regs[k] == 0x19;
+  return vram == 4 ||
+         (regs[0] == 0x04 && regs[1] == 0x04 && regs[2] == 0x04 && regs[3] == 0x04) ||
+         (regs[0] == 0x22 && regs[1] == 0x22 && regs[2] == 0x22 && regs[3] == 0x22);
+}
+
+void ppu_dma_write(Ppu* ppu, const uint8_t regs[4], unsigned oi, const uint8_t* buf, uint32_t n) {
+  if (regs[0] == 0x04) {
+    for (uint32_t i = 0; i < n; i++) ppu_port_oamdata(ppu, buf[i]);
+  } else if (regs[0] == 0x22) {
+    for (uint32_t i = 0; i < n; i++) ppu_port_cgdata(ppu, buf[i]);
+  } else {
+#if !defined(SNES_LINE_CACHE) && !defined(SNES_LINE_REUSE_PROBE)
+    /* A word upload (VMDATAL, VMDATAH alternating; VMAIN increments after the
+     * high byte): each low/high pair writes one VRAM word, the pointer moving
+     * only after the high byte, so the pair is one remap and one store. Same
+     * end state as the two read-modify-writes (the diagnostics above are the
+     * only ones that see the half-written word). A transfer starting on the
+     * high byte or ending on a low one does that byte alone. */
+    if (ppu->vramIncrementOnHigh && regs[0] == 0x18 && regs[1] == 0x19 && regs[2] == 0x18 && regs[3] == 0x19) {
+      uint32_t i = 0;
+      if (oi & 1) ppu_port_vmdatah(ppu, buf[i++]);
+      for (; i + 1 < n; i += 2) {
+        ppu->vram[ppu_getVramRemap(ppu) & 0x7fff] = (uint16_t)(buf[i] | (buf[i + 1] << 8));
+        ppu->vramPointer += ppu->vramIncrement;
+      }
+      if (i < n) ppu_port_vmdatal(ppu, buf[i]);
+      return;
+    }
+#endif
+    for (uint32_t i = 0; i < n; i++, oi++) {
+      if (regs[oi & 3] == 0x18) ppu_port_vmdatal(ppu, buf[i]);
+      else ppu_port_vmdatah(ppu, buf[i]);
     }
   }
 }

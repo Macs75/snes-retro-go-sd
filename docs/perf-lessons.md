@@ -85,7 +85,8 @@ read it before touching any hot renderer loop.
 
 ## 4. Landed optimisations (case studies)
 
-All three are **generic** (see §5.2) and verified host-bit-exact + device A/B.
+§4.1-§4.4 are **generic** (see §5.2); §4.5 is the per-game Super FX exception.
+All are verified host-bit-exact + device A/B.
 
 ### 4.1 HiROM low-half pagemap fast path — committed `5c253f7`
 
@@ -177,6 +178,301 @@ confirmed those stayed byte-identical. The §5.1 blow-up only happens when the
 inlined code carries *loop-carried* state that competes for the hot loop's
 registers.
 
+### 4.5 Super FX (GSU): per-game block code, and the PLOT that called `memcpy` — branch `superfx-poc`
+
+The GSU is the ZSNES 2 core (`src/snes/gsu_zsnes/`): one table dispatch per
+opcode, state in globals. Yoshi's Island at the start (device log 3, the 5.89M
+budget): title screen 156% busy with the GSU alone at 102%, gameplay 102% busy
+with the GSU at 23%.
+
+**Block code** (`tools/gen_gsu_blocks.py` → `gsu_blocks_<game>.inc`, built in
+`gsu_blocks.c`): the game's hot GSU code compiled to C, as in the arcade NEC
+`nec_hle_build.py`. A host histogram per phase (`GSU_PCHIST`, windows by
+`GSU_PCHIST_FRAMES`) selects the hot addresses; the generator decodes them into
+*chains* (straight-line code through untaken branches, prefixes resolved,
+registers and flags in locals), joins chains that jump into each other into one
+C function (shared locals, gotos), and keys entries by (bank, PC, prefetched
+opcode). Exactness rests on three things: every template is the ZSNES handler
+transcribed, quirks included; the budget is checked per label so a chain never
+runs an instruction MainLoop would not have; a ROM-bytes hash enables the table
+only for the matching dump. Verified with `GSU_STATELOG` (per-frame hash of the
+whole GSU state + Game Pak RAM, blocks on vs `GSU_BLOCKS=0`: byte-identical over
+19,219 frames), the 160 device REC hashes, and a negative control.
+
+What the chains had to learn, each found by measuring where control left them
+(`GSU_CHAINHIST`): delay slots that hold a *prefix* (TO R14 in a branch delay
+slot takes its opcode from the branch target), LOOPs whose delay slot is a prefix
+(R13 found by following the `IWT R13` that set it — the histogram can't see the
+target), `JMP R11` returns (resolved against `LINK` return addresses). Joining
+chains cut gameplay chain calls from 2,047 to 139 per frame.
+
+Budget: ~50 KB of ARM in a ~54 KB pool, so the selection is per phase (gameplay
+89%, title 95%, intro 75% of instructions), the lookup table runs at a 2/3 load
+factor, and the coldest 5% of functions are `optimize("Os")`.
+
+**The PLOT.** After all that, the title screen still spent ~half its GSU time in
+PLOT. Moving the Game Pak RAM from uncached AHB SRAM into DTCM changed nothing
+(log 9: −1%), so it was not memory. The disassembly was: `fx_drawpix` read and
+wrote each bitplane word through `ld16u`/`st16u` (`memcpy` for unaligned safety),
+and with `-mno-unaligned-access` GCC emits a **real `bl memcpy`** for a 2-byte
+copy — four library calls per 4bpp pixel, in the interpreter's PLOT handlers as
+much as in the chains. The addresses are always even, so `ld16a`/`st16a`
+(`__builtin_assume_aligned`) compile to one `ldrh`/`strh`. See §5.8.
+
+| Yoshi's Island, device | log 3 (interpreter) | log 8 (chains) | log 10 (+ aligned PLOT) |
+| --- | --- | --- | --- |
+| title: busy / GSU | 156% / 102% | 102% / 41% | **87% / 25%**, audio no longer slowed |
+| story panel (frame 9480): busy / GSU | — | 81% / 25% | **71% / 14%** |
+| gameplay: GSU | 23% | 8.5% | **7.8%** |
+| late frames intro / gameplay | 4314 / 4395 | 200 / 2634 | **157 / 2554** |
+
+Gameplay's remaining late frames are an every-other-frame overrun (average busy
+86-93%, heaviest frame ~125%); the GSU is now ~8-10% of that frame.
+
+**"late" is not lost time.** `PROF/pace late=` counts frames that reach the
+audio-DMA wait after its tick. At 30 fps the drawn frame is the heavy one, and
+the undrawn one after it absorbs a sub-period overrun: `wall_ms` stays at 1995
+per 120 frames (real time) and the audio at 1.000 with dozens of "late" frames.
+Real time is lost only where one frame overruns by more than a period; the
+pacing resets its reference every frame, so those ticks are never repaid and the
+audio ring drains (`underruns`, `step_min` 0.84-0.89). Read `wall_ms` and
+`underruns`, not `late`, to find the frames that matter.
+
+**A spike is often code nobody profiled.** Host `FRAME_STATS` (per-frame 65816,
+SPC700, GSU instructions and DMA bytes) put the intro's worst window (229%) on
+four frames of the "THE BABIES ARE MINE!" panel, when Kamek flies off: GSU
+96K instructions against ~13K, 48% of them interpreted (`GSU_CHAINHIST`), nearly
+all one 7-instruction GETC/PLOT loop at `08:9055` run 46,870 times. The intro
+histogram had been taken at 75% coverage, which left this rare scene out. A
+histogram of the two bursts added to the selection compiled it (2.8% and 0.7%
+interpreted after): device, logs 17 → 18, those windows' heaviest frame
+229% → 104% and 198% → 94%, no time lost, underruns 590/603 → 0.
+
+**A second game, and one overlay per game.** The chains first lived in the
+GSU overlay, so every Super FX cart loaded Yoshi's 85 KB. Each game's blocks
+are now their own overlay record (GSGM), linked right behind the GSU overlay
+and read with it as one pool allocation for the cart whose internal-header hash
+matches; `gsu_blk_select` still checks the ROM bytes before using them
+(`tools/overlay_records.py` shows which record a cart loads). Star Fox's chains
+came from one device recording split into three phase histograms (intro, title,
+gameplay at 95%): 94% of its GSU instructions compiled, state identical with
+chains on and off. Device (Star Fox logs 2 → 3): GSU 67% → 20% (intro),
+32% → 8% (title), 56% → 16% (gameplay) of the frame budget; the title back to
+real time, intro and gameplay from ~1.65x to ~1.25x. What is left there is the
+PPU (41-43%) and the 65816 (37-40%), no longer the GSU.
+
+A later recording reached the mission map and the zoom onto Corneria, which
+none of the three phases had: 89% of their GSU instructions interpreted, GSU
+85-210% of the budget. One routine (01:b674-bbf2, the textured planets) was
+86% of that; a fourth histogram of those frames brought them to 98% compiled
+and the record to 108 KB (4.5 KB of pool left). Device (logs 6 → 7): those
+windows 149% → 72% busy, the worst 268% → 79%, underruns over the replay -86%.
+Level 1 was then 92% compiled: the same addition took it to 94% and its GSU
+21% → 19.5%. Use `tools/gsu_hist_report.py` on a new scene's frames before
+assuming chains will help.
+
+**What an interpreted instruction costs, and level 1's own histogram.**
+`PERF_GSU` on the device, the vblank catch-up split out (log 15): level 1's
+GSU was 21% of the budget, the chains 13 cycles per GSU instruction (PLOT
+apart), the 7.8% left to the interpreter ~100 each (over the 104 windows:
+100.6 per interpreted instruction plus 52K a frame) -- 38% of the GSU time
+for 8% of its instructions. The catch-up burst (35% of the GSU work: the rest
+of a 3D frame, finished at vblank, from the upstream ZSNES fork) has the same
+profile. The selection had never had level 1's histogram: adding it at 95%,
+the map/zoom one trimmed to 90% and `--hot 0.90`, took the record from 108 to
+114 KB (the zoom's own code is 4.7 KB; most of its chains are shared) and level
+1's interpreted instructions from 4,228 to 3,433 a frame -- a third less than
+the histogram promised. 38% of what stays interpreted runs at compiled
+addresses: a chain runs whole loop iterations, so when a scanline's slice ends
+mid-loop the interpreter finishes the iteration and the next slice resumes
+mid-loop until it meets an entry, about one iteration per slice boundary,
+which no histogram shows. With the chain-entry filter (`gsu_blk_filt`, a
+miss in the table 27 → 13 instructions) on top, device (logs 14 → 16): level
+1 GSU 1,139K → 998K cycles/frame, lower in all 83 windows, busy 99.0% →
+96.6%, heaviest frame 241% → 205%, silence halved; the map and zoom +36K
+(still 71% busy). Regenerate with:
+`gen_gsu_blocks.py --rom starfox.sfc --hist h_game.hist:0.95 --hist h_intro.hist:0.95
+--hist h_title.hist:0.95 --hist h_launch.hist:0.90 --hist h_level.hist:0.95
+--plot c_FxOp4C1284bzd,c_FxOp4C1284bz --hot 0.90 --name starfox ...`.
+`PERF_GSU_PLOT` (the PLOT split) no longer fits Star Fox's record: its probes
+are inlined into every chain.
+
+**Then the PPU: offset-per-tile.** Star Fox's 3D scenes are BG mode 2 with
+OPT on, which leaves the fast tile walkers for `PpuDrawBackground_opt`: host
+callgrind put it at 82% of the PPU's instructions, ~72 per pixel -- every
+pixel's 4 bits pulled out one by one, two BG3 tilemap reads per column per layer
+(`ppu_handleOPT`). It now decodes each tile once to chunky nibbles (the table
+the fast drawers use), skips blank tiles, and reuses the offset words the
+per-pass "is OPT on" check already reads. Host: the OPT drawer -60%, PPU -44%.
+Device (Star Fox logs 3 → 4): PPU 41-43% → 24-26%, intro and gameplay 1.25x →
+~1.07x real time, underruns -90%; CPU, GSU, APU and the hashes unchanged.
+Placement cost two pins: the drawer moved behind `ppu_runLine` (only OPT lines
+run it) and the 4bpp drawer is pinned, because taking the OPT checks out of
+line shrank `PpuDrawBackgrounds` and would have shifted every drawer behind it.
+
+### 4.6 SPC700: batch the opcodes inside the Thumb-2 engine
+
+In Yoshi's Island the SPC700 cost is real driver work, not polling: a host
+histogram (`APU_HIST`, `tools/spc_hist_report.py`) put the driver ~97% busy in
+gameplay (DSP shadow-register loop, per-voice pitch maths), with the idle skip
+firing as designed. So skipping more was not the lever; the cost per opcode was.
+
+`PERF_SPC` measured that cost before changing anything (device log 12, waterfall
+room): ~130 cycles per SPC700 opcode, of which ~99 inside `spc_runOpcode` +
+engine and ~31 in `apu_run`'s C loop around it (cycle commit, DSP-boundary test,
+the call). 3,569 opcodes/frame × 130 ≈ 465K. The fix moves the loop into the
+assembly: the engine keeps `Spc*`, ARAM, `Apu*`, `&apu->cycles` and the budget in
+registers, commits each opcode's cycles itself, and calls `apu_dsp_ticks` only on
+opcodes that cross a 32-cycle boundary (at most ~533 DSP ticks a frame against
+3,569 opcodes). It returns to C for exactly
+the cases `apu_run` handles differently, so the C loop stays the single source
+of those rules (the idle-wait bytes are matched in asm only to stop the batch).
+
+| Yoshi waterfall, device, PERF_SPC | log 12 (per opcode) | log 13 (batch) |
+| --- | --- | --- |
+| engine calls / frame | 3,569 | 45 |
+| SPC700 / frame | 507K | 321K |
+| outside the engine (apu_run loop) | ~112K | ~6K |
+| inside the engine, per opcode | ~99 | ~88 |
+| busy | 103.3% | 100.0% |
+
+Two things to carry over. The probes themselves cost ~42K/frame at per-opcode
+granularity: compare a probed build only with a build probed the same way, and
+discount it against a normal one. And the per-opcode figure *inside* the engine
+also fell (99 → 88) — entry/exit (push/pop, re-deriving bases) was part of every
+opcode's cost, invisible until the loop moved. The C fallback (246 opcodes,
+~22.5K/frame, ~7% of the SPC700) is now the measured baseline for native
+handlers; the DSP (~530K) is the larger half of the APU.
+
+### 4.7 DMA: read the source where `snes_read` would, and write ports as blocks
+
+Yoshi's waterfall room showed `dma=562K` a frame for only ~4,400 bytes moved
+(`DMA_HIST`, `tools/dma_hist_report.py`): ~128 device cycles a byte. Not the
+volume and not the `dma_cycle` calls (~1,350 a frame); the per-byte path. Every
+byte from a LoROM, Super FX or WRAM-mirror source ran the full decode
+(`cart_read` → `cart_readLorom` → `cart_gsu_read`, or `snes_read`'s ladder)
+although the bank is fixed for the whole transfer. Only WRAM `$7E/$7F` and
+plain HiROM banks had a direct pointer, which is why HiROM games never showed it.
+
+The fix reuses what the CPU already trusts: `g_snes_rdmap`, the 65816's 8 KB
+page map, gives a host pointer exactly where `snes_read` reads plain memory, so
+one table load per byte replaces the decode (NULL pages still go through
+`snes_read`); the Super FX Game Pak RAM gets its own flat case. Bytes are still
+read one at a time, so a target that writes WRAM is seen. Reading the page map
+against `cart_readLorom` found one place they disagree (LoROM under 2 MB with
+SRAM, `$70-$7D:$8000+`, noted in `snes_pagemap_base`); DMA keeps the slow path
+there.
+
+Device, waterfall (logs 13 → 14, same PERF level): DMA 562K → 320K, busy 100.0%
+→ 95.8%, late frames 113 → 60 of 120; CPU, PPU, APU, GSU and the 65816 opcode
+count unchanged. The first build overflowed the 9 KB BUS window: the three flat
+loops became one (`src[(ofs | adr) & mask]`), and `ppu_write`/`ppu_read` are now
+pinned at their measured offset so DMA edits can't move them.
+
+**Then the write side.** Every byte still went `snes_writeBBus` → `ppu_write`'s
+switch → its port handler. The four data-port cases ($2104, $2118, $2119, $2122)
+moved, unchanged, into always-inline helpers that both `ppu_write` and a new
+`ppu_dma_write` use, so the side effects (remap, increments, palette dirty bits,
+line-cache bumps) are one piece of code. A transfer whose four B-bus targets
+are one port group, from a source without side effects, is read into a 128-byte
+buffer and written as blocks; a byte on a page the map does not serve is read
+only after the bytes before it are written. `ppu_write`'s instruction stream is
+unchanged (612 instructions, diffed). Device (logs 14 → 15): DMA 320K → 238K,
+busy 95.8% → 94.4%; late frames stayed at 60 (the overruns are the ~129% frames).
+
+Placement: the A→B transfer became its own function, placed with
+`ppu_dma_write` in the padding between the BUS and CPU windows, so `dma_doDma`
+shrank (1,016 → 424 bytes) instead of pushing the window; HDMA, `ppu_write` and
+`ppu_read` are pinned at their measured offsets. The first try was caught by
+that pin (`cannot move location counter backwards`) rather than shipping a
+shifted window.
+
+**Then the VRAM word pairs.** Before writing it, `DMA_HIST` recorded VMAIN for
+every VRAM transfer to count what would qualify: mode 1 to `$2118` with the
+increment after the high byte was 76% of the waterfall's DMA bytes, 53% of the
+whole Yoshi replay, 27-31% in Castlevania and Batman, and the cases that cannot
+pair (increment after low, byte-only, odd start) ~2 bytes a frame in all six
+runs -- a general case, not a per-game one. Such a pair lands on one word, so
+it is one remap and one store instead of two read-modify-writes. Device (logs
+15 → 16): DMA 238K → 191K, busy 94.4% → 93.8% (the other figures +7K, within
+what two logs can tell apart). Over the three steps: DMA 562K → 191K (-66%).
+
+### 4.8 Idle skip: a Super FX wait compares only the bits it tests
+
+Star Fox's 65816 waits for the GSU with `LDA $3030 / AND #$20 / BNE`. The idle
+skip knew the loop, but its proof snapshotted the whole status byte, and the
+GSU's own flags in that byte (Z/CY/S/OV) change on every slice it runs, so
+nearly every span was refused; the 2-per-frame re-proof budget then ran out
+and half the frame's opcodes (~4,200 of ~8,250) were the poll, interpreted.
+
+The loop decoder now records an `AND #imm` right after the status read, and
+the skip tells three cases apart: the tested bits changed (no skip, the loop is
+leaving), the whole byte unchanged (the exact path, as before), only untested
+bits changed (skip whole laps from the loop head). The stored mid-lap states
+hold the old byte, so that last case does not use them: a span that starts
+mid-lap first runs the rest of the lap for real, in a `noinline` helper so the
+ITCM code grew only 178 bytes. Generic for any GSU poll of this shape.
+
+Device (Star Fox logs 4 → 5, hashes equal in all 39 windows): gameplay CPU
+2.36M → 2.03M cycles/frame, 65816 opcodes 8,447 → 7,146, busy 103% → 97%,
+underruns over the replay 8,112 → 3,536. What remains refused (~2,200/frame)
+enters the loop with different registers than the proven lap; accepting those
+needs to know which registers the loop reads.
+
+### 4.9 Code run from WRAM: the fetch page
+
+The engine's inline fetch serves bytes from one cached page, which only
+`snes_cpuRead` installs, and only for ROM. In Star Fox's level 1 half the
+65816 opcodes run from WRAM, so every fetched byte there paid the call. The
+page map now installs WRAM pages too (`$7E/$7F` and the low mirror). Only
+fetches reach `snes_cpuRead` for those pages (data reads are served by the
+engine's page-map hit), and the page points at live memory that is never
+remapped, so a write to it needs no invalidation. Generic.
+
+Device (`PERF_CPUB`, Star Fox logs 9 → 10, hashes equal in all 105 windows):
+level-1 batch engine 1,540K → 1,423K cycles/frame, lower in every window, busy
+101.8% → 99.8%. gwemu and host agree on eight recordings
+(`tools/qemu_vs_host.py`); a build serving WRAM fetches one byte off diverged.
+
+### 4.10 Audio: pace the frame loop on the playback queue, not on the audio tick
+
+The frame loop waited for the next audio DMA tick (one per frame, 266 samples
+at 16 kHz) and then dropped whatever lag the frame had left. Light frames
+could not bank time, and a frame that overran a whole tick lost it for good, so
+the stretcher's cushion (640 samples) could refill only by playing slower. In
+Star Fox's level 1 it sat near empty with the rate at its floor, and every
+spike ran it dry.
+
+Two attempts that did not work, measured on the device (Star Fox level 1):
+
+- **Catch-up on the tick** (`SNES_CATCHUP_MAX`, up to 3 ticks of debt repaid by
+  not waiting): +1.7 points of speed, but the stretcher had already slowed the
+  music for that same lag, so the repaid audio arrived as surplus and its
+  overflow drain threw it away: 11,856 samples (0.74 s) against 5,158 without
+  catch-up (logs 12, cap 3 / cap 0). It stays for the stretcher path.
+- **Direct audio paced on the tick**: the queue never held a spare frame. A
+  frame late by less than a whole tick leaves no debt, so nothing repaid it;
+  spares came back only after whole-tick overruns, and the queue swung between
+  full (frames dropped) and empty (silence) in the same 2 seconds.
+
+What works (`SNES_AUDIO_DIRECT=1`, the default): the samples go straight to the
+ISR ring, and the frame wait paces on the ring itself. It waits only while the
+playing frame plus `SNES_DIRECT_SPARE` (3) more are queued, so any overrun,
+however small, shows as a lower queue and the lighter frames after it refill
+it. The pitch and tempo never change; where the core is slower than real time
+for longer than the queue covers, the sound has gaps. Device (logs 13 → 14):
+the intro and the map 2.9 → 0 ms of silence per 2 s window; level 1's heavy
+windows play ~6.8% silence, the time the core loses there. The stretcher's
+work in the main loop went too: ~0.6% of the budget.
+
+The lesson: a buffer only moves time. A spike is absorbed only if the frames
+around it are far enough under budget to refill it. In Star Fox's level 1 the
+3D frame peaks at ~180% every few frames and the frames between barely repay
+it (`PROF/qev`: the queue holds one frame before each silence), so what is left
+there is CPU time to find, not pacing. `PROF/pace` (`dropped`, `fill_min`),
+`PROF/direct`, `PROF/audio3` and `PROF/qev` (`PERF_AUDIO`) measure it, and
+`tools/prof_log_compare.py` sums them per phase.
+
 ---
 
 ## 5. Cross-cutting lessons
@@ -239,6 +535,13 @@ skips.** Per-game data is acceptable only as a guarded, opt-in table — never
 branching logic keyed on a title. The three case studies above are all generic:
 the pagemap path is "HiROM, no coprocessor"; the Mode 7 paths trigger on PPU
 register state, not on which game is running.
+
+**The one exception is the Super FX (§4.5).** Seven titles (plus regional
+copies) use the GSU, and a generic speed-up of the interpreter's dispatch did
+not pay (the one-switch dispatch lost on the device: `experiments/superfx-gsu-dispatch-switch.md`).
+There, per-game compiled block code is allowed — gated on a hash of the exact
+ROM bytes it was compiled from, with the generic interpreter as the exact
+fallback.
 
 ### 5.3 Verify output with state hashes, not pixels
 
@@ -343,6 +646,30 @@ safer, bigger win.
   didn't perturb the pixel loops, the same lens that caught §5.1's spill blow-up.
   See §6 for the one-liner.
 
+### 5.8 A 2-byte `memcpy` is a library call on this device
+
+The usual portable idiom for an unaligned load — `memcpy(&v, p, 2)` — folds into
+one instruction on the host and on most targets. The device build is
+`-mno-unaligned-access`, so GCC cannot fold it and emits `bl memcpy`. It hid in
+the GSU's PLOT from the port on (§4.5): four calls per pixel, invisible in the C,
+obvious in the disassembly (52 `bl memcpy` in the block code alone). When the
+address is known to be aligned, say so (`__builtin_assume_aligned`, or a typed
+access) and it becomes `ldrh`/`ldr`. **Grep the hot objects for `bl memcpy` /
+`bl memset`** — a "free" helper call in a pixel loop is never free here.
+
+### 5.9 A bigger translation unit changes how GCC inlines *unrelated* code
+
+Including 63 KB of generated block code in `gsu_core.c` made GCC inline 19
+helpers it had kept out of line before (`fx_lm`, `fx_stw`, `fx_cmprn`, …) into
+every interpreter handler: +27 KB of overlay, and the measured interpreter's code
+changed silently. GCC's inline-growth limits are *percentages of the unit*, so a
+bigger unit raises the budget for everything in it. Pinning those 19 `noinline`
+only moved the flip to other helpers (+15 KB). The fix was structural: generated
+code in its own unit (`gsu_blocks.c`); the interpreter then compiled exactly as
+before (an `nm -S` diff of the linked ELF: 3 symbols changed, all intended).
+Diff **linked** symbol sizes, not `.o` sizes — `--gc-sections` drops what is
+unreferenced.
+
 ---
 
 ## 6. Tooling quick reference
@@ -378,4 +705,8 @@ diff <(norm before/ppu.o ppu_runLine) <(norm after/ppu.o ppu_runLine)
 PROFLITE (`PROFLITE=1`) is the cheap "how does it fare" build: per-frame skip +
 audio-step tracking only, no per-line/opcode DWT probes. `PERF=1 PERF_CPU=1` adds
 the opcode census (and disables opcode batching, so it can overflow ITCM — a
-diagnostic build only).
+diagnostic build only). Its per-opcode cost is therefore that of a path normal
+builds don't run: to split the 65816 figure of a normal build, use
+`PERF=1 PERF_CPUB=1` (batch / events / idle / rest, `PROF/cpub`, summed per phase
+by `tools/prof_log_compare.py`). A change to the Thumb-2 engines or bridges is
+checked with `tools/qemu_vs_host.py` (gwemu against the host, per recording).

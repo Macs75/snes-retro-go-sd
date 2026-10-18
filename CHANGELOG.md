@@ -1,5 +1,77 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Super FX (GSU) support.** Yoshi's Island, Star Fox, Doom, Vortex, Dirt Trax
+  FX, Stunt Race FX and Winter Gold boot and play. The GSU core is the ZSNES
+  one, made to fit the G&W, and is loaded only for a Super FX cart. Yoshi's
+  Island and Star Fox run their hot GSU code as precompiled blocks, each game's
+  loaded only for its own cart. Yoshi's title screen went from 156% to 87% of
+  the frame budget on device, gameplay averages under it and the heaviest room
+  (the waterfall) sits at it; Star Fox's title runs at full speed and its intro
+  and gameplay went from ~1.65x to ~1.25x real time; its mission map and planet
+  zoom, up to 2.7x, now run at full speed. Save states work for Super
+  FX carts; one saved by an earlier build is refused.
+- Diagnostics: `PERF_SPC=1` (the SPC700 time split), host `APU_HIST`,
+  `CPU_PCHIST` and `IDLE_TRACE`, the GSU spike/coverage and core memory reports
+  in `tools/`, `tools/state_resume_test.py` (a save state resumed in a fresh
+  process must continue like the run that saved it), host `DMA_HIST` with
+  `tools/dma_hist_report.py`, and `tools/replay_ab.py` (two host builds must
+  replay recordings to the same machine state).
+
+### Performance
+
+- **SPC700: the Thumb-2 engine runs whole batches of opcodes**, instead of being
+  called once per opcode from C. Generic, every game's sound driver runs through
+  it. Yoshi's Island waterfall room: SPC700 507K → 321K cycles/frame, an
+  estimated 2.5% of the frame budget against a normal build. Output
+  bit-identical (Castlevania and Yoshi's Island replays on the Cortex-M7
+  harness).
+- **DMA without the per-byte bus decode and register dispatch.** The source is
+  read directly (plain memory through the CPU's page map: WRAM and its mirror,
+  LoROM and Super FX ROM; and the Super FX Game Pak RAM), uploads to VRAM,
+  CGRAM and OAM are written as blocks into the PPU's data ports, and a VRAM
+  word upload writes each low/high pair as one word. Generic. Yoshi's Island
+  waterfall room: DMA 562K → 191K cycles/frame, busy 100% → 94% of the budget,
+  late frames halved. Output bit-identical (Super Mario Kart,
+  Castlevania, Batman, TMNT IV and Yoshi's Island replays).
+- **Offset-per-tile backgrounds** (BG modes 2 and 4 with OPT, Star Fox's 3D
+  scenes) decode each tile once instead of every pixel bit by bit, skip blank
+  tiles and read BG3's offset table once per pass. Star Fox on device: PPU
+  41-43% → 24-26% of the frame budget, intro and gameplay from 1.25x to
+  ~1.07x real time. Output bit-identical.
+- **Idle skip: Super FX status polls** (`LDA $3030 / AND #imm / BNE`) are
+  skipped while only the GSU flags the loop doesn't test change. Star Fox on
+  device: gameplay CPU -14%, busy 103% → 97% of the budget, audio underruns
+  over the replay -56%. Output bit-identical.
+
+### Changed
+
+- **Audio goes straight to the output**, without the stretcher
+  (`SNES_AUDIO_DIRECT=1`, the default; 0 restores it). The frame loop keeps
+  three frames of sound queued beyond the one playing: a heavy frame plays from
+  the queue and the frames after it refill it. Music never changes pitch or
+  tempo; where the emulator is slower than real time for longer than the queue
+  covers, the sound has short gaps instead of slowing down. ~0.6% of the frame
+  budget less.
+- **Idle skip:** a wait loop entered in another CPU environment (M/X/E, DB, DP)
+  gets a site of its own instead of replacing the existing one (8 sites, was 4),
+  and the site search also runs at IRQ requests, so loops that wait for an IRQ
+  mid-frame are found.
+- The Cx4, S-DD1, SPC7110 and DSP-1 code joined the Super FX core as overlays
+  loaded only for their carts, and the private framebuffer holds only the
+  256x240 picture: ~65 KB more RAM for every game.
+
+### Fixed
+
+- The auto-joypad read's busy flag (`$4212` bit 0) now sets for ~3 lines at
+  the start of vblank; it never did. Star Fox hung on the mission briefing,
+  which waits for it before reading the pad.
+- PROFLITE no longer reports the audio as slowed for the stretcher's normal
+  ±1% trimming, only below 0.99x.
+
 ## [v0.0.7]
 
 A targeted follow-up: a generic sub-screen compositing skip that cuts
