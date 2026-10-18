@@ -220,6 +220,8 @@ uint32_t snes_perf_ops, snes_perf_gsu_reads;
 #ifdef SNES_PERF_GSU
 uint32_t snes_perf_gsu_plot, snes_perf_gsu_plots, snes_perf_gsu_chain;
 uint32_t snes_perf_gsu_chain_ops, snes_perf_gsu_ops;
+/* of the above, the vblank catch-up (gsu.c): cycles, instructions, plot and chain cycles, chain instructions */
+uint32_t snes_perf_gsu_vbl, snes_perf_gsu_vbl_ops, snes_perf_gsu_vbl_plot, snes_perf_gsu_vbl_chain, snes_perf_gsu_vbl_chain_ops;
 #endif
 #ifdef SNES_PERF_SPC
 uint32_t snes_perf_spc_step, snes_perf_spc_ops, snes_perf_spc_fb, snes_perf_spc_fbs;
@@ -369,6 +371,10 @@ static void snes_perf_report(void)
          (unsigned long)(snes_perf_gsu_plot / n), (unsigned long)(snes_perf_gsu_plots / n),
          (unsigned long)(snes_perf_gsu_chain / n), (unsigned long)(snes_perf_gsu_chain_ops / n),
          (unsigned long)(snes_perf_gsu_ops / n));
+  printf("PROF/gsu: vblank catch-up=%lu cycles for %lu instructions, plot=%lu chains=%lu chain_ops=%lu per emulated frame\n",
+         (unsigned long)(snes_perf_gsu_vbl / n), (unsigned long)(snes_perf_gsu_vbl_ops / n),
+         (unsigned long)(snes_perf_gsu_vbl_plot / n), (unsigned long)(snes_perf_gsu_vbl_chain / n),
+         (unsigned long)(snes_perf_gsu_vbl_chain_ops / n));
 #endif
   printf("PROF/apu: total=%lu [spc700=%lu dsp=%lu] in_emu=%lu in_pcm=%lu calls=%lu per emulated frame\n",
          (unsigned long)apu_all, (unsigned long)spc, (unsigned long)dsp, (unsigned long)apu_e,
@@ -540,6 +546,8 @@ static void snes_perf_reset(void)
 #ifdef SNES_PERF_GSU
   snes_perf_gsu_plot = snes_perf_gsu_plots = snes_perf_gsu_chain = 0;
   snes_perf_gsu_chain_ops = snes_perf_gsu_ops = 0;
+  snes_perf_gsu_vbl = snes_perf_gsu_vbl_ops = snes_perf_gsu_vbl_plot = 0;
+  snes_perf_gsu_vbl_chain = snes_perf_gsu_vbl_chain_ops = 0;
 #endif
 #ifdef SNES_PERF_SPC
   snes_perf_spc_step = snes_perf_spc_ops = snes_perf_spc_fb = snes_perf_spc_fbs = snes_perf_spc_skips = 0;

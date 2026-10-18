@@ -119,9 +119,21 @@ void gsu_vblank(Gsu *g) {
   gsu_state_frame(gsu_host_frame);
   gsu_host_frame++;
 #endif
+#ifdef SNES_PERF_GSU
+  uint32_t const v_ops = snes_perf_gsu_ops, v_plot = snes_perf_gsu_plot;
+  uint32_t const v_chain = snes_perf_gsu_chain, v_cops = snes_perf_gsu_chain_ops;
+  uint32_t const v_t = snes_perf_now();
+#endif
   SNES_PERF_BEGIN(perf_t);
   gsu_zsnes_vblank();
   SNES_PERF_END(snes_perf_gsu, perf_t);
+#ifdef SNES_PERF_GSU
+  snes_perf_gsu_vbl += snes_perf_now() - v_t;
+  snes_perf_gsu_vbl_ops += snes_perf_gsu_ops - v_ops;
+  snes_perf_gsu_vbl_plot += snes_perf_gsu_plot - v_plot;
+  snes_perf_gsu_vbl_chain += snes_perf_gsu_chain - v_chain;
+  snes_perf_gsu_vbl_chain_ops += snes_perf_gsu_chain_ops - v_cops;
+#endif
   gsu_idle_select(g);
   gsu_service_irq(g);
 }

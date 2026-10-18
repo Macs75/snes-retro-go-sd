@@ -64,13 +64,15 @@ extern uint32_t snes_perf_cpu_rd_slow, snes_perf_cpu_rd_page, snes_perf_cpu_wr_s
 #define SNES_PERF_CPU_INC(c) do { } while (0)
 #endif
 
-/* PERF_GSU=1, a diagnostic for the Super FX figure (two timer reads per PLOT
- * and per chain call): cycles inside PLOT and the PLOT count, cycles inside
- * the compiled chains (PLOTs they run included), and GSU top-level
- * instructions run by the chains / in all. */
+/* PERF_GSU=1, a diagnostic for the Super FX figure (two timer reads per chain
+ * call): cycles inside the compiled chains, GSU top-level instructions run by
+ * the chains / in all, and the same for the vblank catch-up alone (gsu.c).
+ * PERF_GSU_PLOT=1 adds the cycles inside PLOT and the PLOT count (two timer
+ * reads per pixel). */
 #ifdef SNES_PERF_GSU
 extern uint32_t snes_perf_gsu_plot, snes_perf_gsu_plots, snes_perf_gsu_chain;
 extern uint32_t snes_perf_gsu_chain_ops, snes_perf_gsu_ops;
+extern uint32_t snes_perf_gsu_vbl, snes_perf_gsu_vbl_ops, snes_perf_gsu_vbl_plot, snes_perf_gsu_vbl_chain, snes_perf_gsu_vbl_chain_ops;
 #endif
 
 /* PERF_SPC=1, a diagnostic for the SPC700 figure (two timer reads per call

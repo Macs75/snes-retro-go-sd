@@ -64,7 +64,7 @@ void fx_plot_pixel(u4 const r1, u4 const r2, int const depth, u4 const zmask, in
                                                                        : 6;
     u4 const index = (r2 & 0xFFFF00FFu) | ((r1 & 0xFFu) << 8);
     u4 const tile = fx_tile(sfxclineloc, index);
-#ifdef SNES_PERF_GSU
+#ifdef SNES_PERF_GSU_PLOT
     u4 const perf_t = snes_perf_now();
 #endif
 
@@ -79,7 +79,7 @@ void fx_plot_pixel(u4 const r1, u4 const r2, int const depth, u4 const zmask, in
 #ifdef HOST_BUILD
     { extern unsigned long gsu_plotstat[64]; gsu_plotstat[(depth << 4) | (zcheck << 3) | (dither << 2) | (u4)sfxclineloc]++; }
 #endif
-#ifdef SNES_PERF_GSU
+#ifdef SNES_PERF_GSU_PLOT
     snes_perf_gsu_plot += snes_perf_now() - perf_t;
     snes_perf_gsu_plots++;
 #endif

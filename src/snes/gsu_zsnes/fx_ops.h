@@ -2285,11 +2285,13 @@ static void gsu_state_exit(void)
 void gsu_state_frame(long const frame)
 {
     {
-        extern unsigned long gsu_src_ops[3];
+        extern unsigned long gsu_src_ops[3], gsu_src_interp[3];
         static FILE *fo; static int on = -1;
         if (on < 0) { char const *p = getenv("GSU_FRAMEOPS"); fo = p ? fopen(p, "w") : NULL; on = fo != NULL; }
-        if (on) fprintf(fo, "%ld %lu %lu %lu\n", frame, gsu_src_ops[0], gsu_src_ops[1], gsu_src_ops[2]);
+        if (on) fprintf(fo, "%ld %lu %lu %lu %lu %lu %lu\n", frame, gsu_src_ops[0], gsu_src_ops[1], gsu_src_ops[2],
+                        gsu_src_interp[0], gsu_src_interp[1], gsu_src_interp[2]);
         gsu_src_ops[0] = gsu_src_ops[1] = gsu_src_ops[2] = 0;
+        gsu_src_interp[0] = gsu_src_interp[1] = gsu_src_interp[2] = 0;
     }
     if (gsu_st_on <= 0) return;
     extern unsigned long long gsu_blk_ops;
@@ -2373,9 +2375,10 @@ unsigned long long gsu_blk_ops, gsu_all_ops;   /* GSU_STATELOG prints them */
 unsigned long gsu_hs[5];
 unsigned long gsu_plotstat[64];
 /* GSU_FRAMEOPS=file: GSU instructions per emulated frame by where the slice
-   came from (sched.inc sets gsu_src): 0 per-line, 1 vblank catch-up, 2 start */
+   came from (sched.inc sets gsu_src): 0 per-line, 1 vblank catch-up, 2 start;
+   then, of each, the instructions the interpreter ran (the rest ran in chains) */
 int gsu_src;
-unsigned long gsu_src_ops[3];
+unsigned long gsu_src_ops[3], gsu_src_interp[3];
 unsigned long gsu_fs_ops;   /* FRAME_STATS (main_snes.c): GSU instructions this frame */
 #endif
 
@@ -2449,6 +2452,7 @@ void MainLoop(void)
 #ifdef HOST_BUILD
         gsu_hs[1]++;
         gsu_src_ops[gsu_src]++;
+        gsu_src_interp[gsu_src]++;
         gsu_fs_ops++;
 #endif
         FxDispatch(FxTabled);

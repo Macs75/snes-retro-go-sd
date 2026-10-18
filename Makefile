@@ -51,6 +51,7 @@ PERF_AUDIO ?= 0
 PERF_CPU ?= 0
 PERF_CPUB ?= 0
 PERF_GSU ?= 0
+PERF_GSU_PLOT ?= 0
 PERF_SPC ?= 0
 
 CORE_C_SOURCES := \
@@ -141,11 +142,16 @@ endif
 ifeq ($(PERF_CPUB),1)
 CORE_C_DEFS += -DSNES_PERF_CPUB
 endif
-# PERF_GSU=1 splits the Super FX figure: cycles in PLOT and in the compiled
-# chains, and how many GSU instructions the chains ran. Diagnostic: two timer
-# reads per PLOT and per chain call.
+# PERF_GSU=1 splits the Super FX figure: cycles in the compiled chains and how
+# many GSU instructions they ran, for the whole frame and for the vblank
+# catch-up. Diagnostic: two timer reads per chain call. PERF_GSU_PLOT=1 adds
+# the cycles in PLOT (two more per pixel, inlined into every chain: it grows a
+# game's block code by ~3 KB, which Star Fox's may not have room for).
 ifeq ($(PERF_GSU),1)
 CORE_C_DEFS += -DSNES_PERF_GSU
+ifeq ($(PERF_GSU_PLOT),1)
+CORE_C_DEFS += -DSNES_PERF_GSU_PLOT
+endif
 endif
 # PERF_SPC=1 splits the SPC700 figure: cycles inside the Thumb-2 engine (net of
 # its DSP ticks), in its C fallback, and apu_run's loop as the rest.
