@@ -267,10 +267,35 @@ none of the three phases had: 89% of their GSU instructions interpreted, GSU
 86% of that; a fourth histogram of those frames brought them to 98% compiled
 and the record to 108 KB (4.5 KB of pool left). Device (logs 6 → 7): those
 windows 149% → 72% busy, the worst 268% → 79%, underruns over the replay -86%.
-Level 1 was already 92% compiled: the same addition took it to 94% and its
-GSU 21% → 19.5%; compiling the rest would save at most ~4% of the budget for
-~150 KB of code. Use `tools/gsu_hist_report.py` on a new scene's frames before
+Level 1 was then 92% compiled: the same addition took it to 94% and its GSU
+21% → 19.5%. Use `tools/gsu_hist_report.py` on a new scene's frames before
 assuming chains will help.
+
+**What an interpreted instruction costs, and level 1's own histogram.**
+`PERF_GSU` on the device, the vblank catch-up split out (log 15): level 1's
+GSU was 21% of the budget, the chains 13 cycles per GSU instruction (PLOT
+apart), the 7.8% left to the interpreter ~100 each (over the 104 windows:
+100.6 per interpreted instruction plus 52K a frame) -- 38% of the GSU time
+for 8% of its instructions. The catch-up burst (35% of the GSU work: the rest
+of a 3D frame, finished at vblank, from the upstream ZSNES fork) has the same
+profile. The selection had never had level 1's histogram: adding it at 95%,
+the map/zoom one trimmed to 90% and `--hot 0.90`, took the record from 108 to
+114 KB (the zoom's own code is 4.7 KB; most of its chains are shared) and level
+1's interpreted instructions from 4,228 to 3,433 a frame -- a third less than
+the histogram promised. 38% of what stays interpreted runs at compiled
+addresses: a chain runs whole loop iterations, so when a scanline's slice ends
+mid-loop the interpreter finishes the iteration and the next slice resumes
+mid-loop until it meets an entry, about one iteration per slice boundary,
+which no histogram shows. With the chain-entry filter (`gsu_blk_filt`, a
+miss in the table 27 → 13 instructions) on top, device (logs 14 → 16): level
+1 GSU 1,139K → 998K cycles/frame, lower in all 83 windows, busy 99.0% →
+96.6%, heaviest frame 241% → 205%, silence halved; the map and zoom +36K
+(still 71% busy). Regenerate with:
+`gen_gsu_blocks.py --rom starfox.sfc --hist h_game.hist:0.95 --hist h_intro.hist:0.95
+--hist h_title.hist:0.95 --hist h_launch.hist:0.90 --hist h_level.hist:0.95
+--plot c_FxOp4C1284bzd,c_FxOp4C1284bz --hot 0.90 --name starfox ...`.
+`PERF_GSU_PLOT` (the PLOT split) no longer fits Star Fox's record: its probes
+are inlined into every chain.
 
 **Then the PPU: offset-per-tile.** Star Fox's 3D scenes are BG mode 2 with
 OPT on, which leaves the fast tile walkers for `PpuDrawBackground_opt`: host
