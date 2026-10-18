@@ -76,6 +76,14 @@ Mario via `get_ofw_is_mario()`.
 
 See `CLAUDE.md` for the general core memory map and porting checklist.
 
+## License
+
+The core is distributed under the **GNU GPL v2** (`LICENSE`), because the
+Super FX emulation in `src/snes/gsu_zsnes/` is derived from ZSNES (GPLv2).
+The LakeSnes-based core and the build glue were MIT-licensed; their MIT
+terms are kept in `LICENSE.mit`. Vendored headers under `sdk/include/` keep
+their original licenses.
+
 ## Releases (GitHub tags `v*`)
 
 Pushing a tag `vX.Y.Z` (with a matching `## [vX.Y.Z]` section in
