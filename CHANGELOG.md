@@ -49,6 +49,13 @@
 
 ### Changed
 
+- **Audio goes straight to the output**, without the stretcher
+  (`SNES_AUDIO_DIRECT=1`, the default; 0 restores it). The frame loop keeps
+  three frames of sound queued beyond the one playing: a heavy frame plays from
+  the queue and the frames after it refill it. Music never changes pitch or
+  tempo; where the emulator is slower than real time for longer than the queue
+  covers, the sound has short gaps instead of slowing down. ~0.6% of the frame
+  budget less.
 - **Idle skip:** a wait loop entered in another CPU environment (M/X/E, DB, DP)
   gets a site of its own instead of replacing the existing one (8 sites, was 4),
   and the site search also runs at IRQ requests, so loops that wait for an IRQ

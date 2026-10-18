@@ -409,6 +409,45 @@ level-1 batch engine 1,540K → 1,423K cycles/frame, lower in every window, busy
 101.8% → 99.8%. gwemu and host agree on eight recordings
 (`tools/qemu_vs_host.py`); a build serving WRAM fetches one byte off diverged.
 
+### 4.10 Audio: pace the frame loop on the playback queue, not on the audio tick
+
+The frame loop waited for the next audio DMA tick (one per frame, 266 samples
+at 16 kHz) and then dropped whatever lag the frame had left. Light frames
+could not bank time, and a frame that overran a whole tick lost it for good, so
+the stretcher's cushion (640 samples) could refill only by playing slower. In
+Star Fox's level 1 it sat near empty with the rate at its floor, and every
+spike ran it dry.
+
+Two attempts that did not work, measured on the device (Star Fox level 1):
+
+- **Catch-up on the tick** (`SNES_CATCHUP_MAX`, up to 3 ticks of debt repaid by
+  not waiting): +1.7 points of speed, but the stretcher had already slowed the
+  music for that same lag, so the repaid audio arrived as surplus and its
+  overflow drain threw it away: 11,856 samples (0.74 s) against 5,158 without
+  catch-up (logs 12, cap 3 / cap 0). It stays for the stretcher path.
+- **Direct audio paced on the tick**: the queue never held a spare frame. A
+  frame late by less than a whole tick leaves no debt, so nothing repaid it;
+  spares came back only after whole-tick overruns, and the queue swung between
+  full (frames dropped) and empty (silence) in the same 2 seconds.
+
+What works (`SNES_AUDIO_DIRECT=1`, the default): the samples go straight to the
+ISR ring, and the frame wait paces on the ring itself. It waits only while the
+playing frame plus `SNES_DIRECT_SPARE` (3) more are queued, so any overrun,
+however small, shows as a lower queue and the lighter frames after it refill
+it. The pitch and tempo never change; where the core is slower than real time
+for longer than the queue covers, the sound has gaps. Device (logs 13 → 14):
+the intro and the map 2.9 → 0 ms of silence per 2 s window; level 1's heavy
+windows play ~6.8% silence, the time the core loses there. The stretcher's
+work in the main loop went too: ~0.6% of the budget.
+
+The lesson: a buffer only moves time. A spike is absorbed only if the frames
+around it are far enough under budget to refill it. In Star Fox's level 1 the
+3D frame peaks at ~180% every few frames and the frames between barely repay
+it (`PROF/qev`: the queue holds one frame before each silence), so what is left
+there is CPU time to find, not pacing. `PROF/pace` (`dropped`, `fill_min`),
+`PROF/direct`, `PROF/audio3` and `PROF/qev` (`PERF_AUDIO`) measure it, and
+`tools/prof_log_compare.py` sums them per phase.
+
 ---
 
 ## 5. Cross-cutting lessons

@@ -39,6 +39,11 @@ SNES_SPC_IDLE_SKIP ?= 1
 # silent DSP voices leave the per-sample loop, caught up when they wake (src/snes/dsp.c)
 SNES_DSP_IDLE_SKIP_VOICE ?= 1
 SNES_BUS_IN_ITCM ?= 1
+# stretcher path only: frames of audio-tick debt the loop may repay by not waiting; 0 = none
+SNES_CATCHUP_MAX ?= 3
+# 1 = no audio stretcher: each frame's samples go straight to the ISR ring, which the
+# frame wait keeps SNES_DIRECT_SPARE frames ahead; silence when it runs dry. 0 = the stretcher
+SNES_AUDIO_DIRECT ?= 1
 # PERF=1: per-component cycle profiler, PROF/... log lines every 120 frames (src/snes_perf.h)
 PERF ?= 0
 PERF_PPU ?= 0
@@ -159,6 +164,7 @@ endif
 ifeq ($(SNES_SPIN_BAKE),1)
 CORE_C_DEFS += -DSNES_SPIN_BAKE
 endif
+CORE_C_DEFS += -DSNES_CATCHUP_MAX=$(SNES_CATCHUP_MAX) -DSNES_AUDIO_DIRECT=$(SNES_AUDIO_DIRECT)
 ifeq ($(SNES_IDLE_SKIP),1)
 CORE_C_DEFS += -DSNES_IDLE_SKIP
 endif

@@ -109,6 +109,15 @@ bool snes_loadRom(Snes *snes, const uint8_t *data, int length);   /* snes_other.
 #define SNES_AUDIO_RATE     16000
 #define SNES_AUDIO_SAMPLES_NTSC  (SNES_AUDIO_RATE / SNES_FPS_NTSC) /* 266 */
 #define SNES_AUDIO_SAMPLES_PAL   (SNES_AUDIO_RATE / SNES_FPS_PAL)  /* 320 */
+#ifndef SNES_AUDIO_DIRECT
+#define SNES_AUDIO_DIRECT 0   /* 1 = no stretcher: samples straight to the ISR ring (snes_pcm_direct) */
+#endif
+#ifndef SNES_DIRECT_SPARE
+#define SNES_DIRECT_SPARE 3   /* direct audio: frames queued beyond the one playing */
+#endif
+#ifndef SNES_CATCHUP_MAX
+#define SNES_CATCHUP_MAX 3   /* audio ticks of debt the pacing may repay; see the frame wait */
+#endif
 #define SNES_AUDIO_SAMPLES_MAX   SNES_AUDIO_SAMPLES_PAL
 
 /* Savestate stamp: a raw struct dump must refuse files this build didn't
@@ -243,6 +252,25 @@ enum { SP_FRAMECTL, SP_INPUT, SP_EMU, SP_KICK, SP_PCM, SP_WAIT, SP_OVERLAY, SP_S
 static uint32_t sp_phase[SP_N];
 static uint32_t sp_apu_emu, sp_apu_pcm;            /* APU cycles inside emu / inside pcm submit */
 static uint32_t sp_frames, sp_shown, sp_late, sp_pace_ms, sp_t0_ms;
+static uint32_t sp_dropped, sp_fill_min = 0xffffffffu;   /* pacing: ticks past the catch-up cap; lowest stretcher backlog */
+#if SNES_AUDIO_DIRECT
+/* direct audio: silence the ISR played and samples dropped as excess, the
+ * lowest queue a frame found, the frames that found silence, the frames
+ * queued at the last wait (x100); with PERF_AUDIO also the first SP_DIR_EV
+ * frames that found silence: frame in the window, silence samples, queue at
+ * the wait before, the frame's cost in cycles */
+static uint32_t sp_dir_silence, sp_dir_drop, sp_dir_min = 0xffffffffu, sp_dir_dma, sp_dir_prev_spare, sp_dir_nsil;
+static uint16_t sp_dir_tail;
+#ifdef SNES_PERF_AUDIO
+#define SP_DIR_EV 12
+static uint32_t sp_dir_ev[SP_DIR_EV][4], sp_dir_nev;
+#endif
+#endif
+#ifdef SNES_PERF_AUDIO
+/* the cushion each frame leaves at its wait: stretcher backlog by band, and
+ * the lowest ISR ring level seen (both in samples) */
+static uint32_t sp_fill_hist[5], sp_pcm_min = 0xffffffffu;
+#endif
 static uint32_t sp_mhz;
 static uint32_t sp_frame_max;                      /* the heaviest emulated frame (busy cycles) */
 static uint32_t sp_last, sp_frame_busy;
@@ -300,9 +328,17 @@ static void snes_perf_report(void)
            (unsigned long)sp_late, (unsigned long)sp_frames, (unsigned long)wall);
     /* Below 0.99x only: inside +-1% the stretcher is trimming its backlog
        (snes_audio_stretch.c, STEP_MIN), which is not a slowdown you can hear. */
+#if SNES_AUDIO_DIRECT
+    /* direct audio never changes pitch: what a slow stretch costs is silence */
+    if (sp_dir_silence)
+      printf("PROFLITE: audio silence=%lu ms in %lu frames\n",
+             (unsigned long)(sp_dir_silence * 1000u / SNES_AUDIO_RATE),
+             (unsigned long)sp_dir_nsil);
+#else
     if (sp_step_min < 64881u || avg_step < 64881u)
       printf("PROFLITE: audio SLOWED step_avg=%lu step_min=%lu (65536 = 1.0x)\n",
              (unsigned long)avg_step, (unsigned long)sp_step_min);
+#endif
     snes_perf_reset();
     return;
   }
@@ -357,8 +393,9 @@ static void snes_perf_report(void)
   printf("PROF/loop: pcm=%lu input=%lu framectl=%lu per emulated frame\n",
          (unsigned long)(sp_phase[SP_PCM] / n), (unsigned long)(sp_phase[SP_INPUT] / n),
          (unsigned long)(sp_phase[SP_FRAMECTL] / n));
-  printf("PROF/pace: late=%lu of %lu frames (already behind the audio clock), wait_ms=%lu\n",
-         (unsigned long)sp_late, (unsigned long)sp_frames, (unsigned long)sp_pace_ms);
+  printf("PROF/pace: late=%lu of %lu frames (already behind the audio clock), wait_ms=%lu, dropped=%lu ticks past the catch-up cap, fill_min=%lu\n",
+         (unsigned long)sp_late, (unsigned long)sp_frames, (unsigned long)sp_pace_ms,
+         (unsigned long)sp_dropped, (unsigned long)(sp_fill_min == 0xffffffffu ? 0 : sp_fill_min));
 #if defined(SNES_PERF_CPUB) && defined(SNES_IDLE_SKIP)
   {
     uint32_t bt = snes_perf_cpub_batch / n, sg = snes_perf_cpub_single / n, ev = snes_perf_cpub_events / n;
@@ -390,6 +427,20 @@ static void snes_perf_report(void)
   g_idle_stats.laps = g_idle_stats.ff_dots = g_idle_stats.wai_dots = 0;
   g_idle_stats.cyc = g_idle_stats.calls = 0;
 #endif
+#if SNES_AUDIO_DIRECT
+  printf("PROF/direct: silence=%lu in %lu frames, dropped=%lu queue_min=%lu (samples), spare=%u frames\n",
+         (unsigned long)sp_dir_silence, (unsigned long)sp_dir_nsil, (unsigned long)sp_dir_drop,
+         (unsigned long)(sp_dir_min == 0xffffffffu ? 0 : sp_dir_min), (unsigned)SNES_DIRECT_SPARE);
+#ifdef SNES_PERF_AUDIO
+  for (uint32_t i = 0; i < sp_dir_nev; i++)
+    printf("PROF/qev: frame=%lu silence=%lu queued_before=%lu.%02lu frames cost=%lu%%\n",
+           (unsigned long)sp_dir_ev[i][0], (unsigned long)sp_dir_ev[i][1],
+           (unsigned long)(sp_dir_ev[i][2] / 100u), (unsigned long)(sp_dir_ev[i][2] % 100u),
+           (unsigned long)((uint64_t)sp_dir_ev[i][3] * 100u / (budget ? budget : 1u)));
+  if (sp_dir_nsil > sp_dir_nev)
+    printf("PROF/qev: +%lu more frames found silence\n", (unsigned long)(sp_dir_nsil - sp_dir_nev));
+#endif
+#endif
   printf("PROF/audio: step_avg=%lu step_min=%lu (65536 = normal speed) underruns=%lu inserts=%lu fill=%u\n",
          (unsigned long)(sp_step_sum / n), (unsigned long)sp_step_min,
          (unsigned long)(snes_stretch_underruns() - sp_under0), (unsigned long)(g_stretch_ins - sp_ins0),
@@ -408,6 +459,10 @@ static void snes_perf_report(void)
            (unsigned long)(g_sa_next_sum / pl), (unsigned long)(g_sa_base_sum / pl),
            (unsigned long)g_sa_base_min, (unsigned long)g_sa_base_max,
            (unsigned long)((uint64_t)sp_au_isr * 1000u / w));
+    printf("PROF/audio3: frames by backlog at the wait <64=%lu <256=%lu <512=%lu <640=%lu >=640=%lu, pcm_min=%lu\n",
+           (unsigned long)sp_fill_hist[0], (unsigned long)sp_fill_hist[1], (unsigned long)sp_fill_hist[2],
+           (unsigned long)sp_fill_hist[3], (unsigned long)sp_fill_hist[4],
+           (unsigned long)(sp_pcm_min == 0xffffffffu ? 0 : sp_pcm_min));
   }
 #endif
 #ifdef SNES_PERF_CPU
@@ -506,6 +561,16 @@ static void snes_perf_reset(void)
   sp_au_push = sp_au_isr = sp_au_nopull = 0; sp_au_dma0 = dma_counter; sp_au_tail = snes_pcm_tail;
 #endif
   sp_apu_emu = sp_apu_pcm = sp_frames = sp_shown = sp_late = sp_pace_ms = sp_frame_max = 0;
+  sp_dropped = 0; sp_fill_min = 0xffffffffu;
+#if SNES_AUDIO_DIRECT
+  sp_dir_silence = sp_dir_drop = sp_dir_nsil = 0; sp_dir_min = 0xffffffffu;
+#ifdef SNES_PERF_AUDIO
+  sp_dir_nev = 0;
+#endif
+#endif
+#ifdef SNES_PERF_AUDIO
+  memset(sp_fill_hist, 0, sizeof(sp_fill_hist)); sp_pcm_min = 0xffffffffu;
+#endif
   sp_t0_ms = HAL_GetTick();
 }
 #endif
@@ -1823,6 +1888,58 @@ static void snes_pcm_pump(void)
   snes_pcm_head = head;
 }
 
+#if SNES_AUDIO_DIRECT
+/* SNES_AUDIO_DIRECT=1: the frame's samples go straight into the ISR ring, as
+ * the arcade core plays them -- no rate change, no splice, no stretcher. The
+ * frame wait paces on this ring: it holds
+ * SNES_DIRECT_SPARE frames beyond the one playing, a spike up to that many
+ * ticks plays from them, and every frame lighter than budget refills them.
+ * An empty ring plays silence (pcm_fill zeros the rest of the half). The
+ * ring cannot overfill while the wait paces on it; the limit below only
+ * guards a resume, where the loop runs ahead until the spares are back. */
+static uint16_t snes_pcm_queued(void) {
+  return (uint16_t)((snes_pcm_head - snes_pcm_tail) & (SNES_PCM_RING - 1u));
+}
+static void snes_pcm_direct(const int16_t *src, uint16_t n) {
+  const uint16_t mask = (uint16_t)(SNES_PCM_RING - 1u);
+  uint16_t head = snes_pcm_head;
+  uint16_t used = snes_pcm_queued();
+  uint16_t max = (uint16_t)(snes_audio_samples * (SNES_DIRECT_SPARE + 2));
+  uint16_t take = used >= max ? 0 : (uint16_t)(max - used) < n ? (uint16_t)(max - used) : n;
+#ifdef SNES_PERF
+  {
+    /* What the ISR played since the last frame, against what it took from the
+     * ring: the difference is silence. dma_counter and the tail move together
+     * in one ISR, so a read pair that saw no tick in between is consistent. */
+    uint32_t d; uint16_t tl;
+    do { d = dma_counter; tl = snes_pcm_tail; } while (d != dma_counter);
+    uint32_t played = (d - sp_dir_dma) * (uint32_t)snes_audio_samples;
+    uint32_t took = (uint16_t)((tl - sp_dir_tail) & mask);
+    uint32_t sil = played > took ? played - took : 0;
+    sp_dir_dma = d; sp_dir_tail = tl;
+    sp_dir_silence += sil;
+    sp_dir_drop += (uint32_t)(n - take);
+    if (used < sp_dir_min) sp_dir_min = used;
+    if (sil) sp_dir_nsil++;
+#ifdef SNES_PERF_AUDIO
+    if (sil && sp_dir_nev < SP_DIR_EV) {
+      sp_dir_ev[sp_dir_nev][0] = sp_frames;            /* frame within the window */
+      sp_dir_ev[sp_dir_nev][1] = sil;
+      sp_dir_ev[sp_dir_nev][2] = sp_dir_prev_spare;    /* frames queued at the previous wait, x100 */
+      sp_dir_ev[sp_dir_nev][3] = sp_frame_busy;         /* that frame's cost so far, cycles */
+      sp_dir_nev++;
+    }
+#endif
+  }
+#endif
+  for (uint16_t i = 0; i < take; i++) {
+    snes_pcm_ring[head] = src[i];
+    head = (uint16_t)((head + 1u) & mask);
+  }
+  snes_pcm_head = head;
+}
+#endif
+
 static void snes_pcm_submit(void) {
   if (snes->apu) {
 #ifdef SNES_SMW_HLE_PRODUCT
@@ -1878,6 +1995,10 @@ static void snes_pcm_submit(void) {
   if (!play)
     return;
 
+#if SNES_AUDIO_DIRECT
+  snes_pcm_direct(audio_buf, (uint16_t)snes_audio_samples);
+  return;
+#endif
   /* Hand the frame's emulated samples to the stretcher, then top the ISR
    * ring up. The stretcher always writes a full pull; pcm_fill only zeros
    * when the ring is empty. */
@@ -3198,10 +3319,49 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
     /* Pace only once SAI is running — otherwise dma_counter never moves and
      * the 100k-iter guard just burns time (and can still trip WWDG under load). */
     if (odroid_system_get_app()->speedupEnabled == SPEEDUP_1x) {
-        static uint32_t snes_last_dma = 0;
+        static uint32_t snes_last_dma = 0;   /* the audio tick the previous frame's slot ended on */
         if (snes_last_dma == 0) snes_last_dma = dma_counter;
+        /* Each frame owns one audio tick, its slot. A frame that ends after its
+         * slot leaves a debt the next frames repay by not waiting, so audio
+         * pushed catches up with audio played and the stretcher's cushion
+         * refills at normal pitch. The debt is capped at SNES_CATCHUP_MAX
+         * ticks; past that the time is dropped (a pause, a long heavy stretch),
+         * so the game never runs ahead for longer than the cap. */
+        const uint32_t prev_dma = snes_last_dma;
+        uint32_t cap = SNES_CATCHUP_MAX;
+#ifdef SNES_SMW_HLE_PRODUCT
+        if (g_wire_on) cap = 0;   /* the HLE replays missed batches itself, below */
+#endif
+        uint32_t slot = prev_dma + 1u;
+#if SNES_AUDIO_DIRECT
+        /* Direct audio paces on its ring instead: wait while it holds the
+         * playing frame plus SNES_DIRECT_SPARE more (see snes_pcm_direct).
+         * A frame late by any fraction of a tick shows up there, so every
+         * overrun is repaid, not only those of a whole tick. */
+        const uint16_t pace_target = (uint16_t)(snes_audio_samples * (SNES_DIRECT_SPARE + 1));
+#define SNES_PACE_WAITING() (snes_pcm_queued() >= pace_target)
+#else
+#define SNES_PACE_WAITING() ((int32_t)(dma_counter - slot) < 0)
+#endif
 #ifdef SNES_PERF
-        if (dma_counter != snes_last_dma) sp_late++;   /* the audio clock is already ahead */
+#if SNES_AUDIO_DIRECT
+        sp_dir_prev_spare = (uint32_t)snes_pcm_queued() * 100u / (uint32_t)snes_audio_samples;
+#else
+        if ((int32_t)(dma_counter - slot) > (int32_t)cap) sp_dropped += dma_counter - slot - cap;
+#endif
+        if (snes_stretch_fill() < sp_fill_min) sp_fill_min = snes_stretch_fill();
+#ifdef SNES_PERF_AUDIO
+        {
+          uint32_t fl = snes_stretch_fill();
+          sp_fill_hist[fl < 64 ? 0 : fl < 256 ? 1 : fl < 512 ? 2 : fl < 640 ? 3 : 4]++;
+          uint32_t pu = (uint16_t)(snes_pcm_head - snes_pcm_tail) & (SNES_PCM_RING - 1u);
+          if (pu < sp_pcm_min) sp_pcm_min = pu;
+        }
+#endif
+#endif
+        if ((int32_t)(dma_counter - slot) > (int32_t)cap) slot = dma_counter - cap;
+#ifdef SNES_PERF
+        if (!SNES_PACE_WAITING()) sp_late++;   /* the audio clock is already ahead */
         uint32_t sp_w0 = HAL_GetTick();
 #endif
 #ifdef SNES_DEVICE_PROFILE
@@ -3210,7 +3370,7 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
          * deadline had already passed, the wait below falls straight through,
          * and LLE never recovers that period. Reading a near-zero wait as
          * "we overran" without this number is the mistake the review flagged. */
-        prof_dma_before = dma_counter - snes_last_dma;
+        prof_dma_before = dma_counter - prev_dma;
 #endif
         /* Feed the watchdog and give up eventually. This wait blocks until the
          * audio DMA advances, and it had neither guard: if dma_counter stops
@@ -3231,11 +3391,12 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
          * legitimately waits is far under it, so pacing is unchanged. */
         {
             uint32_t spin_guard = 0;
-            while (dma_counter == snes_last_dma && spin_guard < 100000u) {
+            while (SNES_PACE_WAITING() && spin_guard < 100000u) {
                 wdog_refresh();
                 cpumon_sleep();
                 spin_guard++;
             }
+            if (spin_guard >= 100000u) slot = dma_counter;   /* DMA stopped: resync, no debt */
 #ifdef SNES_DEVICE_PROFILE
             prof_wfi = spin_guard;   /* __WFI() round trips actually executed */
 #endif
@@ -3243,8 +3404,9 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 #ifdef SNES_PERF
         sp_pace_ms += HAL_GetTick() - sp_w0;
 #endif
-        uint32_t elapsed = dma_counter - snes_last_dma;
-        snes_last_dma = dma_counter;
+#undef SNES_PACE_WAITING
+        uint32_t elapsed = dma_counter - prev_dma;
+        snes_last_dma = cap ? slot : dma_counter;
         /* LLE: the SAI ISR fills every DMA half from the pcm ring, so a
          * slow frame no longer leaves one half playing stale samples.
          * Catch-up only for HLE — wire_frame_audio does not advance the
