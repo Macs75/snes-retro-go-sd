@@ -64,6 +64,8 @@ void sa1_statelog(Sa1* s, unsigned long frame);   /* SA1_STATELOG=file */
  * and a 65816 read of I-RAM / BW-RAM / ROM without any side effect (0 for
  * anything else). */
 bool sa1_asleep(const Sa1* s);
+/* the 65816 polls $2300/$2301 in a proven loop: the SA-1 runs ahead (sa1.c) */
+int sa1_ahead(Sa1* s, uint16_t v, uint16_t h0, uint16_t L, int n);
 /* The 65816's page map entry for SA-1 cart space (snes.c snes_pagemap_base):
  * a ROM or plain BW-RAM page as a host pointer, NULL for the slow path. */
 uint8_t* sa1_snes_page(Sa1* s, uint8_t bank, uint16_t adr);

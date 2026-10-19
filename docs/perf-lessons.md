@@ -552,6 +552,20 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   line held. A loop entered with other registers at each request (Y) needs a
   proof per request: its own budget, 128 a frame. Host: 20.8M laps skipped
   instead of 15.0M, hashes equal; syncing two dots late broke 51 of 54.
+- **Run ahead to the write, exact to the clock.** A poll at dot h sees a write
+  whose instruction started with debt D when the clocks credited up to h
+  exceed (credited to the end) - D. So the engine charges an instruction's
+  operand-dependent extra cycles at its end (until then r11 is its start
+  debt), records r11 at every C write, and stops after a register write that
+  changes `$2300`/`$2301` or the 65816's interrupt lines; the SA-1 is then put
+  back to the first lap that sees it. Two traps, both caught by the hashes: in
+  C the next instruction overwrote the recorded debt (break right after the
+  write), and the polled bytes must still equal the proof's when the run-ahead
+  starts (it watches for a change from now). A one-clock error in the recorded
+  debt broke 50 of 54 checkpoints on gwemu.
+- **SA-1-only code in core RAM costs every game.** The span runner (2.2 KB, its
+  proof inlined) pushed Star Fox's GSU blocks out of RAM_EMU by 332 bytes; in
+  the SA-1 overlay (`.sa1ovl.text`) it is loaded only for an SA-1 cart.
 
 ---
 

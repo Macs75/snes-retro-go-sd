@@ -18,5 +18,7 @@
 #define RUN_DIRTY       27
 #define RUN_OPS         52
 #define RUN_AS          56
+#define RUN_WDEBT       92
+#define RUN_STOP        96
 
 #endif

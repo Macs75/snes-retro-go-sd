@@ -73,6 +73,8 @@ typedef struct {
   /* 56  the engine's snapshot at the head: A, X, Y, N/Z as it holds them, then
    * Cpu.sp, the words at Cpu+16/20/24 and Cpu.e */
   uint32_t asnap[9];
+  int32_t wdebt;              /* 92  the debt the instruction now running started with */
+  uint8_t stop;               /* 96  a run-ahead's watched write happened: return */
 } Sa1Run;
 
 struct Sa1 {
@@ -127,6 +129,9 @@ struct Sa1 {
   uint8_t* bwram;
   uint32_t bwramMask;
   uint32_t romPatch;          /* map_sa1's patch: ROM offset + 1, 0 = none */
+  /* sa1_ahead: what the 65816 polls ($2300, $2301) and its interrupt lines
+   * when the run-ahead began */
+  uint8_t watch, w2300, w2301, wirq, wnmi;
 };
 
 #define SA1_SAVE_FIRST iram
@@ -139,7 +144,8 @@ _Static_assert(offsetof(Sa1Run, debt) == RUN_DEBT && offsetof(Sa1Run, lapCycles)
                offsetof(Sa1Run, lapInstrs) == RUN_LAPINS && offsetof(Sa1Run, extEvents) == RUN_EXTEV &&
                offsetof(Sa1Run, lapEvents) == RUN_LAPEV && offsetof(Sa1Run, candPc) == RUN_CANDPC &&
                offsetof(Sa1Run, candK) == RUN_CANDK && offsetof(Sa1Run, lapDirty) == RUN_DIRTY &&
-               offsetof(Sa1Run, ops) == RUN_OPS && offsetof(Sa1Run, asnap) == RUN_AS,
+               offsetof(Sa1Run, ops) == RUN_OPS && offsetof(Sa1Run, asnap) == RUN_AS &&
+               offsetof(Sa1Run, wdebt) == RUN_WDEBT && offsetof(Sa1Run, stop) == RUN_STOP,
                "Sa1Run: sa1_engine.S reads these offsets");
 _Static_assert(offsetof(Sa1, rdmap) == 0 && offsetof(Sa1, iram) == SA1E_IRAM &&
                offsetof(Sa1, wdirty) == SA1E_IRAM + SA1E_WDIRTY, "Sa1: sa1_engine.S reads these offsets");
@@ -820,6 +826,14 @@ uint8_t sa1_cpu_read(Sa1* s, uint32_t a) {
   return 0;
 }
 
+/* A run-ahead (sa1_ahead) stops after a register write that changes what the
+ * 65816 polls or its interrupt lines */
+static void sa1_watch_check(Sa1* s) {
+  if (sa1_reg_read(s, 0x2300) != s->w2300 || sa1_reg_read(s, 0x2301) != s->w2301 ||
+      s->snes->cpu->irqWanted != s->wirq || s->snes->cpu->nmiWanted != s->wnmi)
+    s->run.stop = 1;
+}
+
 void sa1_cpu_write(Sa1* s, uint32_t a, uint8_t val) {
   uint8_t bank = (uint8_t)(a >> 16);
   uint16_t adr = (uint16_t)a;
@@ -829,7 +843,10 @@ void sa1_cpu_write(Sa1* s, uint32_t a, uint8_t val) {
     if (adr >= 0x6000) { sa1_bw_window_write(s, adr, val); return; }
     if (adr < 0x0800) { s->iram[adr] = val; return; }
     if (adr >= 0x3000 && adr < 0x3800) { s->iram[adr - 0x3000] = val; return; }
-    if (adr >= 0x2200 && adr < 0x2400) sa1_reg_write(s, adr, val);
+    if (adr >= 0x2200 && adr < 0x2400) {
+      sa1_reg_write(s, adr, val);
+      if (s->watch) sa1_watch_check(s);
+    }
     return;
   }
   if (bank >= 0x40 && bank < 0x50) { sa1_bwram_linear_write(s, bank, adr, val); return; }
@@ -1001,7 +1018,7 @@ static void sa1_interpret(Sa1* s) {
     snes_perf_sa1_ops += s->run.ops;
     s->run.ops = 0;
 #endif
-    if (r == 0) break;
+    if (r == 0 || r == 4) break;     /* 4: a run-ahead's watched write (sa1_ahead) */
     if (r == 3) {             /* the engine proved a wait loop (sa1_loop_head's proof) */
       SA1_PERF_INC(snes_perf_sa1_handbacks, 1);
       if (sa1_skip_on()) {
@@ -1021,6 +1038,14 @@ static void sa1_interpret(Sa1* s) {
       s->run.debt = 0;
       break;
     }
+    s->run.wdebt = s->run.debt;
+    if (s->watch && (c->waiting || c->nmiWanted || (c->irqWanted && !c->i))) {
+      /* a run-ahead stops before an interrupt (taken ahead of the instruction,
+       * it would move the instruction's start), as if that instruction wrote
+       * what the 65816 polls: the laps up to it are still the same laps */
+      s->run.stop = 1;
+      break;
+    }
     const uint16_t pc0 = c->pc;
     const uint8_t k0 = c->k;
     const int cyc = sa1cpu_runOpcode(c);
@@ -1028,6 +1053,7 @@ static void sa1_interpret(Sa1* s) {
     s->run.debt -= cyc;
     s->run.lapCycles += cyc;
     s->run.lapInstrs++;
+    if (s->run.stop) break;     /* it made the watched write (sa1_watch_check) */
     if (c->k != k0 || c->pc >= pc0 || pc0 - c->pc > 64) continue;
     if (sa1_loop_head(s)) return;
   }
@@ -1069,6 +1095,49 @@ void sa1_run(Sa1* s, uint32_t masterClocks) {
     sa1_interpret(s);
     SNES_PERF_END(snes_perf_gsu, perf_t);
   }
+}
+
+/* The 65816 polls the SA-1's messages ($2300/$2301) in a proven loop of L
+ * dots whose read is at dot h0 of line v (main_snes.c, idle_sa1_awake_span).
+ * Lap by lap it would bring the SA-1 to each read; instead the SA-1 runs to
+ * the read of lap n-1 in one go, stopping after the first write that changes
+ * those registers or the 65816's interrupt lines (and before anything C has
+ * to run). The write's instruction started with debt wdebt: a lap's read at h
+ * sees it when the clocks credited up to h exceed (credited to the end) -
+ * wdebt, exactly as when the SA-1 runs while its debt is positive. Returns
+ * how many laps read what they read now (n: all), and when fewer, the SA-1 is
+ * put back to the next lap's read -- the clocks past it taken back, what is
+ * owed up to it run -- where running the laps one by one would have it.
+ * -1: not from here (the SA-1 caught up on another line, or asleep). */
+int sa1_ahead(Sa1* s, uint16_t v, uint16_t h0, uint16_t L, int n) {
+  if (s->lastV != v || s->idle || h0 < s->lastH || n < 1) return -1;
+  const uint32_t hb = s->lastH, half = s->halfClock;
+#define SA1_CLK(h) ((int32_t)(((uint32_t)(h) - hb + half) >> 1))
+  const uint16_t hend = (uint16_t)(h0 + (n - 1) * L);
+  s->w2300 = sa1_reg_read(s, 0x2300);
+  s->w2301 = sa1_reg_read(s, 0x2301);
+  s->wirq = s->snes->cpu->irqWanted;
+  s->wnmi = s->snes->cpu->nmiWanted;
+  s->run.stop = 0;
+  s->watch = 1;
+  sa1_sync(s, v, hend);
+  s->watch = 0;
+  if (!s->run.stop) return n;
+  s->run.stop = 0;
+  const int32_t th = SA1_CLK(hend) - s->run.wdebt;
+  int k = 0;
+  while (k < n - 1 && SA1_CLK(h0 + k * L) <= th) k++;
+  const uint16_t hk = (uint16_t)(h0 + k * L);
+  s->run.debt -= SA1_CLK(hend) - SA1_CLK(hk);
+  s->lastH = hk;
+  s->halfClock = (uint8_t)((hk - hb + half) & 1);
+#undef SA1_CLK
+  if (s->run.debt > 0 && !s->idle) {
+    SNES_PERF_BEGIN(perf_t);
+    sa1_interpret(s);
+    SNES_PERF_END(snes_perf_gsu, perf_t);
+  }
+  return k;
 }
 
 #ifdef HOST_BUILD

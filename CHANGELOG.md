@@ -38,6 +38,12 @@
   the same bytes. Kirby Super Star on device (PERF replay): heavy windows
   132% → 115% of the frame budget at worst, the 65816's share 51-59% → 41-44%;
   the replay's state hashes equal the host's.
+- **SA-1: it runs ahead while the 65816 waits for its message.** When the
+  65816 polls only `$2300`/`$2301`, the SA-1 runs over all the laps in one go
+  up to its first write that changes them, and the laps before it are skipped
+  at once. Kirby Super Star on device (PERF replay): SA-1 engine calls in the
+  heavy windows down a third to a half, those windows 107-118% → 101-109% of
+  the budget, mean speed 98.0% → 99.4%; state hashes equal the host's.
 
 ## [v0.0.8]
 

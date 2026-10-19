@@ -287,6 +287,7 @@ SECTIONS
       *sa1.o(.text* .rodata*)
       *sa1_cpu.o(.text* .rodata*)
       *sa1_engine.o(.text* .rodata*)
+      *(.sa1ovl.text)                   /* main_snes.c's SA-1-only span runner */
       . = ALIGN(4);
       __SA1_OVL_END__ = .;
     }

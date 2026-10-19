@@ -1170,6 +1170,9 @@ static int SNES_ITCM_IDLE idle_accum_span(Snes *s, int dots) {
  * its read finding the SA-1 already there. If catching up raised the 65816's
  * IRQ or NMI, the 65816 must not see it before that read: the lap runs here
  * up to and through the read with the lines as they were. */
+#ifndef HOST_BUILD
+__attribute__((section(".sa1ovl.text")))   /* only an SA-1 cart runs it: in its overlay */
+#endif
 __attribute__((noinline))
 static int idle_sa1_awake_span(Snes *s, int dots) {
   IdleSkip *g = &g_idle;
@@ -1196,9 +1199,37 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
   }
   Sa1 *sa1 = s->cart->sa1;
   const int L = (int)g->lap;
+  /* Polling only the SA-1's messages ($2300/$2301, which only its register
+   * writes change): the SA-1 runs ahead over all the span's laps in one go,
+   * stopping at the write the 65816 would see (sa1_ahead) */
+  bool regs = dots >= 2 * L;
+  for (int j = 0; regs && j < g->npmem; j++) {
+    const uint32_t o = g->pmem_off[j];
+    if ((o & IDLE_MEM_SA1) && (uint16_t)o != 0x2300 && (uint16_t)o != 0x2301 && (uint16_t)o != 0x230e) regs = false;
+  }
+  /* and reading what the proof read, still: the run-ahead stops at a change
+   * from what they hold now */
+  if (regs) regs = idle_mem_eq(s, g->smem);
   while (dots >= L) {
     const bool irq0 = cpu->irqWanted, nmi0 = cpu->nmiWanted;
-    sa1_sync(sa1, s->vPos, (uint16_t)(s->hPos + off));
+    int k = -1;
+    if (regs) {
+      regs = false;
+      const int n = dots / L;
+      k = sa1_ahead(sa1, s->vPos, (uint16_t)(s->hPos + off), (uint16_t)L, n);
+      if (k > 0) {
+        const uint32_t adv = (uint32_t)k * (uint32_t)L;
+        s->hPos = (uint16_t)(s->hPos + adv);
+        s->apuDotsAccum += adv;
+        dots -= (int)adv;
+        g_idle_stats.laps += (uint32_t)k;
+        g_idle_stats.sa1_laps += (uint32_t)k;
+        g_idle_stats.ff_dots += adv;
+      }
+      if (k == n) return dots;            /* every lap, the rest of the span runs */
+      /* else lap k reads the change, the SA-1 already at its read */
+    }
+    if (k < 0) sa1_sync(sa1, s->vPos, (uint16_t)(s->hPos + off));
     if (cpu->irqWanted != irq0 || cpu->nmiWanted != nmi0) {
       const bool irq1 = cpu->irqWanted, nmi1 = cpu->nmiWanted;
       cpu->irqWanted = irq0; cpu->nmiWanted = nmi0;
@@ -1213,7 +1244,7 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
       cpu->irqWanted = irq1; cpu->nmiWanted = nmi1;
       return dots;
     }
-    if (!idle_mem_eq(s, g->smem)) return dots;
+    if (k >= 0 || !idle_mem_eq(s, g->smem)) return dots;
     if (sa1_asleep(sa1)) {                /* asleep now: the ordinary skip */
       const int r = idle_skip_laps(s, dots);
       return r >= 0 ? r : -1 - r;
