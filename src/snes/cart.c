@@ -95,6 +95,7 @@ __attribute__((weak)) uint8_t sa1_snes_read(Sa1* s, uint8_t bank, uint16_t adr) 
 __attribute__((weak)) void sa1_run(Sa1* s, uint32_t masterClocks) { (void)s; (void)masterClocks; }
 __attribute__((weak)) void sa1_sync(Sa1* s, uint16_t v, uint16_t h) { (void)s; (void)v; (void)h; }
 __attribute__((weak)) uint8_t* sa1_snes_page(Sa1* s, uint8_t bank, uint16_t adr) { (void)s; (void)bank; (void)adr; return NULL; }
+__attribute__((weak)) void sa1_iram_write(Sa1* s, uint32_t adr, uint8_t val) { (void)s; (void)adr; (void)val; }
 __attribute__((weak)) bool sa1_asleep(const Sa1* s) { (void)s; return false; }
 __attribute__((weak)) uint8_t sa1_peek(Sa1* s, uint8_t bank, uint16_t adr) { (void)s; (void)bank; (void)adr; return 0; }
 __attribute__((weak)) bool sa1_snes_irq(const Sa1* s) { (void)s; return false; }
@@ -109,7 +110,7 @@ __attribute__((weak)) void sa1_snes_write(Sa1* s, uint8_t bank, uint16_t adr, ui
  * leaving the RAM_EMU pool to the hot data. The RAM_EMU pool is the fallback
  * when AHB is short. Allocated once (the core exits by switching app, nothing
  * is freed); a later cart_load reuses it. */
-/* 128 KB: SA-1 BW-RAM as ZSNES sizes it (SA1_BWRAM_BYTES); the largest Super
+/* 128 KB: the largest SA-1 BW-RAM (two Japan-only titles); the largest Super
  * FX Game Pak RAM is 64 KB (Doom, Stunt Race FX, Winter Gold). Normal carts
  * request their header size, at most 32 KB in practice. */
 enum { kGnwCartSramMax = 0x20000 };
@@ -307,6 +308,12 @@ void cart_attachGsu(Cart* cart) {
 
 void cart_attachSa1(Cart* cart) {
   if (!cart_copro_ready(SNES_COPRO_SA1, "SA-1")) return;
+  /* no room was left for its BW-RAM (the 128 KB carts, beside the SA-1's code
+   * in the pool): the chip is not attached rather than run without it */
+  if (!cart->ram || cart->ramSize < 0x2000) {
+    printf("snes: SA-1 not attached: no room for its %s BW-RAM\n", cart->ram ? "full" : "");
+    return;
+  }
   if (cart->sa1 == NULL) cart->sa1 = sa1_alloc();
   if (cart->sa1) {
     /* the MMC remaps ROM: no fetch-page cache, no page map, no DMA fast path */

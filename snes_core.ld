@@ -153,8 +153,8 @@ SECTIONS
     . = __APU_HOT_START__ + 0x1D800;
     . = ALIGN(4);
     /* The coprocessors' code is not part of the image: see the OVERLAY below. */
-    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o *sa1.o *sa1_cpu.o) .text*)
-    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o *sa1.o *sa1_cpu.o) .rodata*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o *sa1.o *sa1_cpu.o *sa1_engine.o) .text*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o *sa1.o *sa1_cpu.o *sa1_engine.o) .rodata*)
     *(.glue_7)
     *(.glue_7t)
 
@@ -177,7 +177,9 @@ SECTIONS
     . = ALIGN(8);
     *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o) .bss*)
     *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o) COMMON)
-    . = ALIGN(8);
+    /* 32: the pool, and so the coprocessor overlays run from there, start on
+     * a cache line (the SA-1's engine copy keeps its code alignment) */
+    . = ALIGN(32);
   } >RAM_EMU :data
 
   __CORE_BSS_END__ = .;
@@ -284,6 +286,7 @@ SECTIONS
       __SA1_OVL_START__ = .;
       *sa1.o(.text* .rodata*)
       *sa1_cpu.o(.text* .rodata*)
+      *sa1_engine.o(.text* .rodata*)
       . = ALIGN(4);
       __SA1_OVL_END__ = .;
     }

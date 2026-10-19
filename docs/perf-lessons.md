@@ -511,6 +511,34 @@ cycles each (C, from RAM) and the 65816 single-steps at ~460 cycles an
 instruction, because the SA-1 is awake. Letting the 65816 batch while the SA-1
 sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
 
+- **A second copy of the main CPU's engine bought 17%, and the DWT said why.**
+  Assembled for the SA-1, `snes_thumb2.S` ran ~170 cycles an SA-1 instruction
+  against C's 204. Stall counters around each instruction (CPI, LSU, fold,
+  calibrated on empty windows) gave ~90 ARM instructions at ~1.4 cycles each,
+  memory waits 4%, ITCM placement 2.5%. Inlining its bus bridges (2.4 calls an
+  instruction fewer) saved only 12 cycles. The main CPU's engine wins over its
+  C because that C calls `snes_cpuRead` per byte; the SA-1's C already had its
+  bus inline, so the copy kept only the per-instruction bookkeeping: A/X/PC/
+  flags loaded and stored in memory, the m/x width tested at run time, the
+  loop-head test after every instruction -- 68 instructions for an INX.
+- **State in registers, a table per width, small.** `sa1_engine.S` keeps the
+  65816 in r4-r11 for the slice, fetches with one `ldrb` from a pointer into
+  the ROM page (re-looked-up only when it leaves the page), sets N/Z with one
+  `sxtb`/`sxth`, charges cycles with one `subs`, and dispatches from each
+  handler's tail; INX is 9 instructions. The wait-loop proof runs only after a
+  jump back, on the engine's own snapshot. Generated from templates; opcodes
+  under 0.02% of the three games' SA-1 work go to C (≤0.2% of it), which
+  halved the code to 23 KB. Device, same replay: 87.8% → 95.7% of real time.
+- **BW-RAM is strongly-ordered on the device (AHB SRAM, MPU region 0).** An
+  unaligned halfword there faults, so the engine reads data words bytewise and
+  takes halfword operand fetches only from ROM pages; I-RAM (in the `Sa1`
+  struct, DTCM) takes them.
+- **Verify the engine on gwemu, prove the check can fail.** The QEMU harness
+  (`make qemu`, RAM moved to the board's 16 MB PSRAM to hold a 4 MB ROM) runs
+  the whole 6,494-frame replay in ~36 s; all 54 state hashes equal the host's.
+  A deliberately wrong INX for x = 1 changed nothing (the SA-1 runs with 16-bit
+  index registers there); wrong for both widths, the hashes split at frame 120.
+
 ---
 
 ## 5. Cross-cutting lessons

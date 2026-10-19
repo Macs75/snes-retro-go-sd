@@ -1,5 +1,5 @@
 MEMORY { CODE (rx) : ORIGIN = 0x00000000, LENGTH = 4M
-         RAM (rwx)  : ORIGIN = 0x20000000, LENGTH = 4M }
+         RAM (rwx)  : ORIGIN = 0x60000000, LENGTH = 16M }
 ENTRY(Reset_Handler)
 SECTIONS {
   .text : { KEEP(*(.vectors)) *(.text* .itcm* .core_entry .gw_core_bridge_probe) *(.rodata*)

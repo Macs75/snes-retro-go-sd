@@ -109,8 +109,12 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     loadRamSize = ex >= 0x8000 && ex <= 0x20000 ? (int)ex : 0x8000;
   }
   if(headers[used].coprocessor == 3) {
-    /* SA-1: BW-RAM as ZSNES sizes it, whatever the header says (8-128 KB) */
-    loadRamSize = 0x20000;
+    /* SA-1: BW-RAM is the header's RAM size (8 KB Kirby Super Star, 32 KB
+     * Mario RPG / Kirby's Dream Land 3, up to 128 KB), as on the board and in
+     * bsnes; ZSNES gives every cart 128 KB. At least one 8 KB window. The
+     * smaller size puts it in AHB, leaving the pool to the SA-1's code. */
+    uint32_t bw = headers[used].ramSize;
+    loadRamSize = bw >= 0x2000 && bw <= 0x20000 ? (int)bw : 0x2000;
   }
 #ifdef GNW_SNES_CORE
   // Device: the ROM is memory-mapped from flash (the launcher caches it there)

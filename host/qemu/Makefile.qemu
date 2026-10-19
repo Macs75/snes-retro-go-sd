@@ -16,7 +16,7 @@ QEMU_ELF := $(CORE_NAME)_qemu.elf
 
 QEMU_CFLAGS := $(MCU) -O2 -g -ffunction-sections -fdata-sections -std=gnu11 \
 	-include host/stubs/config.h \
-	$(HOST_DEFS) -DSNES_THUMB2_CPU -DSPC_THUMB2_SPC -DQEMU_BUILD \
+	$(HOST_DEFS) -DSNES_THUMB2_CPU -DSPC_THUMB2_SPC -DSNES_SA1_T2 -DQEMU_BUILD \
 	$(HOST_INCLUDES) -I$(SNES)/thumb2
 # PERF_CPU=1: enable the opcode census + bus counters on the real Thumb-2 engine.
 # QEMU is not cycle-accurate, so the cycle split is meaningless here, but the

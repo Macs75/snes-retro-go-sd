@@ -31,9 +31,24 @@ void sa1_saveload(Sa1* s, SaveLoadFunc* func, void* ctx);
 uint8_t sa1_snes_read(Sa1* s, uint8_t bank, uint16_t adr);
 void sa1_snes_write(Sa1* s, uint8_t bank, uint16_t adr, uint8_t val);
 
+/* The 65816's I-RAM write fast path (snes_cpuWrite): sa1_snes_write's I-RAM
+ * case without the bus decode */
+void sa1_iram_write(Sa1* s, uint32_t adr, uint8_t val);
+
 /* The SA-1 CPU's bus (cpu.c under CPU_SA1). */
 uint8_t sa1_cpu_read(Sa1* s, uint32_t adr);
 void sa1_cpu_write(Sa1* s, uint32_t adr, uint8_t val);
+
+/* SNES_SA1_CONTACT=1 (default): the SA-1 catches up only when the 65816 (or a
+ * DMA) touches what the two share -- I-RAM, BW-RAM, the SA-1 registers, the
+ * vectors the SA-1 supplies -- and once a scanline, so the 65816 runs its
+ * engine batches. Exact for everything the two exchange through memory; an
+ * SA-1 IRQ to the 65816 and the SA-1's H/V counter reads can come up to the
+ * lag late. 0: the SA-1 catches up before every 65816 instruction (exact,
+ * the reference to compare against). */
+#ifndef SNES_SA1_CONTACT
+#define SNES_SA1_CONTACT 1
+#endif
 
 /* Run the SA-1 for the master clocks the 65816 side has advanced. */
 void sa1_run(Sa1* s, uint32_t masterClocks);
@@ -54,6 +69,8 @@ bool sa1_asleep(const Sa1* s);
 uint8_t* sa1_snes_page(Sa1* s, uint8_t bank, uint16_t adr);
 /* The SA-1 CPU's read map (cpu.c under CPU_SA1): 8 KB pages, NULL = slow path */
 extern uint8_t** g_sa1_rdmap;
+/* the SA-1's lapDirty (sa1_interpret), for its I-RAM write fast path (cpu.c) */
+extern uint8_t* g_sa1_lapdirty;
 uint8_t sa1_peek(Sa1* s, uint8_t bank, uint16_t adr);
 
 /* The SA-1's request on the 65816's IRQ line ($2201/$2300 bits 7 and 5). */

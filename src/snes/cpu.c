@@ -70,15 +70,19 @@ static void cpu_doInterrupt(Cpu* cpu, bool irq);
 static void cpu_doOpcode(Cpu* cpu, uint8_t opcode);
 
 #ifdef HOST_BUILD
-/* CPU_PCHIST=file (host): 65816 instructions executed per (bank, pc) -- after
- * the idle skip, so the work that really runs. Written at exit, hottest first,
- * as "bank:addr count opcode cum%". The SA-1's instance reads SA1_PCHIST. */
+/* CPU_PCHIST=file (host): 65816 instructions executed per (bank, pc, mode) --
+ * after the idle skip, so the work that really runs. Written at exit, hottest
+ * first, as "bank:addr count opcode cum% m x e dl taken": the mode the
+ * instruction ran in (m, x, e flags; dl = the direct page's low byte is not 0)
+ * and how many times the next instruction was not 1-4 bytes after it (a
+ * branch taken, a jump). The SA-1's instance reads SA1_PCHIST. */
 #include <stdio.h>
 #ifndef CPU_PCH_ENV
 #define CPU_PCH_ENV "CPU_PCHIST"
 #endif
 #define CPU_PCH_N 131072u
-static struct { uint32_t key, n; uint8_t op; } cpu_pch[CPU_PCH_N];
+static struct { uint32_t key, n; uint8_t op; uint32_t taken; } cpu_pch[CPU_PCH_N];
+static int32_t cpu_pch_prev = -1;   /* the last instruction's entry */
 static int cpu_pch_on = -1;
 static unsigned long cpu_pch_total;
 static int cpu_pch_cmp(const void *a, const void *b) {
@@ -93,14 +97,22 @@ static void cpu_pch_write(void) {
   fprintf(f, "# total %lu 65816 instructions\n", cpu_pch_total);
   for (uint32_t i = 0; i < CPU_PCH_N && cpu_pch[i].n; i++) {
     cum += cpu_pch[i].n;
-    fprintf(f, "%02x:%04x %u %02x %.2f\n", (unsigned)(cpu_pch[i].key >> 16), (unsigned)(cpu_pch[i].key & 0xffff),
-            (unsigned)cpu_pch[i].n, cpu_pch[i].op, 100.0 * cum / cpu_pch_total);
+    const uint32_t k = cpu_pch[i].key;
+    fprintf(f, "%02x:%04x %u %02x %.2f %u %u %u %u %u\n", (unsigned)((k >> 16) & 0xff), (unsigned)(k & 0xffff),
+            (unsigned)cpu_pch[i].n, cpu_pch[i].op, 100.0 * cum / cpu_pch_total, (unsigned)(k >> 24) & 1,
+            (unsigned)(k >> 25) & 1, (unsigned)(k >> 26) & 1, (unsigned)(k >> 27) & 1, (unsigned)cpu_pch[i].taken);
   }
   fclose(f);
 }
-static void cpu_pchist(uint32_t key, uint8_t op) {
+static void cpu_pchist(const Cpu* cpu, uint32_t key, uint8_t op) {
   if (cpu_pch_on < 0) { cpu_pch_on = getenv(CPU_PCH_ENV) != NULL; if (cpu_pch_on) atexit(cpu_pch_write); }
   if (!cpu_pch_on) return;
+  if (cpu_pch_prev >= 0) {
+    const uint32_t pk = cpu_pch[cpu_pch_prev].key, d = (key - pk) & 0xffff;
+    if (((pk ^ key) & 0xff0000) || d == 0 || d > 4) cpu_pch[cpu_pch_prev].taken++;
+  }
+  key |= (uint32_t)cpu->mf << 24 | (uint32_t)cpu->xf << 25 | (uint32_t)cpu->e << 26 |
+         (uint32_t)((cpu->dp & 0xff) != 0) << 27;
   uint32_t h = (key * 2654435761u) >> 15;
   for (;; h++) {
     h &= CPU_PCH_N - 1;
@@ -109,6 +121,7 @@ static void cpu_pchist(uint32_t key, uint8_t op) {
   if (!cpu_pch[h].n) { cpu_pch[h].key = key; cpu_pch[h].op = op; }
   cpu_pch[h].n++;
   cpu_pch_total++;
+  cpu_pch_prev = (int32_t)h;
 }
 #endif
 
@@ -136,6 +149,10 @@ extern Snes *g_snes; // for debugging
 static inline uint8_t cpu_read(Cpu* cpu, uint32_t adr) {
   const uint8_t* p = g_sa1_rdmap[(adr >> 13) & 0x7ff];   /* ROM and plain BW-RAM */
   if (p) return p[adr & 0x1fff];
+  /* I-RAM ($0000-$07FF and $3000-$37FF of banks $00-$3F/$80-$BF), where the
+   * SA-1 keeps its direct page and stack: 2 KB, so not in the 8 KB page map */
+  const uint32_t a = adr & 0x40f800;
+  if (a == 0 || a == 0x3000) return g_sa1_iram[adr & 0x7ff];
   return sa1_cpu_read((Sa1*) cpu->mem, adr);
 }
 
@@ -143,7 +160,13 @@ static uint8_t cpu_read_raw(Cpu* cpu, uint32_t adr) {
   return cpu_read(cpu, adr);
 }
 
-static void cpu_write(Cpu* cpu, uint32_t adr, uint8_t val) {
+static inline void cpu_write(Cpu* cpu, uint32_t adr, uint8_t val) {
+  const uint32_t a = adr & 0x40f800;
+  if (a == 0 || a == 0x3000) {        /* I-RAM, as in cpu_read: a write marks the lap */
+    *g_sa1_lapdirty = 1;
+    g_sa1_iram[adr & 0x7ff] = val;
+    return;
+  }
   sa1_cpu_write((Sa1*) cpu->mem, adr, val);
 }
 #else
@@ -359,7 +382,7 @@ int SNES_RUNOPCODE_IMPL(Cpu* cpu) {
 #endif
   uint8_t opcode = cpu_readOpcode(cpu);
 #ifdef HOST_BUILD
-  cpu_pchist(pch_key, opcode);
+  cpu_pchist(cpu, pch_key, opcode);
 #endif
   cpu->cyclesUsed = cyclesPerOpcode[opcode];
   cpu_doOpcode(cpu, opcode);
@@ -420,6 +443,15 @@ int cpu_thumb2_fallback(Cpu* cpu, uint32_t opcode) {
   g_op_fallback++;
   g_op_fbhist[(uint8_t)opcode]++;
 #endif
+  cpu_doOpcode(cpu, (uint8_t)opcode);
+  return cpu->cyclesUsed;
+}
+#endif
+
+#if defined(CPU_SA1) && defined(CPU_SA1_T2)
+/* The SA-1's engine (thumb2/sa1_engine.S) finishes here an opcode it leaves
+ * to C, on this copy's bus: the same door as above. */
+int cpu_thumb2_fallback(Cpu* cpu, uint32_t opcode) {
   cpu_doOpcode(cpu, (uint8_t)opcode);
   return cpu->cyclesUsed;
 }

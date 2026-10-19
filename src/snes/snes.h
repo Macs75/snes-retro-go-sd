@@ -142,6 +142,11 @@ uint8_t snes_cpuRead(Snes* snes, uint32_t adr);
 extern uint8_t *g_snes_rdmap[0x800];   /* WRAM + cacheable ROM */
 extern uint8_t *g_snes_wrmap[0x800];   /* WRAM only */
 void snes_pagemap_refresh(Snes *snes);   /* after a cartridge mapping change */
+extern uint8_t *g_sa1_iram;          /* SA-1 cart I-RAM, else NULL (snes_cpuRead) */
+extern const uint16_t *g_sa1_vh;     /* the SA-1's last catch-up: line, dot */
+extern const uint8_t *g_sa1_bwwin;   /* SA-1 cart: the 65816's BW-RAM window block */
+extern const uint8_t *g_sa1_bwlin;   /* SA-1 cart: BW-RAM banks $40-$4F, NULL in CC1 */
+extern uint32_t g_sa1_bwmask;
 #endif
 void snes_cpuWrite(Snes* snes, uint32_t adr, uint8_t val);
 // debugging

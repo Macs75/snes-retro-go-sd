@@ -2,6 +2,9 @@
  * One interpreter, two instances -- every opcode fix lands in both. The main
  * CPU's machinery stays out of this copy: the Thumb-2 engine and its bridges,
  * the ITCM sections, the spin skip, the recompiler, the census. */
+#ifdef SNES_SA1_T2
+#define CPU_SA1_T2 1          /* the device: the SA-1's engine calls the fallback below */
+#endif
 #undef SNES_THUMB2_CPU
 #undef SNES_BUS_IN_ITCM
 #undef SNES_SPIN_SKIP
@@ -24,6 +27,13 @@
 #define pc_hist_ctr sa1cpu_pc_hist_ctr
 #define pc_bp sa1cpu_pc_bp
 #define DumpCpuHistory sa1cpu_DumpCpuHistory
+#define cpu_thumb2_fallback sa1cpu_thumb2_fallback
 
 #include "sa1.h"
 #include "cpu.c"
+
+#ifdef CPU_SA1_T2
+/* the SA-1's engine charges an opcode it leaves to C from this (the main
+ * engine's table exists only with SNES_THUMB2_CPU) */
+const uint8_t sa1_cycles_per_opcode[256] = { SNES_CYCLES_PER_OPCODE };
+#endif

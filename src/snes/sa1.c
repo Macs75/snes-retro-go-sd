@@ -32,6 +32,10 @@
  * cycles go to snes_perf_gsu, the coprocessor figure. */
 uint32_t snes_perf_sa1_ops, snes_perf_sa1_skip, snes_perf_sa1_wakes;
 uint32_t snes_perf_sa1_snes_rd, snes_perf_sa1_cpu_rd;
+/* PROF/sa1b: sa1_interpret calls (slices), engine loop calls and the cycles
+ * inside them, hand-backs for a loop-head proof, instructions C ran */
+uint32_t snes_perf_sa1_slices, snes_perf_sa1_loops, snes_perf_sa1_loopcyc;
+uint32_t snes_perf_sa1_handbacks, snes_perf_sa1_csteps;
 #define SA1_PERF_INC(c, n) ((c) += (n))
 #else
 #define SA1_PERF_INC(c, n) do { } while (0)
@@ -49,17 +53,29 @@ void sa1cpu_saveload(Cpu* cpu, SaveLoadFunc* func, void* ctx);
 /* The CPU state a wait-loop proof compares: Cpu.a up to (not incl.) irqWanted */
 #define SA1_CPU_SNAP (offsetof(Cpu, irqWanted) - offsetof(Cpu, a))
 
-struct Sa1 {
-  Snes* snes;
-  Cpu* cpu;
-  uint8_t* rom;
-  uint32_t romSize;
-  uint32_t romMask;           /* romSize - 1 for a 2^n image, else 0: fold */
-  uint8_t* bwram;
-  uint32_t bwramMask;
-  uint8_t* rdmap[0x800];      /* the SA-1's read map: see sa1_maps */
-  uint32_t romPatch;          /* map_sa1's patch: ROM offset + 1, 0 = none */
+/* What sa1_interpret and the SA-1's engine (thumb2/sa1_engine.S) share; the
+ * engine reads the fields at these offsets (thumb2/sa1_engine.h). */
+typedef struct {
+  int32_t debt;               /*  0  SA-1 clocks owed by sa1_run */
+  int32_t lapCycles;          /*  4  clocks and instructions since the loop head */
+  uint32_t lapInstrs;         /*  8 */
+  uint32_t pc0;               /* 12 */
+  uint32_t extEvents;         /* 16  things a loop could see: 65816 writes, ... */
+  uint32_t lapEvents;         /* 20  extEvents when this lap began */
+  uint16_t candPc;            /* 24  the loop head being proven */
+  uint8_t candK;              /* 26 */
+  uint8_t lapDirty;           /* 27  this lap wrote, or read a clock / a side effect */
+  uint8_t snap[SA1_CPU_SNAP]; /* 28  the CPU at the head, Cpu.a to Cpu.e (C's proof) */
+  uint32_t ops;               /* 52  instructions the engine ran (PROF/sa1) */
+  /* 56  the engine's snapshot at the head: A, X, Y, N/Z as it holds them, then
+   * Cpu.sp, the words at Cpu+16/20/24 and Cpu.e */
+  uint32_t asnap[9];
+} Sa1Run;
 
+struct Sa1 {
+  uint8_t* rdmap[0x800];      /* the SA-1's read map (sa1_maps): first, for the engine */
+  uint32_t wdirty;            /* the engine wrote I-RAM this lap (non-zero) */
+  uint32_t pad;
   /* --- saved from here (sa1_saveload) --- */
   uint8_t iram[0x800];        /* IRAM */
   uint8_t SA1Control;         /* $2200 */
@@ -94,23 +110,40 @@ struct Sa1 {
   uint8_t SA1TimerCount[4];   /* $2212-$2215 */
   uint16_t lastV, lastH;      /* where sa1_sync last caught up to */
   uint8_t halfClock;          /* a master clock not yet worth an SA-1 clock */
-  int32_t clockDebt;          /* SA-1 clocks owed by sa1_run */
-
-  /* --- the wait-loop skip (sa1_interpret), not saved: it re-proves --- */
+  /* the run state: debt is saved (the last saved field), the rest is the
+   * wait-loop skip, which re-proves (sa1_interpret) */
+  Sa1Run run;
   uint8_t idle;               /* asleep at a proven wait loop's head */
-  uint8_t lapDirty;           /* this lap wrote, or read a clock / a side effect */
-  uint8_t candK;              /* the loop head being proven */
-  uint16_t candPc;
-  uint8_t snap[SA1_CPU_SNAP]; /* the CPU at the head, from Cpu.a to Cpu.e */
-  uint32_t extEvents;         /* things the loop could see: 65816 writes, ... */
-  uint32_t lapEvents;         /* extEvents when this lap began */
-  int32_t lapCycles;          /* clocks and instructions since the head */
-  uint32_t lapInstrs;
   int32_t idleLap;            /* the proven lap */
   uint32_t idleInstrs;
+  Snes* snes;
+  Cpu* cpu;
+  uint8_t* rom;
+  uint32_t romSize;
+  uint32_t romMask;           /* romSize - 1 for a 2^n image, else 0: fold */
+  uint8_t* bwram;
+  uint32_t bwramMask;
+  uint32_t romPatch;          /* map_sa1's patch: ROM offset + 1, 0 = none */
 };
 
 #define SA1_SAVE_FIRST iram
+
+#if defined(SNES_SA1_T2) && (!defined(HOST_BUILD) || defined(QEMU_BUILD))
+/* the device (and the QEMU harness): the SA-1 runs in thumb2/sa1_engine.S */
+#define SA1_T2 1
+#include "thumb2/sa1_engine.h"
+_Static_assert(offsetof(Sa1Run, debt) == RUN_DEBT && offsetof(Sa1Run, lapCycles) == RUN_LAPCYC &&
+               offsetof(Sa1Run, lapInstrs) == RUN_LAPINS && offsetof(Sa1Run, extEvents) == RUN_EXTEV &&
+               offsetof(Sa1Run, lapEvents) == RUN_LAPEV && offsetof(Sa1Run, candPc) == RUN_CANDPC &&
+               offsetof(Sa1Run, candK) == RUN_CANDK && offsetof(Sa1Run, lapDirty) == RUN_DIRTY &&
+               offsetof(Sa1Run, ops) == RUN_OPS && offsetof(Sa1Run, asnap) == RUN_AS,
+               "Sa1Run: sa1_engine.S reads these offsets");
+_Static_assert(offsetof(Sa1, rdmap) == 0 && offsetof(Sa1, iram) == SA1E_IRAM &&
+               offsetof(Sa1, wdirty) == SA1E_IRAM + SA1E_WDIRTY, "Sa1: sa1_engine.S reads these offsets");
+_Static_assert(offsetof(Cpu, sp) == 12 && offsetof(Cpu, dp) == 16 && offsetof(Cpu, c) == 20 &&
+               offsetof(Cpu, i) == 24 && offsetof(Cpu, e) == 28, "Cpu: sa1_engine.S snapshots these words");
+int sa1_engine_run(Cpu* cpu, Sa1Run* run);
+#endif
 
 static void sa1_wake(Sa1* s);
 static void sa1_maps(Sa1* s);
@@ -125,6 +158,10 @@ static void sa1_maps_bwlinear(Sa1* s);
  * Awake, the SA-1 needs the per-instruction sync again: hclip makes the batch
  * hand back after this instruction (it is how a moved H-IRQ dot ends a span). */
 static inline void sa1_event(Sa1* s) {
+#if SNES_SA1_CONTACT
+  sa1_sync(s, s->snes->vPos, s->snes->hPos);   /* contact: the SA-1 up to now */
+  if (s->idle) sa1_wake(s);
+#else
   if (s->idle) {
     sa1_sync(s, s->snes->vPos, s->snes->hPos);
     sa1_wake(s);
@@ -132,9 +169,10 @@ static inline void sa1_event(Sa1* s) {
     s->snes->dma->hclip = 1;
 #endif
   }
-  s->extEvents++;
+#endif
+  s->run.extEvents++;
 }
-#define SA1_SAVE_END   (offsetof(Sa1, clockDebt) + sizeof(int32_t))
+#define SA1_SAVE_END   (offsetof(Sa1, run) + sizeof(int32_t))   /* through run.debt */
 
 /* --- the SA-1 CPU's interrupt lines ---------------------------------------- */
 
@@ -199,7 +237,7 @@ static inline uint8_t sa1_rom_read(const Sa1* s, uint8_t bank, uint16_t adr) {
 /* ZSNES SA1_DMA_CC1: a character-conversion type 1 read. The 65816 DMAs from
  * BW-RAM while the SA-1 hands it the converted character from I-RAM. */
 static uint8_t sa1_cc1_read(Sa1* s, uint32_t addr) {
-  s->lapDirty = 1;            /* writes I-RAM: not a read a wait loop can repeat */
+  s->run.lapDirty = 1;            /* writes I-RAM: not a read a wait loop can repeat */
   const unsigned DMACB = s->SA1DMAChar & 3;
   const unsigned DMASIZE = (s->SA1DMAChar >> 2) & 7;
   const uint32_t DSA = s->SA1DMASource;
@@ -415,7 +453,7 @@ static uint8_t sa1_read_230d(Sa1* s) {
 static uint8_t sa1_reg_read(Sa1* s, uint16_t adr) {
   /* the H/V counters change with time, the bit-stream reads advance it: a lap
    * that reads them proves nothing */
-  if ((adr >= 0x2302 && adr <= 0x2305) || adr == 0x230c || adr == 0x230d) s->lapDirty = 1;
+  if ((adr >= 0x2302 && adr <= 0x2305) || adr == 0x230c || adr == 0x230d) s->run.lapDirty = 1;
   switch (adr) {
     case 0x2300: {
       uint8_t al = s->SA1Message[1];
@@ -582,6 +620,12 @@ static void sa1_reg_write(Sa1* s, uint16_t adr, uint8_t al) {
 uint8_t sa1_snes_read(Sa1* s, uint8_t bank, uint16_t adr) {
   uint8_t b = bank & 0x7f;
   SA1_PERF_INC(snes_perf_sa1_snes_rd, 1);
+#if SNES_SA1_CONTACT
+  /* contact: anything but ROM is shared with the SA-1 (and the vectors it
+   * supplies sit in ROM space), so it is first brought up to now */
+  if (!(((b < 0x40) && adr >= 0x8000 && !(bank == 0x00 && adr >= 0xffea)) || bank >= 0xc0))
+    sa1_sync(s, s->snes->vPos, s->snes->hPos);
+#endif
   /* the reads that change SA-1 state: the bit-stream reader, the converter */
   if (adr == 0x230c || adr == 0x230d || (s->SA1_in_cc1_dma && b >= 0x40 && b < 0x50))
     sa1_event(s);
@@ -625,6 +669,7 @@ void sa1_snes_write(Sa1* s, uint8_t bank, uint16_t adr, uint8_t val) {
 /* --- read maps -------------------------------------------------------------- */
 
 uint8_t** g_sa1_rdmap;
+uint8_t* g_sa1_lapdirty;
 
 /* A ROM page through the MMC: an 8 KB page never straddles a 32 KB LoROM bank
  * or a 1 MB block, so it is linear in the image. Not the bank $00 page with
@@ -653,6 +698,9 @@ uint8_t* sa1_snes_page(Sa1* s, uint8_t bank, uint16_t adr) {
   uint16_t page = adr & 0xe000;
   if (bank >= 0xc0 || ((bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) && page >= 0x8000))
     return sa1_rom_page(s, bank, page);
+#if SNES_SA1_CONTACT
+  return NULL;                /* BW-RAM: a contact, through sa1_snes_read */
+#endif
   if (s->bwramMask + 1 < 0x2000) return NULL;
   return sa1_bw_page(s, bank, page, s->SNSBMAP & 0x1f);   /* the 65816's window is never a bit map */
 }
@@ -660,8 +708,15 @@ uint8_t* sa1_snes_page(Sa1* s, uint8_t bank, uint16_t adr) {
 /* The $6000-$7FFF page of banks $00-$3F/$80-$BF in both maps: a BW-RAM block
  * register moved ($2224 the 65816's, $2225 the SA-1's). Only BW-RAM pages
  * change, never the fetch page (ROM / WRAM), so no refresh of that. */
+static void sa1_fast_ptrs(Sa1* s) {
+  g_sa1_bwwin = s->bwram + (((uint32_t)(s->SNSBMAP & 0x1f) << 13) & s->bwramMask);
+  g_sa1_bwlin = s->SA1_in_cc1_dma ? NULL : s->bwram;
+  g_sa1_bwmask = s->bwramMask;
+}
+
 static void sa1_maps_window(Sa1* s) {
   const bool bw = s->bwramMask + 1 >= 0x2000;
+  sa1_fast_ptrs(s);
   for (uint32_t bank = 0; bank < 0xc0; bank++) {
     if (bank >= 0x40 && bank < 0x80) continue;
     const uint32_t p = (bank << 3) | 3;
@@ -674,6 +729,7 @@ static void sa1_maps_window(Sa1* s) {
 
 /* Banks $40-$4F in both maps: a type 1 character conversion started or ended */
 static void sa1_maps_bwlinear(Sa1* s) {
+  sa1_fast_ptrs(s);
   for (uint32_t p = 0x40 << 3; p < (0x50 << 3); p++) {
     s->rdmap[p] = s->bwramMask + 1 >= 0x2000 ? sa1_bw_page(s, (uint8_t)(p >> 3), (uint16_t)(p << 13), 0) : NULL;
 #if SNES_PAGEMAP
@@ -695,6 +751,7 @@ static void sa1_maps(Sa1* s) {
     s->rdmap[p] = m;
   }
   g_sa1_rdmap = s->rdmap;
+  if (s->snes) sa1_fast_ptrs(s);
   if (s->snes) snes_pagemap_refresh(s->snes);
 }
 
@@ -714,6 +771,11 @@ uint8_t sa1_peek(Sa1* s, uint8_t bank, uint16_t adr) {
   if (bank >= 0xc0) return sa1_rom_read(s, bank, adr);
   if (b >= 0x40 && b < 0x50) return s->bwram[(((uint32_t)(b & 0x0f) << 16) | adr) & s->bwramMask];
   return 0;
+}
+
+void sa1_iram_write(Sa1* s, uint32_t adr, uint8_t val) {
+  sa1_event(s);
+  s->iram[adr & 0x7ff] = val;
 }
 
 /* --- the SA-1 CPU's view --------------------------------------------------- */
@@ -752,7 +814,7 @@ uint8_t sa1_cpu_read(Sa1* s, uint32_t a) {
 void sa1_cpu_write(Sa1* s, uint32_t a, uint8_t val) {
   uint8_t bank = (uint8_t)(a >> 16);
   uint16_t adr = (uint16_t)a;
-  s->lapDirty = 1;
+  s->run.lapDirty = 1;
   if (bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) {
     if (adr >= 0x8000) return;
     if (adr >= 0x6000) { sa1_bw_window_write(s, adr, val); return; }
@@ -785,6 +847,9 @@ void sa1_link(Sa1* s, Snes* snes, uint8_t* rom, uint32_t romSize, uint8_t* bwram
   s->bwramMask = bwramSize ? bwramSize - 1 : 0;
   /* map_sa1: a ROM with this sequence at $B95 gets $B96 zeroed */
   s->romPatch = (romSize > 0xb99 && !memcmp(rom + 0xb95, test, 4)) ? 0xb96 + 1 : 0;
+  g_sa1_iram = s->iram;       /* both CPUs' I-RAM fast paths (snes_cpuRead, cpu.c) */
+  g_sa1_lapdirty = &s->run.lapDirty;
+  g_sa1_vh = &s->lastV;
   sa1_maps(s);
 }
 
@@ -797,9 +862,9 @@ void sa1_reset(Sa1* s) {
   sa1cpu_reset(s->cpu);
   s->cpu->sp = 0x01ff;
   s->idle = 0;
-  s->candPc = 0xffff;
-  s->candK = 0xff;
-  s->extEvents++;
+  s->run.candPc = 0xffff;
+  s->run.candK = 0xff;
+  s->run.extEvents++;
   sa1_maps(s);
 }
 
@@ -844,36 +909,118 @@ static int sa1_skip_on(void) {
  * clockDebt, and the next event (sa1_event: a 65816 write to I-RAM, BW-RAM or
  * the registers, a 65816 read with a side effect, a save state) first wakes it
  * (sa1_wake). Proven on the CPU state, not on a table of known loops. */
+/* After an instruction that went back 1..64 bytes in the same bank, at pc:
+ * the loop-head bookkeeping (the proof described above). Returns true when
+ * the loop is proven and the SA-1 now sleeps. */
+static bool sa1_loop_head(Sa1* s) {
+  Cpu* c = s->cpu;
+  if (c->pc == s->run.candPc && c->k == s->run.candK && !s->run.lapDirty && !s->wdirty &&
+      s->run.lapEvents == s->run.extEvents && !memcmp(s->run.snap, &c->a, SA1_CPU_SNAP) && sa1_skip_on()) {
+    s->idle = 1;
+    s->idleLap = s->run.lapCycles;
+    s->idleInstrs = s->run.lapInstrs;
+    return true;
+  }
+  s->run.candPc = c->pc;
+  s->run.candK = c->k;
+  memcpy(s->run.snap, &c->a, SA1_CPU_SNAP);
+  s->run.lapDirty = 0;
+  s->wdirty = 0;
+  s->run.lapEvents = s->run.extEvents;
+  s->run.lapCycles = 0;
+  s->run.lapInstrs = 0;
+  return false;
+}
+
+#ifdef SA1_T2
+/* The engine's bus, for what it does not do inline: the SA-1's cpu_read and
+ * cpu_write (cpu.c under CPU_SA1) -- the read map, I-RAM, then the chip. A
+ * write returns non-zero when it went to the SA-1's registers, which can move
+ * the read map or raise an interrupt: the engine then looks again. */
+uint8_t sa1e_read(Sa1* s, uint32_t adr) {
+  const uint8_t* p = s->rdmap[(adr >> 13) & 0x7ff];
+  if (p) return p[adr & 0x1fff];
+  const uint32_t a = adr & 0x40f800;
+  if (a == 0 || a == 0x3000) return s->iram[adr & 0x7ff];
+  return sa1_cpu_read(s, adr);
+}
+
+uint32_t sa1e_rd16(Sa1* s, uint32_t lo, uint32_t hi) {
+  const uint32_t v = sa1e_read(s, lo);
+  return v | (uint32_t)sa1e_read(s, hi) << 8;
+}
+
+uint32_t sa1e_rd24_b0(Sa1* s, uint32_t lo) {
+  const uint32_t v = sa1e_rd16(s, lo, (lo + 1) & 0xffff);
+  return v | (uint32_t)sa1e_read(s, (lo + 2) & 0xffff) << 16;
+}
+
+int sa1e_wr8(Sa1* s, uint32_t adr, uint32_t val) {
+  const uint32_t a = adr & 0x40f800;
+  if (a == 0 || a == 0x3000) {
+    s->run.lapDirty = 1;
+    s->iram[adr & 0x7ff] = (uint8_t)val;
+    return 0;
+  }
+  sa1_cpu_write(s, adr, (uint8_t)val);
+  return (adr & 0x400000) == 0 && (adr & 0xfe00) == 0x2200;
+}
+
+int sa1e_wr16(Sa1* s, uint32_t lo, uint32_t hi, uint32_t val) {
+  const int r = sa1e_wr8(s, lo, val);
+  return r | sa1e_wr8(s, hi, val >> 8);
+}
+
+int sa1e_wr16r(Sa1* s, uint32_t lo, uint32_t hi, uint32_t val) {   /* the high byte first */
+  const int r = sa1e_wr8(s, hi, val >> 8);
+  return r | sa1e_wr8(s, lo, val);
+}
+#endif
+
 static void sa1_interpret(Sa1* s) {
   Cpu* c = s->cpu;
-  while (s->clockDebt > 0) {
+  SA1_PERF_INC(snes_perf_sa1_slices, 1);
+  while (s->run.debt > 0) {
+#ifdef SA1_T2
+#ifdef SNES_PERF
+    const uint32_t t0 = snes_perf_now();
+#endif
+    const int r = sa1_engine_run(c, &s->run);
+#ifdef SNES_PERF
+    snes_perf_sa1_loopcyc += snes_perf_now() - t0;
+    snes_perf_sa1_loops++;
+    snes_perf_sa1_ops += s->run.ops;
+    s->run.ops = 0;
+#endif
+    if (r == 0) break;
+    if (r == 3) {             /* the engine proved a wait loop (sa1_loop_head's proof) */
+      SA1_PERF_INC(snes_perf_sa1_handbacks, 1);
+      if (sa1_skip_on()) {
+        s->idle = 1;
+        s->idleLap = s->run.lapCycles;
+        s->idleInstrs = s->run.lapInstrs;
+        return;
+      }
+      s->run.candPc = 0xffff;
+      continue;
+    }
+    /* r == 1: an interrupt, WAI, STP, emulation mode or code outside the read
+     * map -- this instruction in C, below */
+    SA1_PERF_INC(snes_perf_sa1_csteps, 1);
+#endif
     if (c->stopped || (c->waiting && !c->irqWanted && !c->nmiWanted)) {
-      s->clockDebt = 0;
+      s->run.debt = 0;
       break;
     }
     const uint16_t pc0 = c->pc;
     const uint8_t k0 = c->k;
     const int cyc = sa1cpu_runOpcode(c);
     SA1_PERF_INC(snes_perf_sa1_ops, 1);
-    s->clockDebt -= cyc;
-    s->lapCycles += cyc;
-    s->lapInstrs++;
+    s->run.debt -= cyc;
+    s->run.lapCycles += cyc;
+    s->run.lapInstrs++;
     if (c->k != k0 || c->pc >= pc0 || pc0 - c->pc > 64) continue;
-    /* at a loop head */
-    if (c->pc == s->candPc && c->k == s->candK && !s->lapDirty && s->lapEvents == s->extEvents &&
-        !memcmp(s->snap, &c->a, SA1_CPU_SNAP) && sa1_skip_on()) {
-      s->idle = 1;
-      s->idleLap = s->lapCycles;
-      s->idleInstrs = s->lapInstrs;
-      return;
-    }
-    s->candPc = c->pc;
-    s->candK = c->k;
-    memcpy(s->snap, &c->a, SA1_CPU_SNAP);
-    s->lapDirty = 0;
-    s->lapEvents = s->extEvents;
-    s->lapCycles = 0;
-    s->lapInstrs = 0;
+    if (sa1_loop_head(s)) return;
   }
 }
 
@@ -886,15 +1033,15 @@ static void sa1_wake(Sa1* s) {
   SNES_PERF_BEGIN(perf_t);
   s->idle = 0;
   SA1_PERF_INC(snes_perf_sa1_wakes, 1);
-  if (s->clockDebt > 0 && s->idleLap > 0) {
-    const int32_t laps = (s->clockDebt - 1) / s->idleLap;
-    s->clockDebt -= laps * s->idleLap;
+  if (s->run.debt > 0 && s->idleLap > 0) {
+    const int32_t laps = (s->run.debt - 1) / s->idleLap;
+    s->run.debt -= laps * s->idleLap;
 #ifdef HOST_BUILD
     sa1_fs_skip += (uint32_t)laps * s->idleInstrs;
 #endif
     SA1_PERF_INC(snes_perf_sa1_skip, (uint32_t)laps * s->idleInstrs);
   }
-  s->candPc = 0xffff;         /* the rest of the lap must not re-prove it */
+  s->run.candPc = 0xffff;         /* the rest of the lap must not re-prove it */
   sa1_interpret(s);
   SNES_PERF_END(snes_perf_gsu, perf_t);
 }
@@ -902,12 +1049,12 @@ static void sa1_wake(Sa1* s) {
 /* Held in reset or wait ($2200 bits 5/6), or in WAI with nothing pending, the
  * slice is dropped. */
 void sa1_run(Sa1* s, uint32_t masterClocks) {
-  if (s->SA1Control & 0x60) { s->clockDebt = 0; return; }
+  if (s->SA1Control & 0x60) { s->run.debt = 0; return; }
   /* the odd master clock carries over: the SA-1's time must not depend on
    * how often it is called (the 65816's idle skip calls it less) */
   masterClocks += s->halfClock;
   s->halfClock = masterClocks & 1;
-  s->clockDebt += (int32_t)(masterClocks >> 1);
+  s->run.debt += (int32_t)(masterClocks >> 1);
   if (!s->idle) {
     SNES_PERF_BEGIN(perf_t);
     sa1_interpret(s);
@@ -938,7 +1085,7 @@ void sa1_statelog(Sa1* s, unsigned long frame) {
   fprintf(f, "%lu wram=%08x iram=%08x bwram=%08x sa1=%08x cpu=%08x debt=%d sa1pc=%02x:%04x cpupc=%02x:%04x\n", frame,
           (unsigned)sa1_fnv(h0, s->snes->ram, 0x20000), (unsigned)sa1_fnv(h0, s->iram, sizeof s->iram),
           (unsigned)sa1_fnv(h0, s->bwram, s->bwramMask + 1), (unsigned)sa1_fnv(h0, &s->cpu->a, SA1_CPU_SNAP),
-          (unsigned)sa1_fnv(h0, &s->snes->cpu->a, SA1_CPU_SNAP), (int)s->clockDebt,
+          (unsigned)sa1_fnv(h0, &s->snes->cpu->a, SA1_CPU_SNAP), (int)s->run.debt,
           s->cpu->k, s->cpu->pc, s->snes->cpu->k, s->snes->cpu->pc);
 }
 #endif

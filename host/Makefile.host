@@ -41,6 +41,7 @@ HOST_CORE_DEFS := $(filter-out \
 	-DSNES_PRESENT_DMA2D \
 	-DSNES_BUS_IN_ITCM \
 	-DSNES_PERF \
+	-DSNES_SA1_T2 \
 	,$(CORE_C_DEFS))
 
 HOST_DEFS := \

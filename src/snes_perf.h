@@ -34,6 +34,8 @@ extern uint32_t snes_perf_ops, snes_perf_gsu_reads;   /* 65816 opcodes run; CPU 
  * asleep in a wait loop, wakes, cart reads by the 65816 and by the SA-1 */
 extern uint32_t snes_perf_sa1_ops, snes_perf_sa1_skip, snes_perf_sa1_wakes;
 extern uint32_t snes_perf_sa1_snes_rd, snes_perf_sa1_cpu_rd;
+extern uint32_t snes_perf_sa1_slices, snes_perf_sa1_loops, snes_perf_sa1_loopcyc;
+extern uint32_t snes_perf_sa1_handbacks, snes_perf_sa1_csteps;
 
 /* the PPU split (cycles, both inside snes_perf_ppu): sprite evaluation runs
  * on every line of every frame; the rest only on drawn lines. main/sub are

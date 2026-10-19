@@ -41,6 +41,13 @@ extern bool g_is_turbo;
  * 64 KB pages). Host pointers only: never in a savestate; rebuilt wherever
  * the ROM page cache is dropped (init, reset after every load, savestates). */
 uint8_t *g_snes_rdmap[0x800];
+/* SA-1 carts (sa1_link): its I-RAM and where it last caught up to (lastV,
+ * lastH), for the 65816's I-RAM fast path in snes_cpuRead/snes_cpuWrite */
+uint8_t *g_sa1_iram;
+const uint16_t *g_sa1_vh;
+const uint8_t *g_sa1_bwwin;   /* the 65816's $6000-$7FFF BW-RAM block */
+const uint8_t *g_sa1_bwlin;   /* BW-RAM for banks $40-$4F, NULL during CC1 */
+uint32_t g_sa1_bwmask;        /* (bank & $0F) << 16 | address, wrapped to BW-RAM */
 /* the write map: the WRAM pages only, exactly snes_cpuWrite's fast paths */
 uint8_t *g_snes_wrmap[0x800];
 
@@ -171,6 +178,9 @@ Snes* snes_init(uint8_t *ram) {
    * garbage pointer. Set it here as well as in snes_reset(). */
   snes->romPageTag = ~(uint32_t)0;
   snes->romPageBase = NULL;
+  g_sa1_iram = NULL;          /* until an SA-1 cart links it (sa1_link) */
+  g_sa1_vh = NULL;
+  g_sa1_bwwin = g_sa1_bwlin = NULL;
 #if SNES_PAGEMAP
   snes_build_pagemap(snes);
 #endif
@@ -1001,6 +1011,27 @@ uint8_t snes_cpuRead(Snes* snes, uint32_t adr) {
       }
       return base[adr & 0x1fff];
     }
+#if SNES_SA1
+    /* SA-1 cart memory the 65816 shares with the SA-1, served here instead of
+     * through snes_read, cart_read and sa1_snes_read: I-RAM ($3000-$37FF of
+     * banks $00-$3F/$80-$BF, its direct page in these games), the BW-RAM
+     * window at $6000-$7FFF ($2224's block) and BW-RAM banks $40-$4F (not
+     * during a type 1 character conversion: g_sa1_bwlin is NULL then). Each is
+     * a contact (sa1.h): the SA-1 first catches up, unless it already has to
+     * this dot (the other bytes of the same instruction). g_sa1_iram is NULL
+     * without an SA-1. */
+    if (g_sa1_iram) {
+      const uint8_t *p = NULL;
+      if ((adr & 0x40f800) == 0x003000) p = g_sa1_iram + (adr & 0x7ff);
+      else if ((adr & 0x40e000) == 0x006000) p = g_sa1_bwwin + (adr & 0x1fff);
+      else if ((adr & 0xf00000) == 0x400000 && g_sa1_bwlin) p = g_sa1_bwlin + (adr & g_sa1_bwmask);
+      if (p) {
+        if (g_sa1_vh[0] != snes->vPos || g_sa1_vh[1] != snes->hPos)
+          sa1_sync(snes->cart->sa1, snes->vPos, snes->hPos);
+        return *p;
+      }
+    }
+#endif
     SNES_PERF_CPU_INC(snes_perf_cpu_rd_slow);
     return snes_read(snes, adr);
   }
@@ -1123,6 +1154,18 @@ void snes_cpuWrite(Snes* snes, uint32_t adr, uint8_t val) {
   if(off < 0x2000 && (bank < 0x40 || (bank >= 0x80 && bank < 0xc0))) { snes->ram[off] = val; return; }
 #ifdef RIG_CALL_PROFILE
   g_cpuWrite_slow++;
+#endif
+#if SNES_SA1
+  /* SA-1 cart I-RAM and BW-RAM, as in snes_cpuRead: a write is an event (it
+   * may wake the SA-1), so it goes to the SA-1's own write, skipping only the
+   * bus decode */
+  if (g_sa1_iram) {
+    if ((adr & 0x40f800) == 0x003000) { sa1_iram_write(snes->cart->sa1, adr, val); return; }
+    if ((adr & 0x40e000) == 0x006000 || (adr & 0xf00000) == 0x400000) {
+      sa1_snes_write(snes->cart->sa1, (uint8_t)(adr >> 16), (uint16_t)adr, val);
+      return;
+    }
+  }
 #endif
   SNES_PERF_CPU_INC(snes_perf_cpu_wr_slow);
   snes_write(snes, adr, val);

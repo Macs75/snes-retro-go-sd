@@ -375,7 +375,14 @@ static void snes_perf_report(void)
            (unsigned long)(snes_perf_sa1_wakes / n), (unsigned long)(snes_perf_sa1_snes_rd / n),
            (unsigned long)(snes_perf_sa1_cpu_rd / n));
   }
+  if (g_the_snes && g_the_snes->cart && g_the_snes->cart->sa1) {
+    printf("PROF/sa1b: slices=%lu loops=%lu in_loop=%lu cycles handbacks=%lu c_steps=%lu per emulated frame\n",
+           (unsigned long)(snes_perf_sa1_slices / n), (unsigned long)(snes_perf_sa1_loops / n),
+           (unsigned long)(snes_perf_sa1_loopcyc / n), (unsigned long)(snes_perf_sa1_handbacks / n),
+           (unsigned long)(snes_perf_sa1_csteps / n));
+  }
   snes_perf_sa1_ops = snes_perf_sa1_skip = snes_perf_sa1_wakes = snes_perf_sa1_snes_rd = snes_perf_sa1_cpu_rd = 0;
+  snes_perf_sa1_slices = snes_perf_sa1_loops = snes_perf_sa1_loopcyc = snes_perf_sa1_handbacks = snes_perf_sa1_csteps = 0;
 #ifdef SNES_PERF_GSU
   printf("PROF/gsu: plot=%lu cycles in %lu plots, chains=%lu cycles (plots inside included), chain_ops=%lu of %lu GSU instructions per emulated frame\n",
          (unsigned long)(snes_perf_gsu_plot / n), (unsigned long)(snes_perf_gsu_plots / n),
@@ -672,7 +679,7 @@ static void SNES_ITCM_SCHED cpu_tick(Snes *s) {
   if (dma_cycle(s->dma)) return;
 #endif
   if (s->cpuCyclesLeft == 0) {
-#if SNES_SA1
+#if SNES_SA1 && !SNES_SA1_CONTACT
     /* the SA-1 up to here first, as before every 65816 instruction */
     if (s->cart->sa1) sa1_sync(s->cart->sa1, s->vPos, s->hPos);
 #endif
@@ -816,7 +823,7 @@ static inline bool idle_sa1_quiet(const Snes *s) {
 }
 /* the SA-1 up to this dot before an opcode, as run_dots does */
 static inline void idle_sa1_sync(Snes *s) {
-#if SNES_SA1
+#if SNES_SA1 && !SNES_SA1_CONTACT
   if (s->cart->sa1) sa1_sync(s->cart->sa1, s->vPos, s->hPos);
 #else
   (void)s;
@@ -1286,7 +1293,7 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
        * instruction (below). */
       SnesBatch b = { dots, apud, hpos, 0, s };
       int c = -1;
-#if SNES_SA1
+#if SNES_SA1 && !SNES_SA1_CONTACT
       if (!s->cart->sa1 || sa1_asleep(s->cart->sa1)) {   /* see sa1_event */
 #else
       if (true) {
@@ -1308,7 +1315,7 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
       {
         s->hPos = hpos;
         s->apuDotsAccum = apud;
-#if SNES_SA1
+#if SNES_SA1 && !SNES_SA1_CONTACT
         /* the SA-1 runs up to this dot before every 65816 instruction: their
          * mailboxes are polled within a few instructions of each other */
         if (s->cart->sa1) sa1_sync(s->cart->sa1, s->vPos, hpos);
@@ -1478,6 +1485,11 @@ static void SNES_ITCM_SCHED run_frame_events(Snes *s) {
 #endif
     cpu_tick(s);
     if (s->hPos == 0 && s->vPos == 0) break;
+#if SNES_SA1 && SNES_SA1_CONTACT
+    /* contact sync: also at every event, so an IRQ the SA-1 raises reaches
+     * the 65816 within a span even when it touches nothing shared */
+    if (s->cart->sa1) sa1_sync(s->cart->sa1, s->vPos, s->hPos);
+#endif
     run_dots(s, dots_to_next_event(s));
   }
   wdog_refresh();
