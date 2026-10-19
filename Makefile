@@ -69,6 +69,8 @@ $(SNES)/gsu_zsnes/gsu_core.c \
 $(SNES)/gsu_zsnes/gsu_blocks.c \
 $(SNES)/gsu_zsnes/gsu_blocks_yoshi.c \
 $(SNES)/gsu_zsnes/gsu_blocks_starfox.c \
+$(SNES)/sa1.c \
+$(SNES)/sa1_cpu.c \
 $(SNES)/input.c \
 $(SNES)/ppu.c \
 $(SNES)/snes.c \
@@ -171,6 +173,8 @@ ifeq ($(SNES_SPIN_BAKE),1)
 CORE_C_DEFS += -DSNES_SPIN_BAKE
 endif
 CORE_C_DEFS += -DSNES_CATCHUP_MAX=$(SNES_CATCHUP_MAX) -DSNES_AUDIO_DIRECT=$(SNES_AUDIO_DIRECT)
+# SA-1 carts: the SA-1 catches up before every 65816 instruction (run_dots)
+CORE_C_DEFS += -DSNES_SA1=1
 ifeq ($(SNES_IDLE_SKIP),1)
 CORE_C_DEFS += -DSNES_IDLE_SKIP
 endif

@@ -19,6 +19,7 @@
 #include "sdd1.h"
 #include "spc7110.h"
 #include "gsu.h"
+#include "sa1.h"
 #include "input.h"
 #include "tracing.h"
 #include "snes_gnw_alloc.h"
@@ -49,6 +50,9 @@ static uint8_t *snes_pagemap_base(Snes *snes, uint32_t adr) {
   if (bank == 0x7e || bank == 0x7f) return &snes->ram[((bank & 1) << 16) | off];
   if (off < 0x2000 && (bank < 0x40 || (bank >= 0x80 && bank < 0xc0))) return &snes->ram[off];
   Cart *cart = snes->cart;
+  /* SA-1: its MMC's ROM pages and plain BW-RAM (sa1_snes_page), rebuilt by
+   * snes_pagemap_refresh when the mapping moves */
+  if (cart && cart->sa1) return sa1_snes_page(cart->sa1, bank, off);
   /* Super FX: exactly the ROM that cart_gsu_read serves -- $00-$3F/$80-$BF
    * upper halves as LoROM, $40-$5F/$C0-$DF as linear 64 KB banks. Game Pak RAM,
    * the RAM mirror and the GSU registers keep the slow path. (romPageOk is off
@@ -98,6 +102,15 @@ static uint8_t *snes_pagemap_base(Snes *snes, uint32_t adr) {
   }
 #endif
   return NULL;
+}
+
+static void snes_build_pagemap(Snes *snes);
+/* The cartridge mapping moved (the SA-1's MMC or BW-RAM windows): rebuild the
+ * map and drop the fetch page, which may point at the old mapping. */
+void snes_pagemap_refresh(Snes *snes) {
+  snes->romPageTag = ~(uint32_t)0;
+  snes->romPageBase = NULL;
+  snes_build_pagemap(snes);
 }
 
 static void snes_build_pagemap(Snes *snes) {
@@ -330,6 +343,8 @@ void snes_handle_pos_stuff(Snes *snes) {
     }
     if (snes->cart && snes->cart->gsu)
       gsu_runLine(snes->cart->gsu);    /* one scanline's GSU slice */
+    if (snes->cart && snes->cart->sa1)
+      sa1_sync(snes->cart->sa1, snes->vPos, snes->hPos);  /* catch up to this line */
   } else if (snes->hPos == 512) {
     // render the line halfway of the screen for better compatibility
     if (!snes->inVblank && !snes->disableRender) {
@@ -440,6 +455,8 @@ void snes_run_line(Snes *snes) {
   }
   if (snes->cart && snes->cart->gsu)
     gsu_runLine(snes->cart->gsu);      /* one scanline's GSU slice */
+  if (snes->cart && snes->cart->sa1)
+    sa1_sync(snes->cart->sa1, snes->vPos, snes->hPos);    /* catch up to this line */
 
   /* The V-timer matches on every dot of its line; setting the flag once is the
    * same thing to everyone who reads it. */
@@ -626,7 +643,8 @@ static uint8_t snes_readReg(Snes* snes, uint16_t adr) {
     case 0x4211: {
       uint8_t val = snes->inIrq << 7;
       snes->inIrq = false;
-      snes->cpu->irqWanted = false;
+      /* the SA-1's request shares the line */
+      snes->cpu->irqWanted = snes->cart->sa1 && sa1_snes_irq(snes->cart->sa1);
       return val | (snes->openBus & 0x7f);
     }
     case 0x4212: {
@@ -694,7 +712,7 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
       snes->nmiEnabled = val & 0x80;
       if(!snes->hIrqEnabled && !snes->vIrqEnabled) {
         snes->inIrq = false;
-        snes->cpu->irqWanted = false;
+        snes->cpu->irqWanted = snes->cart->sa1 && sa1_snes_irq(snes->cart->sa1);
       }
       /* SNES quirk: enabling NMI during vblank can assert NMI immediately.
        * Gate on the RDNMI latch (inNmi / $4210.7): if the game already

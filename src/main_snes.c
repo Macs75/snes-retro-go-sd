@@ -75,6 +75,7 @@ static void snes_wait_button(void)
 #include "snes/snes.h"
 #include "snes/cart.h"
 #include "snes/gsu.h"
+#include "snes/sa1.h"
 #include "snes/gsu_zsnes/gsu_blocks.h"   /* gsu_blk_cart_id, GSU_BLK_GAME_MAGIC */
 #include "snes/spc7110.h"
 #include "snes/ppu.h"
@@ -361,11 +362,20 @@ static void snes_perf_report(void)
          snes_half_lock_active() ? "on" : "off", sm < 4 ? scal[sm] : "?", snes_fps == SNES_FPS_PAL ? "PAL" : "NTSC");
   printf("PROF/budget: budget=%lu busy=%lu heaviest=%lu (cycles per emulated frame, %lu MHz)\n",
          (unsigned long)budget, (unsigned long)busy, (unsigned long)sp_frame_max, (unsigned long)sp_mhz);
-  printf("PROF/emu: total=%lu [cpu=%lu ppu=%lu apu=%lu dma=%lu gsu=%lu] per emulated frame, ppu lines=%lu\n",
+  /* the coprocessor figure: the Super FX's, or on an SA-1 cart the SA-1's */
+  const bool sa1_cart = g_the_snes && g_the_snes->cart && g_the_snes->cart->sa1;
+  printf("PROF/emu: total=%lu [cpu=%lu ppu=%lu apu=%lu dma=%lu %s=%lu] per emulated frame, ppu lines=%lu\n",
          (unsigned long)emu, (unsigned long)cpu, (unsigned long)ppu, (unsigned long)apu_e, (unsigned long)dma,
-         (unsigned long)gsu, (unsigned long)(snes_perf_ppu_lines / n));
+         sa1_cart ? "sa1" : "gsu", (unsigned long)gsu, (unsigned long)(snes_perf_ppu_lines / n));
   printf("PROF/ops: ops=%lu gsu_reads=%lu per emulated frame (65816 opcodes run; CPU reads of $3000-$32FF)\n",
          (unsigned long)(snes_perf_ops / n), (unsigned long)(snes_perf_gsu_reads / n));
+  if (g_the_snes && g_the_snes->cart && g_the_snes->cart->sa1) {
+    printf("PROF/sa1: ops=%lu skipped=%lu wakes=%lu cart_reads cpu=%lu sa1=%lu per emulated frame (cycles: sa1= above)\n",
+           (unsigned long)(snes_perf_sa1_ops / n), (unsigned long)(snes_perf_sa1_skip / n),
+           (unsigned long)(snes_perf_sa1_wakes / n), (unsigned long)(snes_perf_sa1_snes_rd / n),
+           (unsigned long)(snes_perf_sa1_cpu_rd / n));
+  }
+  snes_perf_sa1_ops = snes_perf_sa1_skip = snes_perf_sa1_wakes = snes_perf_sa1_snes_rd = snes_perf_sa1_cpu_rd = 0;
 #ifdef SNES_PERF_GSU
   printf("PROF/gsu: plot=%lu cycles in %lu plots, chains=%lu cycles (plots inside included), chain_ops=%lu of %lu GSU instructions per emulated frame\n",
          (unsigned long)(snes_perf_gsu_plot / n), (unsigned long)(snes_perf_gsu_plots / n),
@@ -661,7 +671,13 @@ static void SNES_ITCM_SCHED cpu_tick(Snes *s) {
 #else
   if (dma_cycle(s->dma)) return;
 #endif
-  if (s->cpuCyclesLeft == 0) run_one_opcode(s);
+  if (s->cpuCyclesLeft == 0) {
+#if SNES_SA1
+    /* the SA-1 up to here first, as before every 65816 instruction */
+    if (s->cart->sa1) sa1_sync(s->cart->sa1, s->vPos, s->hPos);
+#endif
+    run_one_opcode(s);
+  }
   s->cpuCyclesLeft -= 2;
 }
 
@@ -775,9 +791,36 @@ static inline void idle_img_put(Cpu *cpu, const IdleState *st) {
 static inline bool idle_state_eq(const IdleState *p, const IdleState *q) {
   return p->pc == q->pc && idle_img_eq(p->img, q->img);
 }
+/* a byte of the loop's read set: WRAM, or memory the SA-1 shares (IDLE_MEM_SA1) */
+static inline uint8_t idle_peek(const Snes *s, uint32_t off) {
+#if SNES_SA1
+  if (off & IDLE_MEM_SA1) return sa1_peek(s->cart->sa1, (uint8_t)(off >> 16), (uint16_t)off);
+#endif
+  return s->ram[off];
+}
 static inline bool idle_mem_eq(const Snes *s, const uint8_t *m) {
-  for (int i = 0; i < g_idle.npmem; i++) if (s->ram[g_idle.pmem_off[i]] != m[i]) return false;
+  for (int i = 0; i < g_idle.npmem; i++) if (idle_peek(s, g_idle.pmem_off[i]) != m[i]) return false;
   return true;
+}
+/* On an SA-1 cart the CPU runs beside the SA-1, which may write what a loop
+ * reads or raise its IRQ at any moment. Laps are skipped only while it sleeps
+ * in a proven wait loop (sa1.c): then it changes nothing until the 65816 does
+ * something, which an idle loop never does inside a span. */
+static inline bool idle_sa1_quiet(const Snes *s) {
+#if SNES_SA1
+  return !s->cart->sa1 || sa1_asleep(s->cart->sa1);
+#else
+  (void)s;
+  return true;
+#endif
+}
+/* the SA-1 up to this dot before an opcode, as run_dots does */
+static inline void idle_sa1_sync(Snes *s) {
+#if SNES_SA1
+  if (s->cart->sa1) sa1_sync(s->cart->sa1, s->vPos, s->hPos);
+#else
+  (void)s;
+#endif
 }
 
 /* A $4210 read is constant only while the NMI flag is clear AND not on the
@@ -842,7 +885,7 @@ static bool idle_prove(Snes *s, int *dots) {
   uint8_t mem[IDLE_MAX_MEM + IDLE_MAX_IDX * 2];
   if (!idle_code_ok(s, g) || !idle_prepare_reads(s, g)) return false;
   idle_state(s, &start);
-  for (int i = 0; i < g->npmem; i++) mem[i] = s->ram[g->pmem_off[i]];
+  for (int i = 0; i < g->npmem; i++) mem[i] = idle_peek(s, g->pmem_off[i]);
   const uint16_t sfr0 = g->gsu_poll ? gsu_sfr_peek() : 0;
   IdleState seen[IDLE_MAX_STATES];
   uint8_t seen_ch[IDLE_MAX_STATES];
@@ -851,6 +894,7 @@ static bool idle_prove(Snes *s, int *dots) {
   for (;;) {
     if (nseen == IDLE_MAX_STATES) return false;
     idle_state(s, &seen[nseen++]);
+    idle_sa1_sync(s);
     apply_irq_match(s);
     const uint32_t c = run_one_opcode_charge(s);
     s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
@@ -920,6 +964,7 @@ static int idle_align_head(Snes *s, int dots) {
   const IdleSkip *g = &g_idle;
   for (int cap = IDLE_MAX_STATES; cpu->pc != g->head; ) {
     if (--cap < 0 || (uint16_t)(cpu->pc - g->head) > g->len) return dots;
+    idle_sa1_sync(s);
     apply_irq_match(s);
     const uint32_t c = run_one_opcode_charge(s);
     s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
@@ -966,7 +1011,7 @@ static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
     g->snap_ok = false; g->head = 0xffff; g->len = 0;
     return dots;
   }
-  for (int i = 0; i < g->npmem; i++) if (s->ram[g->pmem_off[i]] != g->smem[i]) return -1 - dots;
+  for (int i = 0; i < g->npmem; i++) if (idle_peek(s, g->pmem_off[i]) != g->smem[i]) return -1 - dots;
   Cpu *cpu = s->cpu;
   uint16_t pc = cpu->pc;
   if (!exact && pc != g->head) {
@@ -1056,6 +1101,7 @@ static int SNES_ITCM_IDLE idle_accum_span(Snes *s, int dots) {
   int cap = 32;
   while (phase != 2 || cpu->pc != g->head) {
     if (--cap < 0) return dots;
+    idle_sa1_sync(s);
     apply_irq_match(s);
     const uint32_t c = run_one_opcode_charge(s);
     s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
@@ -1106,6 +1152,7 @@ static int SNES_ITCM_IDLE idle_accum_span(Snes *s, int dots) {
 __attribute__((noinline))
 static int SNES_ITCM_IDLE idle_run_span(Snes *s, int dots) {
   if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) return dots;
+  if (!idle_sa1_quiet(s)) return dots;
   if (idle_hirq_in(s, s->hPos, dots)) return dots;
   /* the opcode in flight finishes first: pure arithmetic, as run_dots does */
   while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
@@ -1234,17 +1281,26 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
 #ifdef SNES_T2_BATCH
       /* opcodes that end inside the span run in the engine; it hands back
        * the last one's charge (it started a DMA or crosses the span's end),
-       * or -1 when the next opcode needs the ordinary path */
+       * or -1 when the next opcode needs the ordinary path. On an SA-1 cart
+       * only while the SA-1 sleeps: awake, it catches up before every
+       * instruction (below). */
       SnesBatch b = { dots, apud, hpos, 0, s };
-#ifdef SNES_PERF_CPUB
-      SNES_CPUB_BEGIN(cbb);
+      int c = -1;
+#if SNES_SA1
+      if (!s->cart->sa1 || sa1_asleep(s->cart->sa1)) {   /* see sa1_event */
+#else
+      if (true) {
 #endif
-      int c = snes_thumb2_batch(s->cpu, &b);
 #ifdef SNES_PERF_CPUB
-      SNES_CPUB_END(cbb, snes_perf_cpub_batch);
-      snes_perf_cpub_batches++;
+        SNES_CPUB_BEGIN(cbb);
 #endif
-      dots = b.dots; apud = b.apud; hpos = b.hpos;
+        c = snes_thumb2_batch(s->cpu, &b);
+#ifdef SNES_PERF_CPUB
+        SNES_CPUB_END(cbb, snes_perf_cpub_batch);
+        snes_perf_cpub_batches++;
+#endif
+        dots = b.dots; apud = b.apud; hpos = b.hpos;
+      }
       if (c >= 0) {
         left = (uint8_t)c;
       } else
@@ -1252,6 +1308,11 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
       {
         s->hPos = hpos;
         s->apuDotsAccum = apud;
+#if SNES_SA1
+        /* the SA-1 runs up to this dot before every 65816 instruction: their
+         * mailboxes are polled within a few instructions of each other */
+        if (s->cart->sa1) sa1_sync(s->cart->sa1, s->vPos, hpos);
+#endif
 #ifdef SNES_PERF_CPUB
         SNES_CPUB_BEGIN(cbs);
 #endif
@@ -1272,7 +1333,8 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
          * engine's fallback path only, so a game that never waits never
          * reaches it. */
         if (s->cpu->waiting && !s->cpu->nmiWanted && !s->cpu->irqWanted && !s->cpu->stopped &&
-            !idle_hirq_in(s, hpos, dots) && !(dma->dmaBusy || dma->hdmaTimer > 0)) {
+            !idle_hirq_in(s, hpos, dots) && !(dma->dmaBusy || dma->hdmaTimer > 0) &&
+            idle_sa1_quiet(s)) {   /* an SA-1 at work may raise the IRQ that ends the WAI */
           const int rem = dots - left;
           if (rem >= 12) {
             const int k6 = (rem / 6 - 1) * 6;
@@ -2570,6 +2632,7 @@ extern uint8_t __CX4_OVL_START__[], __CX4_OVL_END__[];
 extern uint8_t __SDD1_OVL_START__[], __SDD1_OVL_END__[];
 extern uint8_t __SPC7110_OVL_START__[], __SPC7110_OVL_END__[];
 extern uint8_t __DSP1_OVL_START__[], __DSP1_OVL_END__[];
+extern uint8_t __SA1_OVL_START__[], __SA1_OVL_END__[];
 
 static const struct {
   int kind;
@@ -2582,6 +2645,7 @@ static const struct {
   { SNES_COPRO_SDD1,    "S-DD1",    0x31444453u /* SDD1 */, __SDD1_OVL_START__, __SDD1_OVL_END__, __SDD1_OVL_END__ },
   { SNES_COPRO_SPC7110, "SPC7110",  0x31313753u /* S711 */, __SPC7110_OVL_START__, __SPC7110_OVL_END__, __SPC7110_OVL_END__ },
   { SNES_COPRO_DSP1,    "DSP-1",    0x31505344u /* DSP1 */, __DSP1_OVL_START__, __DSP1_OVL_END__, __DSP1_OVL_END__ },
+  { SNES_COPRO_SA1,     "SA-1",     0x4F314153u /* SA1O */, __SA1_OVL_START__, __SA1_OVL_END__, __SA1_OVL_END__ },
 };
 
 static uint32_t copro_ovl_rd32(const uint8_t *p) {
@@ -2694,6 +2758,8 @@ static bool cart_needs_coprocessor(const uint8_t *rom, uint32_t len) {
           /* S-DD1 is supported (Star Ocean, SFA2) */
         } else if ((romType >> 4) == 0x01) {
           /* Super FX / GSU is supported (Star Fox, Yoshi's Island...) */
+        } else if ((romType >> 4) == 0x03) {
+          /* SA-1 is supported (Mario RPG, Kirby Super Star...) */
         } else if ((romType >> 4) == 0x0F && (romType & 0x0f) == 0x09) {
           /* SPC7110 is supported (Far East of Eden Zero / Momotaro / SPL4) */
         } else {
@@ -3506,13 +3572,17 @@ void app_main_snes(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
          * (tools/frame_spikes.py) */
       extern uint32_t snes_fs_cpu, snes_fs_spc, snes_fs_dma;
       extern unsigned long gsu_fs_ops;
+      extern uint32_t sa1_fs_cpu;   /* sa1_cpu.c: SA-1 instructions */
+      extern uint32_t sa1_fs_skip;  /* sa1.c: SA-1 instructions the wait-loop skip did not run */
       static FILE *fs_f;
       static int fs_on = -1;
       static uint32_t fs_n;
       if (fs_on < 0) { const char *e = getenv("FRAME_STATS"); fs_f = e ? fopen(e, "w") : NULL; fs_on = fs_f != NULL; }
-      if (fs_on) fprintf(fs_f, "%lu %lu %lu %lu %lu\n", (unsigned long)++fs_n, (unsigned long)snes_fs_cpu,
-                         (unsigned long)snes_fs_spc, (unsigned long)snes_fs_dma, gsu_fs_ops);
-      snes_fs_cpu = snes_fs_spc = snes_fs_dma = 0;
+      if (fs_on) fprintf(fs_f, "%lu %lu %lu %lu %lu %lu %lu\n", (unsigned long)++fs_n, (unsigned long)snes_fs_cpu,
+                         (unsigned long)snes_fs_spc, (unsigned long)snes_fs_dma, gsu_fs_ops,
+                         (unsigned long)sa1_fs_cpu, (unsigned long)sa1_fs_skip);
+      if (snes->cart->sa1) sa1_statelog(snes->cart->sa1, fs_n);
+      snes_fs_cpu = snes_fs_spc = snes_fs_dma = sa1_fs_cpu = sa1_fs_skip = 0;
       gsu_fs_ops = 0;
     }
 #endif

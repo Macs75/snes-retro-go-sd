@@ -42,6 +42,9 @@
 #include "cpu.h"
 
 #define IDLE_MAX_LEN  32
+/* a read-set offset with this bit is an SA-1 bus address (I-RAM / BW-RAM),
+ * read with sa1_peek; without it, an offset into Snes.ram */
+#define IDLE_MEM_SA1 0x80000000u
 #define IDLE_MAX_MEM   4
 
 #define IDLE_MAX_STATES 16

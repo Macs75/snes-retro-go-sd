@@ -19,7 +19,7 @@ import argparse, re
 PATS = [
     (r'busy=(\d+) heaviest=(\d+)', ('busy', 'heavy')),
     (r'budget=(\d+)', ('budget',)),
-    (r'PROF/emu: total=(\d+) \[cpu=(\d+) ppu=(\d+) apu=(\d+) dma=(\d+) gsu=(\d+)\]',
+    (r'PROF/emu: total=(\d+) \[cpu=(\d+) ppu=(\d+) apu=(\d+) dma=(\d+) (?:gsu|sa1)=(\d+)\]',
      ('tot', 'cpu', 'ppu', 'apu', 'dma', 'gsu')),
     (r'PROF/pace: late=(\d+)', ('late',)),
     (r'dropped=(\d+) ticks past the catch-up cap, fill_min=(\d+)', ('drop', 'fmin')),

@@ -144,17 +144,17 @@ SECTIONS
 
     . = __APU_HOT_START__ + 0x17800;
     __CPU_C_START__ = .;
-    *(.text.cpu_doOpcode)
+    *(EXCLUDE_FILE(*sa1_cpu.o) .text.cpu_doOpcode)
     . = ALIGN(32);
-    *(.text.cpu_*)
+    *(EXCLUDE_FILE(*sa1_cpu.o) .text.cpu_*)   /* the SA-1's copy is in its overlay */
     __CPU_C_END__ = .;
     ASSERT(__CPU_C_END__ <= __CPU_C_START__ + 0x6000, "SNES: 65816 C window (24K) overflows");
 
     . = __APU_HOT_START__ + 0x1D800;
     . = ALIGN(4);
     /* The coprocessors' code is not part of the image: see the OVERLAY below. */
-    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o) .text*)
-    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o) .rodata*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o *sa1.o *sa1_cpu.o) .text*)
+    *(EXCLUDE_FILE(*gsu_core.o *gsu_blocks.o *gsu_blocks_*.o *cx4_hle.o *sdd1.o *spc7110.o *dsp1_hle.o *sa1.o *sa1_cpu.o) .rodata*)
     *(.glue_7)
     *(.glue_7t)
 
@@ -277,6 +277,15 @@ SECTIONS
       *dsp1_hle.o(.text* .rodata*)
       . = ALIGN(4);
       __DSP1_OVL_END__ = .;
+    }
+    /* SA-1: the chip and its 65816 (cpu.c compiled again as sa1_cpu.c) */
+    .sa1_overlay
+    {
+      __SA1_OVL_START__ = .;
+      *sa1.o(.text* .rodata*)
+      *sa1_cpu.o(.text* .rodata*)
+      . = ALIGN(4);
+      __SA1_OVL_END__ = .;
     }
   }
 

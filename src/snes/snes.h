@@ -141,6 +141,7 @@ uint8_t snes_cpuRead(Snes* snes, uint32_t adr);
 /* the 65816 page maps (snes.c): 8 KB pages, host pointer or NULL = slow path */
 extern uint8_t *g_snes_rdmap[0x800];   /* WRAM + cacheable ROM */
 extern uint8_t *g_snes_wrmap[0x800];   /* WRAM only */
+void snes_pagemap_refresh(Snes *snes);   /* after a cartridge mapping change */
 #endif
 void snes_cpuWrite(Snes* snes, uint32_t adr, uint8_t val);
 // debugging
@@ -153,7 +154,7 @@ void snes_handle_pos_stuff(Snes *snes);
 bool snes_loadRom(Snes* snes, const uint8_t* data, int length);
 /* The coprocessor snes_loadRom attaches for this image (same header pick). */
 enum { SNES_COPRO_NONE, SNES_COPRO_DSP1, SNES_COPRO_CX4, SNES_COPRO_SDD1,
-       SNES_COPRO_SPC7110, SNES_COPRO_GSU };
+       SNES_COPRO_SPC7110, SNES_COPRO_GSU, SNES_COPRO_SA1 };
 int snes_rom_coprocessor(const uint8_t* data, int length);
 /* Whether the code for coprocessor `kind` is present (device: its overlay is
    loaded). cart_attach* refuse the chip otherwise. Weak default: true. */

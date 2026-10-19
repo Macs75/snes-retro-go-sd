@@ -72,8 +72,11 @@ static void cpu_doOpcode(Cpu* cpu, uint8_t opcode);
 #ifdef HOST_BUILD
 /* CPU_PCHIST=file (host): 65816 instructions executed per (bank, pc) -- after
  * the idle skip, so the work that really runs. Written at exit, hottest first,
- * as "bank:addr count opcode cum%". */
+ * as "bank:addr count opcode cum%". The SA-1's instance reads SA1_PCHIST. */
 #include <stdio.h>
+#ifndef CPU_PCH_ENV
+#define CPU_PCH_ENV "CPU_PCHIST"
+#endif
 #define CPU_PCH_N 131072u
 static struct { uint32_t key, n; uint8_t op; } cpu_pch[CPU_PCH_N];
 static int cpu_pch_on = -1;
@@ -83,7 +86,7 @@ static int cpu_pch_cmp(const void *a, const void *b) {
   return x < y ? 1 : x > y ? -1 : 0;
 }
 static void cpu_pch_write(void) {
-  FILE *f = fopen(getenv("CPU_PCHIST"), "w");
+  FILE *f = fopen(getenv(CPU_PCH_ENV), "w");
   if (!f) return;
   qsort(cpu_pch, CPU_PCH_N, sizeof cpu_pch[0], cpu_pch_cmp);
   unsigned long cum = 0;
@@ -96,7 +99,7 @@ static void cpu_pch_write(void) {
   fclose(f);
 }
 static void cpu_pchist(uint32_t key, uint8_t op) {
-  if (cpu_pch_on < 0) { cpu_pch_on = getenv("CPU_PCHIST") != NULL; if (cpu_pch_on) atexit(cpu_pch_write); }
+  if (cpu_pch_on < 0) { cpu_pch_on = getenv(CPU_PCH_ENV) != NULL; if (cpu_pch_on) atexit(cpu_pch_write); }
   if (!cpu_pch_on) return;
   uint32_t h = (key * 2654435761u) >> 15;
   for (;; h++) {
@@ -127,6 +130,23 @@ extern Snes *g_snes; // for debugging
  * nothing (same ±6 window), they just still pay the branch. Splitting them out
  * would mean threading "this operand is immediate" through every cpu_xxx(low,
  * high) consumer, which is not worth it for the branch. */
+#ifdef CPU_SA1
+/* The SA-1's instance (sa1_cpu.c): mem is the Sa1, and its bus is the SA-1's
+ * view of the cartridge (sa1.c). None of the main CPU's hooks apply. */
+static inline uint8_t cpu_read(Cpu* cpu, uint32_t adr) {
+  const uint8_t* p = g_sa1_rdmap[(adr >> 13) & 0x7ff];   /* ROM and plain BW-RAM */
+  if (p) return p[adr & 0x1fff];
+  return sa1_cpu_read((Sa1*) cpu->mem, adr);
+}
+
+static uint8_t cpu_read_raw(Cpu* cpu, uint32_t adr) {
+  return cpu_read(cpu, adr);
+}
+
+static void cpu_write(Cpu* cpu, uint32_t adr, uint8_t val) {
+  sa1_cpu_write((Sa1*) cpu->mem, adr, val);
+}
+#else
 static uint8_t cpu_read_raw(Cpu* cpu, uint32_t adr) {
   // assume mem is a pointer to a Snes
   return snes_cpuRead((Snes*) cpu->mem, adr);
@@ -157,6 +177,7 @@ static void cpu_write(Cpu* cpu, uint32_t adr, uint8_t val) {
   snes_cpuWrite((Snes*) cpu->mem, adr, val);
 }
 #endif
+#endif /* CPU_SA1 */
 
 /* Stage 3D -- non-static data-access bridges for the Thumb-2 direct-page
  * handlers (snes_thumb2.S). These are byte-identical to the static cpu_read /
@@ -166,6 +187,7 @@ static void cpu_write(Cpu* cpu, uint32_t adr, uint8_t val) {
  * IMM_FETCH_BYTE), exactly as cpu_adrDp uses cpu_readOpcode (cpu_read_raw).
  * Non-static + unreferenced from C: the BL from .S resolves the symbol at link;
  * -Wunused-function does not fire for extern linkage. */
+#ifndef CPU_SA1
 #ifdef SNES_BUS_IN_ITCM
 __attribute__((section(".itcm_snes_interp.thumb2.bus")))
 #endif
@@ -219,6 +241,7 @@ void cpu_thumb2_write(Cpu* cpu, uint32_t adr, uint8_t val) {
   snes_cpuWrite((Snes*) cpu->mem, adr, val);
 #endif
 }
+#endif /* !CPU_SA1 */
 
 Cpu* cpu_init(void* mem, int memType) {
   Cpu* cpu = snes_zalloc(sizeof(Cpu));
@@ -325,10 +348,12 @@ int SNES_RUNOPCODE_IMPL(Cpu* cpu) {
   }
   /* rc static recompiler: if active, dispatch to native site (−42% insn on SMW).
    * One never-taken branch when inactive (g_rc_active defaults false). */
+#ifndef CPU_SA1
   if (g_rc_active) {
     uint16_t id = rc_dispatch_lookup(cpu->k, cpu->pc);
     if (id) { rc_dispatch_call(id, cpu); return cpu->cyclesUsed; }
   }
+#endif
 #ifdef HOST_BUILD
   const uint32_t pch_key = ((uint32_t)cpu->k << 16) | cpu->pc;
 #endif
@@ -1026,6 +1051,7 @@ static void cpu_doOpcode(Cpu* cpu, uint8_t opcode) {
       boot_trace_left--;
     }
   }
+#ifndef CPU_SA1
   if (host_hang_pc_on()) {
     static unsigned n;
     static uint32_t last_pc;
@@ -1053,6 +1079,7 @@ static void cpu_doOpcode(Cpu* cpu, uint8_t opcode) {
       exit(2);
     }
   }
+#endif /* !CPU_SA1 */
 #endif
 #ifdef SNES_PC_HISTOGRAM
   /* Per-ROM execution map: count every executed opcode by its 24-bit address, so

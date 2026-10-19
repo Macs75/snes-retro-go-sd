@@ -35,6 +35,7 @@ OVERLAYS = [
     (b"SDD1", ".sdd1_overlay", "__SDD1_OVL_START__", "__SDD1_OVL_END__", "__SDD1_OVL_END__"),
     (b"S711", ".spc7110_overlay", "__SPC7110_OVL_START__", "__SPC7110_OVL_END__", "__SPC7110_OVL_END__"),
     (b"DSP1", ".dsp1_overlay", "__DSP1_OVL_START__", "__DSP1_OVL_END__", "__DSP1_OVL_END__"),
+    (b"SA1O", ".sa1_overlay", "__SA1_OVL_START__", "__SA1_OVL_END__", "__SA1_OVL_END__"),
 ]
 
 

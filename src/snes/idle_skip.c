@@ -71,7 +71,7 @@ static uint8_t mirror_bank(uint8_t bank) {
   return (uint8_t)(bank ^ 0x80);
 }
 
-enum { MEM_NO = 0, MEM_WRAM, MEM_ROM, MEM_RDNMI, MEM_GSUSFR };
+enum { MEM_NO = 0, MEM_WRAM, MEM_ROM, MEM_RDNMI, MEM_GSUSFR, MEM_SA1 };
 
 /* What a read at bank:off reaches. WRAM gives its offset into Snes.ram. ROM is
  * accepted only for the two plain mappings, where it is constant. $4210 is
@@ -85,6 +85,20 @@ static int classify(const Snes *s, uint8_t bank, uint16_t off, uint32_t *ram_off
   if (bank == 0x7e || bank == 0x7f) { *ram_off = ((uint32_t)(bank & 1) << 16) | off; return MEM_WRAM; }
   if (b < 0x40 && off < 0x2000)      { *ram_off = off; return MEM_WRAM; }
   if (b < 0x40 && off == 0x4210)     return MEM_RDNMI;
+  if (s->cart && s->cart->sa1) {            /* SA-1: its own map (sa1_snes_read) */
+    /* I-RAM, the BW-RAM window and banks $40-$4F: memory the SA-1 shares,
+     * which only it or a 65816 write changes. Read through sa1_peek; the span
+     * runner skips such a loop only while the SA-1 sleeps (sa1_asleep). The
+     * offset carries IDLE_MEM_SA1 and the bus address. */
+    if ((b < 0x40 && ((off >= 0x3000 && off < 0x3800) || (off >= 0x6000 && off < 0x8000))) ||
+        (b >= 0x40 && b < 0x50 && bank < 0x80)) {
+      *ram_off = IDLE_MEM_SA1 | ((uint32_t)bank << 16) | off;
+      return MEM_SA1;
+    }
+    if (b < 0x40 && off >= 0x8000) return MEM_ROM;
+    if (bank >= 0xc0) return MEM_ROM;
+    return MEM_NO;                          /* registers, the rest */
+  }
   if (s->cart && s->cart->gsu) {            /* Super FX: its own map (cart_gsu_read) */
     if (b < 0x40 && (off == 0x3030 || off == 0x3031)) return MEM_GSUSFR;
     if (b < 0x40 && off >= 0x8000) return MEM_ROM;
@@ -265,7 +279,7 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
               if (op == 0xad || op == 0xaf) gsu_lda_next = (uint16_t)(q + len);   /* LDA abs / long */
             }
           }
-          if (c == MEM_WRAM) {
+          if (c == MEM_WRAM || c == MEM_SA1) {
             int j;
             for (j = 0; j < out->nmem; j++) if (out->mem_off[j] == off) break;
             if (j == out->nmem) {
@@ -339,7 +353,7 @@ bool idle_prepare_reads(Snes *s, IdleSkip *g) {
       if (a < ea) return false;
       int c = classify(s, mb, a, &off);
       if (c == MEM_NO || c == MEM_RDNMI || c == MEM_GSUSFR) return false;
-      if (c == MEM_WRAM) {
+      if (c == MEM_WRAM || c == MEM_SA1) {
         if (n == (int)(sizeof g->pmem_off / sizeof g->pmem_off[0])) return false;
         g->pmem_off[n++] = off;
       }

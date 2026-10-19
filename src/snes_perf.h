@@ -30,6 +30,10 @@ extern uint32_t snes_perf_dsp;                        /* DSP ticks inside apu_ru
 extern uint32_t snes_perf_dma, snes_perf_dma_calls;   /* DMA, minus any APU work inside it */
 extern uint32_t snes_perf_gsu;                        /* Super FX: every GSU slice (line, vblank, start) */
 extern uint32_t snes_perf_ops, snes_perf_gsu_reads;   /* 65816 opcodes run; CPU reads of GSU registers */
+/* SA-1 (sa1.c; its cycles are in snes_perf_gsu): instructions run, skipped
+ * asleep in a wait loop, wakes, cart reads by the 65816 and by the SA-1 */
+extern uint32_t snes_perf_sa1_ops, snes_perf_sa1_skip, snes_perf_sa1_wakes;
+extern uint32_t snes_perf_sa1_snes_rd, snes_perf_sa1_cpu_rd;
 
 /* the PPU split (cycles, both inside snes_perf_ppu): sprite evaluation runs
  * on every line of every frame; the rest only on drawn lines. main/sub are

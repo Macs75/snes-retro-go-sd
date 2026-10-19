@@ -17,6 +17,7 @@ typedef struct Cx4 Cx4;
 typedef struct Sdd1 Sdd1;
 typedef struct Spc7110 Spc7110;
 typedef struct Gsu Gsu;
+typedef struct Sa1 Sa1;
 
 struct Cart {
   Snes* snes;
@@ -55,6 +56,9 @@ struct Cart {
   Spc7110* spc7110;
   /* Super FX / GSU (Star Fox, Yoshi's Island...). LoROM boards; NULL otherwise. */
   Gsu* gsu;
+  /* SA-1 (Mario RPG, Kirby...): its own 65816, MMC and BW-RAM = cart->ram.
+   * cart_read/cart_write hand the whole cart region to it. NULL otherwise. */
+  Sa1* sa1;
 };
 
 // TODO: how to handle reset & load? (especially where to init ram)
@@ -66,6 +70,7 @@ void cart_attachCx4(Cart* cart);    /* call after cart_load for Cx4 carts */
 void cart_attachSdd1(Cart* cart);   /* call after cart_load for S-DD1 carts */
 void cart_attachSpc7110(Cart* cart);/* call after cart_load for SPC7110 carts */
 void cart_attachGsu(Cart* cart);    /* call after cart_load for Super FX carts */
+void cart_attachSa1(Cart* cart);    /* call after cart_load for SA-1 carts */
 void cart_free(Cart* cart);
 void cart_reset(Cart* cart); // will reset special chips etc, general reading is set up in load
 void cart_load(Cart* cart, int type, uint8_t* rom, int romSize, int ramSize); // TODO: figure out how to handle (battery, cart-chips etc)

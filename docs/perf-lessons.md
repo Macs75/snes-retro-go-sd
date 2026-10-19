@@ -473,6 +473,44 @@ there is CPU time to find, not pacing. `PROF/pace` (`dropped`, `fill_min`),
 `PROF/direct`, `PROF/audio3` and `PROF/qev` (`PERF_AUDIO`) measure it, and
 `tools/prof_log_compare.py` sums them per phase.
 
+### 4.11 SA-1: two 65816s, one interpreter — branch `sa1-poc`
+
+The SA-1 is a second 65816 at 10.74 MHz beside the main one. Its CPU is ours
+(`cpu.c` compiled again as `sa1_cpu.c` on the SA-1's bus); the chip logic is
+ZSNES's. What the bring-up and the first device logs taught:
+
+- **Interleave at the instruction, not the scanline.** With the SA-1 run once a
+  line, Kirby's Dream Land 3 crashed: when the SA-1 asks the 65816 to run a
+  routine, the 65816 waits four `XBA`s before re-reading the message register,
+  so a reply one line late ran the routine twice (the second time with the
+  SA-1's "list done" index of -1). `sa1_sync` now runs the SA-1 up to the dot
+  before every 65816 instruction -- including the one `cpu_tick` runs at an
+  event boundary, which had been missed.
+- **Most SA-1 instructions are waiting.** snes9x's 36-59K SA-1 instructions a
+  frame (the old "not viable" verdict) are 79-99% one polling loop. A jump back
+  to a loop head whose next arrival finds the CPU identical, after a lap that
+  wrote nothing and read no clock or side effect, with nothing outside having
+  happened, proves the loop: the SA-1 sleeps, its clocks accrue, and the next
+  65816 write it could see wakes it, charging the skipped laps in one step. The
+  65816's idle skip takes loops polling I-RAM/BW-RAM only while the SA-1
+  sleeps. Host, both skips on vs off: WRAM, I-RAM, BW-RAM and both CPUs equal
+  every frame for 2,400 frames of three games.
+- **Make the clock independent of how often you call it.** The first on/off
+  check differed: `sa1_run` halved master clocks with `>> 1` per call, so
+  fewer, larger catch-ups (the 65816 skipping laps) lost fewer half clocks.
+  The odd clock now carries over.
+- **A per-byte call into another file is the slow path.** Both CPUs' ROM and
+  BW-RAM reads go through 8 KB page maps, rebuilt only on a real change (Mario
+  RPG rewrites `$2225` with the same value thousands of times) and only the
+  pages that moved.
+
+Device, Kirby Super Star intro + attract (PROFLITE → `PERF`, log 1): 43-69% →
+83% of real time on average, the light windows at 100%. What is left is real
+work: in the slow windows the SA-1 runs 20-23K instructions a frame at ~216
+cycles each (C, from RAM) and the 65816 single-steps at ~460 cycles an
+instruction, because the SA-1 is awake. Letting the 65816 batch while the SA-1
+sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
+
 ---
 
 ## 5. Cross-cutting lessons

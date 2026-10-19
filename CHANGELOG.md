@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **SA-1 support.** Kirby Super Star, Kirby's Dream Land 3 and Super Mario RPG
+  boot and play. The chip is ZSNES's; its CPU is the core's own 65816, run a
+  second time. Its code is loaded only for an SA-1 cart. On device, Kirby Super
+  Star's intro and attract run at 84% of real time on average, the light scenes
+  at full speed.
+
+### Performance
+
+- **SA-1: proven wait loops are slept through**, and the 65816's idle skip now
+  takes loops that poll SA-1 memory while the SA-1 sleeps; both CPUs read ROM
+  and BW-RAM through page maps. Kirby Super Star's intro and attract on device:
+  ~50% → 84% of real time. Machine state identical to running every lap.
+
 ## [v0.0.8]
 
 ### Added

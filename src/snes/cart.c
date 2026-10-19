@@ -11,6 +11,7 @@
 #include "sdd1.h"
 #include "spc7110.h"
 #include "gsu.h"
+#include "sa1.h"
 #include "snes_gnw_alloc.h"
 
 /* Weak fallbacks so build scripts that list snes/*.c files explicitly and
@@ -84,6 +85,20 @@ __attribute__((weak)) bool gsu_cpu_ram_blocked(Gsu* g) { (void)g; return false; 
 __attribute__((weak)) bool gsu_cpu_rom_blocked(Gsu* g) { (void)g; return false; }
 __attribute__((weak)) void gsu_runLine(Gsu* g) { (void)g; }
 __attribute__((weak)) void gsu_vblank(Gsu* g) { (void)g; }
+/* SA-1: host-only for now; the device core links these stubs */
+__attribute__((weak)) Sa1* sa1_alloc(void) { return NULL; }
+__attribute__((weak)) void sa1_link(Sa1* s, Snes* snes, uint8_t* rom, uint32_t rs, uint8_t* ram, uint32_t ramSize) {
+  (void)s; (void)snes; (void)rom; (void)rs; (void)ram; (void)ramSize; }
+__attribute__((weak)) void sa1_reset(Sa1* s) { (void)s; }
+__attribute__((weak)) void sa1_saveload(Sa1* s, SaveLoadFunc* func, void* ctx) { (void)s; (void)func; (void)ctx; }
+__attribute__((weak)) uint8_t sa1_snes_read(Sa1* s, uint8_t bank, uint16_t adr) { (void)s; (void)bank; (void)adr; return 0; }
+__attribute__((weak)) void sa1_run(Sa1* s, uint32_t masterClocks) { (void)s; (void)masterClocks; }
+__attribute__((weak)) void sa1_sync(Sa1* s, uint16_t v, uint16_t h) { (void)s; (void)v; (void)h; }
+__attribute__((weak)) uint8_t* sa1_snes_page(Sa1* s, uint8_t bank, uint16_t adr) { (void)s; (void)bank; (void)adr; return NULL; }
+__attribute__((weak)) bool sa1_asleep(const Sa1* s) { (void)s; return false; }
+__attribute__((weak)) uint8_t sa1_peek(Sa1* s, uint8_t bank, uint16_t adr) { (void)s; (void)bank; (void)adr; return 0; }
+__attribute__((weak)) bool sa1_snes_irq(const Sa1* s) { (void)s; return false; }
+__attribute__((weak)) void sa1_snes_write(Sa1* s, uint8_t bank, uint16_t adr, uint8_t val) { (void)s; (void)bank; (void)adr; (void)val; }
 
 #ifdef GNW_SNES_CORE
 #include <assert.h>
@@ -94,9 +109,10 @@ __attribute__((weak)) void gsu_vblank(Gsu* g) { (void)g; }
  * leaving the RAM_EMU pool to the hot data. The RAM_EMU pool is the fallback
  * when AHB is short. Allocated once (the core exits by switching app, nothing
  * is freed); a later cart_load reuses it. */
-/* 64 KB: the largest Super FX Game Pak RAM (Doom, Stunt Race FX, Winter
- * Gold); normal carts request their header size, at most 32 KB in practice. */
-enum { kGnwCartSramMax = 0x10000 };
+/* 128 KB: SA-1 BW-RAM as ZSNES sizes it (SA1_BWRAM_BYTES); the largest Super
+ * FX Game Pak RAM is 64 KB (Doom, Stunt Race FX, Winter Gold). Normal carts
+ * request their header size, at most 32 KB in practice. */
+enum { kGnwCartSramMax = 0x20000 };
 static uint8_t *gnw_cart_sram;
 static int gnw_cart_sram_size;
 #endif
@@ -190,6 +206,7 @@ Cart* cart_init(Snes* snes) {
   cart->sdd1 = NULL;
   cart->spc7110 = NULL;
   cart->gsu = NULL;
+  cart->sa1 = NULL;
   cart->romPageOk = 0;
   memset(cart->bankLowRom, 0, sizeof(cart->bankLowRom));
   for(int b = 0; b < 128; b++) cart->bankBase[b] = NULL;
@@ -288,6 +305,21 @@ void cart_attachGsu(Cart* cart) {
 #endif
 }
 
+void cart_attachSa1(Cart* cart) {
+  if (!cart_copro_ready(SNES_COPRO_SA1, "SA-1")) return;
+  if (cart->sa1 == NULL) cart->sa1 = sa1_alloc();
+  if (cart->sa1) {
+    /* the MMC remaps ROM: no fetch-page cache, no page map, no DMA fast path */
+    cart->romPageOk = 0;
+    cart_buildBankBases(cart);
+    sa1_link(cart->sa1, cart->snes, cart->rom, cart->romSize, cart->ram, cart->ramSize);
+    sa1_reset(cart->sa1);
+    printf("snes: SA-1 attached (%d KB ROM, %d KB BW-RAM)\n",
+           (int)(cart->romSize / 1024), (int)(cart->ramSize / 1024));
+  }
+  else printf("snes: SA-1 alloc failed\n");
+}
+
 void cart_free(Cart* cart) {
   snes_zfree(cart);
 }
@@ -299,6 +331,7 @@ void cart_reset(Cart* cart) {
   if (cart->sdd1) sdd1_reset(cart->sdd1);
   if (cart->spc7110) spc7110_reset(cart->spc7110);
   if (cart->gsu) gsu_reset(cart->gsu);
+  if (cart->sa1) sa1_reset(cart->sa1);
   /* Fold the DMA ROM fast path's run-fixed conditions now that coprocessors
    * (if any) are attached. */
   cart->romDmaDirect = (cart->type == 2 && cart->romPageOk &&
@@ -318,6 +351,7 @@ void cart_saveload(Cart *cart, SaveLoadFunc *func, void *ctx) {
   /* Super FX: the GSU's registers, flags and cache are the ZSNES core's
    * globals; gsu_saveload streams them (the Game Pak RAM is cart->ram above). */
   if (cart->gsu) gsu_saveload(cart->gsu, func, ctx);
+  if (cart->sa1) sa1_saveload(cart->sa1, func, ctx);
 }
 
 void cart_load(Cart* cart, int type, uint8_t* rom, int romSize, int ramSize) {
@@ -451,6 +485,7 @@ const uint8_t* cart_gsu_dma_ram(Cart* cart, uint8_t bank, uint32_t* ofs, uint32_
 }
 
 static uint8_t cart_readLorom(Cart* cart, uint8_t bank, uint16_t adr) {
+  if(cart->sa1) return sa1_snes_read(cart->sa1, bank, adr);
   if(cart->gsu) {
     uint8_t v;
     if(cart_gsu_read(cart, bank, adr, &v)) return v;
@@ -517,6 +552,7 @@ static void cart_gsu_write(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val) 
 }
 
 static void cart_writeLorom(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val) {
+  if(cart->sa1) { sa1_snes_write(cart->sa1, bank, adr, val); return; }
   if(cart->gsu) {
     cart_gsu_write(cart, bank, adr, val);
     return;

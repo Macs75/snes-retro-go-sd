@@ -68,6 +68,7 @@ static int coproOf(const CartHeader* h) {
   if(h->coprocessor == 4 && h->chips >= 3 && h->chips <= 5) return SNES_COPRO_SDD1;
   if(h->coprocessor == 15 && h->chips == 9) return SNES_COPRO_SPC7110;
   if(h->coprocessor == 1) return SNES_COPRO_GSU;
+  if(h->coprocessor == 3) return SNES_COPRO_SA1;
   return SNES_COPRO_NONE;
 }
 
@@ -107,6 +108,10 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     uint32_t ex = headers[used].headerVersion == 3 ? headers[used].exRamSize : 0;
     loadRamSize = ex >= 0x8000 && ex <= 0x20000 ? (int)ex : 0x8000;
   }
+  if(headers[used].coprocessor == 3) {
+    /* SA-1: BW-RAM as ZSNES sizes it, whatever the header says (8-128 KB) */
+    loadRamSize = 0x20000;
+  }
 #ifdef GNW_SNES_CORE
   // Device: the ROM is memory-mapped from flash (the launcher caches it there)
   // and is megabytes large — the pow2 expand+malloc+copy below cannot fit the
@@ -139,6 +144,10 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   // $ffd6 high nibble $1 = Super FX / GSU (Star Fox, Yoshi's Island...).
   if(headers[used].coprocessor == 1) {
     cart_attachGsu(snes->cart);
+  }
+  // $ffd6 high nibble $3 = SA-1 (Mario RPG, Kirby Super Star...).
+  if(headers[used].coprocessor == 3) {
+    cart_attachSa1(snes->cart);
   }
   snes_reset(snes, true); // reset after loading
   snes_set_region(snes, headers[used].pal);
@@ -184,6 +193,10 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   }
   if(headers[used].coprocessor == 1) {
     cart_attachGsu(snes->cart);
+  }
+  // $ffd6 high nibble $3 = SA-1 (Mario RPG, Kirby Super Star...).
+  if(headers[used].coprocessor == 3) {
+    cart_attachSa1(snes->cart);
   }
   snes_reset(snes, true); // reset after loading
   snes_set_region(snes, headers[used].pal);
