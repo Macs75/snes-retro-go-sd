@@ -44,6 +44,12 @@
   at once. Kirby Super Star on device (PERF replay): SA-1 engine calls in the
   heavy windows down a third to a half, those windows 107-118% → 101-109% of
   the budget, mean speed 98.0% → 99.4%; state hashes equal the host's.
+- **Idle loops are skipped after a line's HDMA too.** A span that started in
+  the HDMA stall was never offered to the idle skip; now the rest of it is,
+  once the stall is taken. Kirby Super Star on device (PERF replay): windows
+  over budget 9 → 4, the worst 109% → 104.5%. Final Fantasy III and Super
+  Mario Kart skip more of their waits as well. Host replays of six games and
+  gwemu runs of three give the same state hashes as before.
 
 ## [v0.0.8]
 

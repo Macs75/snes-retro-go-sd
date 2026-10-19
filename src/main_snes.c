@@ -1347,6 +1347,21 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
   uint16_t hpos = s->hPos;
   uint32_t apud = s->apuDotsAccum;
   bool dma_active = dma->dmaBusy || dma->hdmaTimer > 0;
+#ifdef SNES_IDLE_SKIP
+  /* A span that starts in the line's HDMA stall (Kirby Super Star's waits for
+   * the SA-1, ~90 spans a frame) is not offered to the idle skip above: once
+   * the stall is taken, the rest of it is, as at a span's start. No HDMA
+   * starts inside a span, and the loop starts no DMA. */
+#define IDLE_AFTER_DMA()                                                         \
+  if (!dma_active && dots > 0 && (uint16_t)(s->cpu->pc - g_idle.head) <= g_idle.len) { \
+    s->hPos = hpos; s->apuDotsAccum = apud; s->cpuCyclesLeft = left;             \
+    dots = idle_run_span(s, dots);                                               \
+    hpos = s->hPos; apud = s->apuDotsAccum; left = s->cpuCyclesLeft;             \
+    dma_active = dma->dmaBusy || dma->hdmaTimer > 0;                             \
+  }
+#else
+#define IDLE_AFTER_DMA()
+#endif
   while (dots > 0) {
     if (dma_active) {
       /* HDMA stall: after a line's HDMA transfers the CPU waits out
@@ -1364,6 +1379,7 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
         hpos = (uint16_t)(hpos + 2 * k); dots -= 2 * k;
         dma_active = dma->dmaBusy || dma->hdmaTimer > 0;
         SNES_PERF_CPU_INC(snes_perf_cpu_dmaloop);
+        IDLE_AFTER_DMA();
         continue;
       }
       /* General-DMA stall: $420B has moved the data and left its bus time in
@@ -1395,6 +1411,7 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
       hpos += 2; dots -= 2;
       dma_active = dma->dmaBusy || dma->hdmaTimer > 0;
       SNES_PERF_CPU_INC(snes_perf_cpu_dmaloop);
+      IDLE_AFTER_DMA();
       continue;
     }
     bool started_dma = false;

@@ -566,6 +566,13 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
 - **SA-1-only code in core RAM costs every game.** The span runner (2.2 KB, its
   proof inlined) pushed Star Fox's GSU blocks out of RAM_EMU by 332 bytes; in
   the SA-1 overlay (`.sa1ovl.text`) it is loaded only for an SA-1 cart.
+- **Ask why a skip does not fire before improving it.** Counted on the host
+  for the heavy frames: of 809 laps of the `$2300` wait still run, ~450 were
+  in spans that began in the line's HDMA stall, which `run_dots` never offered
+  to the idle skip -- not a limit of the skip at all. Offering the rest of the
+  span once the stall is taken (a check per stall, none per opcode) took
+  windows over budget from 9 to 4; FF3 and Super Mario Kart skip more too.
+  `tools/host_rec_hashes.sh` replays any ROM with its `.rec` for the checks.
 
 ---
 
