@@ -573,6 +573,15 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   span once the stall is taken (a check per stall, none per opcode) took
   windows over budget from 9 to 4; FF3 and Super Mario Kart skip more too.
   `tools/host_rec_hashes.sh` replays any ROM with its `.rec` for the checks.
+- **An exact skip can still cost: check the other windows and the other games.**
+  Offering the idle skip again after a mid-span poll (the `$2300` read setting
+  `hclip`) was exact on every recording, and helped the windows it targeted,
+  but its extra proofs failed in the lap where the SA-1's message had just
+  arrived and used up the proof budget: Kirby Super Star's window 44 went
+  102% -> 109%. Removed; the partial-lap step alone left no window over
+  budget. Every change since is checked on the six host recordings, on Mario
+  RPG and Kirby's Dream Land 3 with `tools/host_attract_compare.sh` (same state
+  every frame, no window heavier), and on gwemu, before a device build.
 
 ---
 

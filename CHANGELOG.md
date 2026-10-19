@@ -50,6 +50,13 @@
   over budget 9 → 4, the worst 109% → 104.5%. Final Fantasy III and Super
   Mario Kart skip more of their waits as well. Host replays of six games and
   gwemu runs of three give the same state hashes as before.
+- **SA-1: the last, partial lap of a run-ahead is skipped too.** Its read is
+  included in the run-ahead; with nothing changed, the partial lap is stepped
+  through the proven lap's states instead of being run. Kirby Super Star on
+  device (PERF replay): no window over budget any more (the worst 104.5% →
+  99.0%), late frames 1,397 → 1,173. Host: Mario RPG's attract runs 5.5% fewer
+  65816 instructions, Kirby's Dream Land 3's 0.4%, both with the same state
+  every frame.
 
 ## [v0.0.8]
 

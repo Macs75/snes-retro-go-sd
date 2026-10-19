@@ -1215,18 +1215,40 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
     int k = -1;
     if (regs) {
       regs = false;
-      const int n = dots / L;
-      k = sa1_ahead(sa1, s->vPos, (uint16_t)(s->hPos + off), (uint16_t)L, n);
-      if (k > 0) {
-        const uint32_t adv = (uint32_t)k * (uint32_t)L;
+      const int n = dots / L;                                  /* whole laps */
+      const int nr = n + ((int)off < dots - n * L);            /* reads: the last, partial lap's too */
+      k = sa1_ahead(sa1, s->vPos, (uint16_t)(s->hPos + off), (uint16_t)L, nr);
+      const int whole = k > n ? n : k;
+      if (whole > 0) {
+        const uint32_t adv = (uint32_t)whole * (uint32_t)L;
         s->hPos = (uint16_t)(s->hPos + adv);
         s->apuDotsAccum += adv;
         dots -= (int)adv;
-        g_idle_stats.laps += (uint32_t)k;
-        g_idle_stats.sa1_laps += (uint32_t)k;
+        g_idle_stats.laps += (uint32_t)whole;
+        g_idle_stats.sa1_laps += (uint32_t)whole;
         g_idle_stats.ff_dots += adv;
       }
-      if (k == n) return dots;            /* every lap, the rest of the span runs */
+      if (k == nr) {
+        /* every read the same: the partial lap is the stored lap's first
+         * boundaries, stepped as idle_skip_laps does (an opcode takes effect
+         * when it starts, then is consumed), and the span is done */
+        uint32_t left = 0, adv = 0;
+        for (int ii = i; dots > 0; ) {
+          const int j = ii + 1 == g->nst ? 0 : ii + 1;
+          idle_img_put(cpu, &g->st[j]);
+          cpu->pc = g->st[j].pc;
+          left = g->ch[ii];
+          const uint32_t step = left < (uint32_t)dots ? left : (uint32_t)dots;
+          left -= step;
+          adv += step;
+          dots -= (int)step;
+          ii = j;
+        }
+        s->hPos = (uint16_t)(s->hPos + adv);
+        s->apuDotsAccum += adv;
+        s->cpuCyclesLeft = (uint8_t)left;
+        return dots;
+      }
       /* else lap k reads the change, the SA-1 already at its read */
     }
     if (k < 0) sa1_sync(sa1, s->vPos, (uint16_t)(s->hPos + off));
