@@ -445,10 +445,11 @@ static void snes_perf_report(void)
          (unsigned long)(g_idle_stats.laps / n), (unsigned long)(g_idle_stats.ff_dots / n),
          (unsigned long)(g_idle_stats.wai_dots / n), (unsigned long)g_idle_stats.rearms, (unsigned long)g_idle_stats.rejects);
   /* the span runner's own time (cycles, inside the cpu figure) and calls */
-  printf("PROF/idle: span_runner=%lu cycles in %lu calls per emulated frame\n",
-         (unsigned long)(g_idle_stats.cyc / n), (unsigned long)(g_idle_stats.calls / n));
+  printf("PROF/idle: span_runner=%lu cycles in %lu calls per emulated frame, sa1_awake_laps=%lu\n",
+         (unsigned long)(g_idle_stats.cyc / n), (unsigned long)(g_idle_stats.calls / n),
+         (unsigned long)(g_idle_stats.sa1_laps / n));
   g_idle_stats.laps = g_idle_stats.ff_dots = g_idle_stats.wai_dots = 0;
-  g_idle_stats.cyc = g_idle_stats.calls = 0;
+  g_idle_stats.cyc = g_idle_stats.calls = g_idle_stats.sa1_laps = 0;
 #endif
 #if SNES_AUDIO_DIRECT
   printf("PROF/direct: silence=%lu in %lu frames, dropped=%lu queue_min=%lu (samples), spare=%u frames\n",
@@ -1156,15 +1157,91 @@ static int SNES_ITCM_IDLE idle_accum_span(Snes *s, int dots) {
 }
 #endif
 
+#if SNES_SA1
+/* The SA-1 at work while the 65816 polls what they share (Kirby Super Star
+ * waits for the SA-1's message in $2300 this way, ~2,200 laps a frame in its
+ * busy scenes, each running the SA-1 a few instructions). A lap is still the
+ * same lap if the one instruction reading SA-1 memory reads the same bytes,
+ * and it reads them as the SA-1 has them at that instruction's dot (the
+ * contact in snes_cpuRead). So per lap the SA-1 is brought to that dot here
+ * and the bytes compared; equal, the lap is advanced without running it. The
+ * SA-1 runs to the same dots it would have, seeing nothing new (the loop
+ * writes nothing). Not equal, the CPU is left at the lap's start and runs it,
+ * its read finding the SA-1 already there. If catching up raised the 65816's
+ * IRQ or NMI, the 65816 must not see it before that read: the lap runs here
+ * up to and through the read with the lines as they were. */
+__attribute__((noinline))
+static int idle_sa1_awake_span(Snes *s, int dots) {
+  IdleSkip *g = &g_idle;
+  Cpu *cpu = s->cpu;
+  if (g->gsu_poll) return dots;
+  if (g->rdnmi && idle_rdnmi_live(s)) return dots;
+  if (g->code_ram && !idle_code_ok(s, g)) return dots;
+  int i = 0;
+  if (g->snap_ok)
+    for (i = 0; i < g->nst; i++) if (g->st[i].pc == cpu->pc) break;
+  if (!g->snap_ok || i == g->nst || !idle_img_eq((const uint8_t *)&cpu->a, g->st[i].img)) {
+    /* no lap proven from this state (the loop is entered with other
+     * registers at each of the SA-1's requests): prove one, a lap run here */
+    if (g_idle_sa1_budget == 0 || !idle_boundary_ok(s)) return dots;
+    g_idle_sa1_budget--;
+    if (!idle_prove(s, &dots)) return dots;
+    i = 0;                                /* back at the proof's first boundary */
+  }
+  if (g->sa1_rd != 1) return dots;
+  uint32_t off = 0;                       /* the read's dot, from this boundary */
+  for (int j = i, n = 0; g->st[j].pc != g->sa1_pc; j = j + 1 == g->nst ? 0 : j + 1) {
+    if (++n > g->nst) return dots;
+    off += g->ch[j];
+  }
+  Sa1 *sa1 = s->cart->sa1;
+  const int L = (int)g->lap;
+  while (dots >= L) {
+    const bool irq0 = cpu->irqWanted, nmi0 = cpu->nmiWanted;
+    sa1_sync(sa1, s->vPos, (uint16_t)(s->hPos + off));
+    if (cpu->irqWanted != irq0 || cpu->nmiWanted != nmi0) {
+      const bool irq1 = cpu->irqWanted, nmi1 = cpu->nmiWanted;
+      cpu->irqWanted = irq0; cpu->nmiWanted = nmi0;
+      for (;;) {
+        const uint16_t pc = cpu->pc;
+        apply_irq_match(s);
+        const uint32_t c = run_one_opcode_charge(s);
+        s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
+        while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
+        if (pc == g->sa1_pc || s->cpuCyclesLeft || dots <= 0) break;
+      }
+      cpu->irqWanted = irq1; cpu->nmiWanted = nmi1;
+      return dots;
+    }
+    if (!idle_mem_eq(s, g->smem)) return dots;
+    if (sa1_asleep(sa1)) {                /* asleep now: the ordinary skip */
+      const int r = idle_skip_laps(s, dots);
+      return r >= 0 ? r : -1 - r;
+    }
+    s->hPos = (uint16_t)(s->hPos + L);
+    s->apuDotsAccum += (uint32_t)L;
+    dots -= L;
+    g_idle_stats.laps++;
+    g_idle_stats.sa1_laps++;
+    g_idle_stats.ff_dots += (uint32_t)L;
+  }
+  return dots;
+}
+#endif
+
 __attribute__((noinline))
 static int SNES_ITCM_IDLE idle_run_span(Snes *s, int dots) {
   if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) return dots;
-  if (!idle_sa1_quiet(s)) return dots;
+  const bool sa1_busy = !idle_sa1_quiet(s);
+  if (sa1_busy && g_idle.sa1_rd != 1) return dots;
   if (idle_hirq_in(s, s->hPos, dots)) return dots;
   /* the opcode in flight finishes first: pure arithmetic, as run_dots does */
   while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
   if (dots <= 0) return dots;
   if (s->vIrqEnabled && s->vPos == s->vTimer) return dots;
+#if SNES_SA1
+  if (sa1_busy) return g_idle.kind == IDLE_KIND_RECUR ? idle_sa1_awake_span(s, dots) : dots;
+#endif
 #if SNES_IDLE_ACCUM
   if (g_idle.kind == IDLE_KIND_ACCUM) return idle_accum_span(s, dots);
 #endif
@@ -1208,6 +1285,12 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
   }
 #endif
 #ifdef SNES_IDLE_SKIP
+#if SNES_SA1
+  /* An SA-1 cart's 65816 waits in more than one loop between two NMIs (for
+   * the SA-1's message, for an I-RAM flag): a span outside the active site
+   * looks for the pc among the known ones */
+  if ((uint16_t)(s->cpu->pc - g_idle.head) > g_idle.len && g_sa1_iram) idle_line_select(s);
+#endif
   /* One test per SPAN: is the CPU in the armed idle loop? */
   if ((uint16_t)(s->cpu->pc - g_idle.head) <= g_idle.len &&
       !(s->dma->dmaBusy || s->dma->hdmaTimer > 0))

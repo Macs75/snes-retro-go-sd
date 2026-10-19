@@ -31,6 +31,13 @@
   87.8% → 95.7% of real time against the main CPU's engine assembled for the
   SA-1, late frames 59% → 38%, audio dropouts 15.0 s → 4.9 s; the SA-1
   overlay 127 → 65 KB. The replay's state hashes equal the host's.
+- **SA-1: the 65816's waits for the SA-1 are skipped while it works.** The
+  idle skip takes loops polling `$2300`/`$2301` (the SA-1's message, its IRQ
+  flags) too, finds the loop the 65816 is in between NMIs, and while the SA-1
+  runs advances a lap after bringing the SA-1 to that lap's read and finding
+  the same bytes. Kirby Super Star on device (PERF replay): heavy windows
+  132% → 115% of the frame budget at worst, the 65816's share 51-59% → 41-44%;
+  the replay's state hashes equal the host's.
 
 ## [v0.0.8]
 

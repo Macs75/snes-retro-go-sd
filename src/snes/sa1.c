@@ -25,6 +25,9 @@
 #include "dma.h"
 #include "snes_gnw_alloc.h"
 #include "../snes_perf.h"
+#ifdef SNES_IDLE_SKIP
+#include "idle_skip.h"
+#endif
 
 #ifdef SNES_PERF
 /* PROF/sa1 (main_snes.c): SA-1 instructions run / skipped asleep, wakes, and
@@ -626,6 +629,11 @@ uint8_t sa1_snes_read(Sa1* s, uint8_t bank, uint16_t adr) {
   if (!(((b < 0x40) && adr >= 0x8000 && !(bank == 0x00 && adr >= 0xffea)) || bank >= 0xc0))
     sa1_sync(s, s->snes->vPos, s->snes->hPos);
 #endif
+#ifdef SNES_IDLE_SKIP
+  /* the 65816 polls the SA-1's messages: offer the loop to the idle skip
+   * (a no-op when it is already the active site) */
+  if ((adr == 0x2300 || adr == 0x2301) && b < 0x40) idle_sa1_poll_sample(s->snes);
+#endif
   /* the reads that change SA-1 state: the bit-stream reader, the converter */
   if (adr == 0x230c || adr == 0x230d || (s->SA1_in_cc1_dma && b >= 0x40 && b < 0x50))
     sa1_event(s);
@@ -766,6 +774,7 @@ uint8_t sa1_peek(Sa1* s, uint8_t bank, uint16_t adr) {
     if (adr >= 0x6000)
       return s->bwram[(((uint32_t)(s->SNSBMAP & 0x1f) << 13) | (adr & 0x1fff)) & s->bwramMask];
     if (adr >= 0x3000 && adr < 0x3800) return s->iram[adr - 0x3000];
+    if (adr == 0x2300 || adr == 0x2301 || adr == 0x230e) return sa1_reg_read(s, adr);   /* no side effect */
     return 0;
   }
   if (bank >= 0xc0) return sa1_rom_read(s, bank, adr);

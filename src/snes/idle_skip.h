@@ -92,6 +92,12 @@ typedef struct {
    * every slice while it runs; with the head bits unchanged, whole laps from
    * the head are still the same laps (idle_skip_laps). */
   uint16_t gsu_and, gsu_hmask, gsu_hsnap;
+  /* SA-1: the loop's instruction that reads memory the SA-1 shares, and how
+   * many do (0x80 set: an indexed one, address known only at proof time).
+   * With exactly one, laps are skipped while the SA-1 runs too
+   * (idle_sa1_awake_span in main_snes.c). */
+  uint16_t sa1_pc;
+  uint8_t  sa1_rd;
   bool     code_ram;      /* the loop's code is in WRAM: compared every span    */
   uint8_t  ncode;
   uint8_t  code[IDLE_MAX_LEN];
@@ -142,6 +148,7 @@ bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out);
 typedef struct {
   uint32_t laps, ff_dots, wai_dots, rearms, rejects;
   uint32_t cyc, calls;    /* PERF: the span runner's own cycles and calls */
+  uint32_t sa1_laps;      /* of laps: skipped with the SA-1 at work */
 } IdleStats;
 
 /* The sites live in DTCM on the device (idle_alloc): the span runner reads
@@ -156,6 +163,8 @@ extern IdleStats g_idle_stats;
 extern uint8_t g_idle_budget;   /* proving laps left this frame, refilled at the NMI */
 extern uint8_t g_idle_gsu_budget;   /* the same for GSU poll sites, so they never
                                      * starve the frame's wait loop of its proofs */
+extern uint8_t g_idle_sa1_budget;   /* and for a loop polling the SA-1 while it works,
+                                     * entered with other registers at each request */
 
 /* once, after snes_init: move the state to DTCM (no-op off the device) */
 void idle_alloc(void);
@@ -166,6 +175,8 @@ void idle_nmi_sample(Snes *s);
 /* Super FX: the CPU read the GSU status while the GSU is busy -- the same
  * site search at the current pc (no per-frame bookkeeping) */
 void idle_gsu_poll_sample(Snes *s);
+/* the CPU polls the SA-1's messages ($2300/$2301) while it works: the same */
+void idle_sa1_poll_sample(Snes *s);
 /* at an IRQ request: the same search at the interrupted pc. A loop waiting for
  * an IRQ (Yoshi's Island's frame wait ends on the GSU's STOP IRQ, mid-frame)
  * is never where the CPU is at the NMI, so the NMI sample alone never finds it. */

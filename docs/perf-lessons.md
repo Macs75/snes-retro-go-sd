@@ -538,6 +538,20 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   the whole 6,494-frame replay in ~36 s; all 54 state hashes equal the host's.
   A deliberately wrong INX for x = 1 changed nothing (the SA-1 runs with 16-bit
   index registers there); wrong for both widths, the hashes split at frame 120.
+- **Find the poll before fixing the poll.** The device log pointed at an I-RAM
+  wait loop (the idle site); a host PC histogram of just the heavy frames (two
+  runs, `SNES_FRAMES` 4800 and 4920, subtracted) showed it at 5% of the
+  65816's instructions there and a WRAM loop `BIT $2300 / BEQ` at 59%: the
+  65816 waiting for the SA-1's message, ~2,200 laps a frame, each a contact
+  that runs the SA-1 seven instructions. The skip refused it twice over: a
+  register read, and never the active site (only the NMI picked one).
+- **Skipping while the other CPU runs is still exact if you sync it to each
+  read.** Per lap the SA-1 is brought to the dot of the lap's one SA-1 read and
+  the polled bytes compared; the 65816 is not run. An IRQ that catch-up raises
+  must not be seen before that read: the lap then runs up to the read with the
+  line held. A loop entered with other registers at each request (Y) needs a
+  proof per request: its own budget, 128 a frame. Host: 20.8M laps skipped
+  instead of 15.0M, hashes equal; syncing two dots late broke 51 of 54.
 
 ---
 

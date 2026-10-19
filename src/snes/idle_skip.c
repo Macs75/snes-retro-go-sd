@@ -15,7 +15,7 @@ IdleSkip *g_idle_sites = s_sites_static;
 IdleSkip *g_idlep = &s_sites_static[0];
 #endif
 IdleStats g_idle_stats;
-uint8_t g_idle_budget, g_idle_gsu_budget;
+uint8_t g_idle_budget, g_idle_gsu_budget, g_idle_sa1_budget;
 static uint32_t s_frame;
 
 #ifdef TARGET_GNW
@@ -59,7 +59,7 @@ void idle_reset(void) {
   for (int i = 0; i < IDLE_SITES; i++) site_clear(&g_idle_sites[i]);
   g_idlep = &g_idle_sites[0];
   g_idle_stats = (IdleStats){0};
-  g_idle_budget = g_idle_gsu_budget = 0;
+  g_idle_budget = g_idle_gsu_budget = g_idle_sa1_budget = 0;
   s_frame = 0;
   for (int i = 0; i < 4; i++) s_reject[i] = 0xffffffffu;
   s_reject_i = 0;
@@ -90,7 +90,10 @@ static int classify(const Snes *s, uint8_t bank, uint16_t off, uint32_t *ram_off
      * which only it or a 65816 write changes. Read through sa1_peek; the span
      * runner skips such a loop only while the SA-1 sleeps (sa1_asleep). The
      * offset carries IDLE_MEM_SA1 and the bus address. */
-    if ((b < 0x40 && ((off >= 0x3000 && off < 0x3800) || (off >= 0x6000 && off < 0x8000))) ||
+    /* and $2300-$2301 (the two CPUs' messages and interrupt flags) and $230E
+     * (the version), which only register writes change and a read does not */
+    if ((b < 0x40 && ((off >= 0x3000 && off < 0x3800) || (off >= 0x6000 && off < 0x8000) ||
+                      off == 0x2300 || off == 0x2301 || off == 0x230e)) ||
         (b >= 0x40 && b < 0x50 && bank < 0x80)) {
       *ram_off = IDLE_MEM_SA1 | ((uint32_t)bank << 16) | off;
       return MEM_SA1;
@@ -195,6 +198,8 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
   out->nmem = 0; out->nidx = 0; out->rdnmi = false; out->uses_db = false; out->uses_dp = false;
   out->gsu_poll = false;
   out->gsu_and = 0;
+  out->sa1_pc = 0xffff;
+  out->sa1_rd = 0;
   uint16_t gsu_lda_next = 0xffff;                  /* the instruction after a status LDA */
   uint32_t ro;
   const int ccls = classify(s, bank, head, &ro);
@@ -279,6 +284,7 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
               if (op == 0xad || op == 0xaf) gsu_lda_next = (uint16_t)(q + len);   /* LDA abs / long */
             }
           }
+          if (c == MEM_SA1 && out->sa1_pc != q) { out->sa1_pc = q; out->sa1_rd++; }
           if (c == MEM_WRAM || c == MEM_SA1) {
             int j;
             for (j = 0; j < out->nmem; j++) if (out->mem_off[j] == off) break;
@@ -353,6 +359,7 @@ bool idle_prepare_reads(Snes *s, IdleSkip *g) {
       if (a < ea) return false;
       int c = classify(s, mb, a, &off);
       if (c == MEM_NO || c == MEM_RDNMI || c == MEM_GSUSFR) return false;
+      if (c == MEM_SA1) g->sa1_rd |= 0x80;                       /* which instruction: not known here */
       if (c == MEM_WRAM || c == MEM_SA1) {
         if (n == (int)(sizeof g->pmem_off / sizeof g->pmem_off[0])) return false;
         g->pmem_off[n++] = off;
@@ -505,6 +512,7 @@ static void idle_sample(Snes *s);
 void idle_nmi_sample(Snes *s) {
   g_idle_budget = 2;
   g_idle_gsu_budget = 2;
+  g_idle_sa1_budget = 128;
   s_frame++;
   idle_sample(s);
 }
@@ -515,6 +523,12 @@ void idle_nmi_sample(Snes *s) {
 void idle_gsu_poll_sample(Snes *s) {
   const Cpu *cpu = s->cpu;
   if (site_has(&g_idle, cpu->k, cpu->pc) && idle_env_ok(cpu, &g_idle)) return;   /* already the active site */
+  idle_sample(s);
+}
+
+void idle_sa1_poll_sample(Snes *s) {
+  const Cpu *cpu = s->cpu;
+  if (site_has(&g_idle, cpu->k, cpu->pc) && idle_env_ok(cpu, &g_idle)) return;
   idle_sample(s);
 }
 
