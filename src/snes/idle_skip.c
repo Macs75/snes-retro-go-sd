@@ -17,7 +17,7 @@ IdleSkip *g_idlep = &s_sites_static[0];
 IdleStats g_idle_stats;
 uint8_t g_idle_budget, g_idle_gsu_budget, g_idle_sa1_budget, g_idle_span_budget;
 static uint32_t s_frame;
-static uint32_t s_span_pc;   /* idle_span_sample: the last span's pc */
+static uint32_t s_span_pc[4];   /* idle_span_sample: the last spans' pcs, [0] the last */
 
 #ifdef TARGET_GNW
 #include <assert.h>
@@ -49,11 +49,19 @@ _Static_assert(offsetof(IdleState, img) == 2, "IdleState: img+14 must be word-al
 /* rejected pcs, so a busy frame's landing spot is not decoded every frame */
 static uint32_t s_reject[4];
 static uint8_t  s_reject_i;
-/* idle_span_sample's own: pcs whose loop does not poll the SA-1, and while it
- * searches, that only such a loop is armed */
-static uint32_t s_span_reject[4];
-static uint8_t  s_span_reject_i;
+/* idle_span_sample's own: the pcs its searches rejected (no loop, or one that
+ * does not poll the SA-1), by a hash of the pc, each tagged with the 256-frame
+ * epoch it was rejected in so that it is tried again in the next one (WRAM
+ * code changes); and while it searches, that only such a loop is armed */
+#define SPAN_REJECTS 64
+static uint32_t s_span_reject[SPAN_REJECTS];
 static bool     s_span_search;
+static inline uint32_t *span_reject_slot(uint32_t pc24) {
+  return &s_span_reject[(pc24 * 2654435761u) >> 26];
+}
+static inline uint32_t span_reject_key(uint32_t pc24) {
+  return pc24 | (s_frame >> 8) << 24;
+}
 
 static void site_clear(IdleSkip *g) {
   *g = (IdleSkip){0};
@@ -66,10 +74,11 @@ void idle_reset(void) {
   g_idlep = &g_idle_sites[0];
   g_idle_stats = (IdleStats){0};
   g_idle_budget = g_idle_gsu_budget = g_idle_sa1_budget = g_idle_span_budget = 0;
-  s_span_pc = 0xffffffffu;
+  for (int i = 0; i < 4; i++) s_span_pc[i] = 0xffffffffu;
   s_frame = 0;
-  for (int i = 0; i < 4; i++) s_reject[i] = s_span_reject[i] = 0xffffffffu;
-  s_reject_i = s_span_reject_i = 0;
+  for (int i = 0; i < 4; i++) s_reject[i] = 0xffffffffu;
+  s_reject_i = 0;
+  for (int i = 0; i < SPAN_REJECTS; i++) s_span_reject[i] = 0xffffffffu;
 }
 
 /* $7e/$7f are WRAM, not a ROM mirror */
@@ -569,11 +578,15 @@ bool idle_line_select(Snes *s) {
 }
 
 void idle_span_sample(Snes *s) {
-  const uint32_t pc24 = ((uint32_t)s->cpu->k << 16) | s->cpu->pc, prev = s_span_pc;
-  s_span_pc = pc24;
-  /* the same pc is no sign of a loop: a DMA stall, an MVN */
-  if (g_idle_span_budget == 0 || pc24 == prev || pc24 - prev + IDLE_MAX_LEN > 2 * IDLE_MAX_LEN) return;
-  for (int i = 0; i < 4; i++) if (s_reject[i] == pc24 || s_span_reject[i] == pc24) return;
+  const uint32_t pc24 = ((uint32_t)s->cpu->k << 16) | s->cpu->pc, prev = s_span_pc[0];
+  /* a wait loop of a few instructions starts spans at the same pcs again:
+   * this pc is one of the 3 before the last span's, and near the last's (the
+   * same pc as the last is no sign: a DMA stall, an MVN) */
+  const bool again = pc24 == s_span_pc[1] || pc24 == s_span_pc[2] || pc24 == s_span_pc[3];
+  s_span_pc[3] = s_span_pc[2]; s_span_pc[2] = s_span_pc[1]; s_span_pc[1] = prev; s_span_pc[0] = pc24;
+  if (g_idle_span_budget == 0 || !again || pc24 == prev || pc24 - prev + IDLE_MAX_LEN > 2 * IDLE_MAX_LEN) return;
+  if (*span_reject_slot(pc24) == span_reject_key(pc24)) return;
+  for (int i = 0; i < 4; i++) if (s_reject[i] == pc24) return;
   g_idle_span_budget--;
   s_span_search = true;
   idle_sample(s);
@@ -622,7 +635,7 @@ static void idle_sample(Snes *s) {
     site_clear(&cand);
     if (try_head(s, bank, head, pc, &cand)) {
       if (s_span_search && cand.sa1_rd == 0) {                  /* the NMI sample's to find */
-        s_span_reject[s_span_reject_i++ & 3] = pc24;
+        *span_reject_slot(pc24) = span_reject_key(pc24);
         return;
       }
       if (slot < 0) {                                            /* an empty slot, else the oldest */
@@ -661,5 +674,6 @@ static void idle_sample(Snes *s) {
 #endif
   IDLE_TRACE("IDLE: frame %lu reject %02x:%04x (no idle loop decoded there)\n", (unsigned long)s_frame, bank, pc);
   g_idle_stats.rejects++;
-  s_reject[s_reject_i++ & 3] = pc24;
+  if (s_span_search) *span_reject_slot(pc24) = span_reject_key(pc24);
+  else s_reject[s_reject_i++ & 3] = pc24;
 }

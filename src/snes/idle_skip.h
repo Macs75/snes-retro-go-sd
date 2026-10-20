@@ -193,9 +193,10 @@ void idle_irq_sample(Snes *s);
 bool idle_line_select(Snes *s);   /* true: the pc is in a known site, now the active one */
 /* SA-1 cart, a span outside every known site: an SA-1 cart's 65816 also waits
  * in loops no sample lands in (Mario RPG: the NMI in its frame wait, then an
- * I-RAM flag, which no register read offers). When this span starts within
- * IDLE_MAX_LEN bytes of the last one's pc, not at it -- looping, most likely
- * -- the site search runs at the pc (not a pc it rejected), at most
+ * I-RAM flag, which no register read offers). When this span starts at the
+ * pc one of the 3 spans before the last started at, and within IDLE_MAX_LEN
+ * bytes of the last one's pc, not at it -- a short loop, most likely -- the
+ * site search runs at the pc (not a pc it rejected lately), at most
  * g_idle_span_budget times a frame, and arms only a loop that reads memory the
  * SA-1 shares: the others are the NMI sample's (taking the frame's proofs
  * from the loop it finds cost more than it saved). */
