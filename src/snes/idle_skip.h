@@ -170,6 +170,7 @@ extern uint8_t g_idle_gsu_budget;   /* the same for GSU poll sites, so they neve
                                      * starve the frame's wait loop of its proofs */
 extern uint8_t g_idle_sa1_budget;   /* and for a loop polling the SA-1 while it works,
                                      * entered with other registers at each request */
+extern uint8_t g_idle_span_budget;  /* idle_span_sample's site searches left this frame */
 
 /* once, after snes_init: move the state to DTCM (no-op off the device) */
 void idle_alloc(void);
@@ -189,7 +190,16 @@ void idle_irq_sample(Snes *s);
 /* Super FX, once a line: activate whichever known site holds the pc. Such a
  * game waits in two loops a frame -- its frame wait and the GSU poll -- and
  * only the NMI and the poll would otherwise switch between them. */
-void idle_line_select(Snes *s);
+bool idle_line_select(Snes *s);   /* true: the pc is in a known site, now the active one */
+/* SA-1 cart, a span outside every known site: an SA-1 cart's 65816 also waits
+ * in loops no sample lands in (Mario RPG: the NMI in its frame wait, then an
+ * I-RAM flag, which no register read offers). When this span starts within
+ * IDLE_MAX_LEN bytes of the last one's pc, not at it -- looping, most likely
+ * -- the site search runs at the pc (not a pc it rejected), at most
+ * g_idle_span_budget times a frame, and arms only a loop that reads memory the
+ * SA-1 shares: the others are the NMI sample's (taking the frame's proofs
+ * from the loop it finds cost more than it saved). */
+void idle_span_sample(Snes *s);
 /* before proving: resolve the read set (indexed operands with the current
  * X/Y) into pmem_off; false if any of it is not WRAM or ROM */
 bool idle_prepare_reads(Snes *s, IdleSkip *g);

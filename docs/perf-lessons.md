@@ -610,6 +610,16 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
 - **gwemu runs only replays: give the attract an empty recording.**
   `tools/make_idle_rec.py` writes one, so a game without a recording (Kirby's
   Dream Land 3) gets its engine paths checked there too.
+- **A loop the NMI never lands in is never found.** Mario RPG's intro window
+  (124%) was the 65816 polling I-RAM `$3002` in WRAM, 94% of its
+  instructions, while its NMI always landed in the frame wait; no sample ever
+  looked there (`IDLE_TRACE` showed no decision at that pc). Two spans
+  starting within a loop's length of each other mark a loop: search there.
+  Two traps, both seen in `tools/host_attract_compare.sh` before any device
+  run: a DMA keeps the pc still across spans and used up the searches (the
+  same pc is no loop), and arming every loop found let a `$4212` wait take the
+  frame's two proofs from the vblank wait the NMI had found (the first windows
+  +25%); arming only loops that poll SA-1 memory left no window heavier.
 
 ---
 

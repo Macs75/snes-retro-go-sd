@@ -15,8 +15,9 @@ IdleSkip *g_idle_sites = s_sites_static;
 IdleSkip *g_idlep = &s_sites_static[0];
 #endif
 IdleStats g_idle_stats;
-uint8_t g_idle_budget, g_idle_gsu_budget, g_idle_sa1_budget;
+uint8_t g_idle_budget, g_idle_gsu_budget, g_idle_sa1_budget, g_idle_span_budget;
 static uint32_t s_frame;
+static uint32_t s_span_pc;   /* idle_span_sample: the last span's pc */
 
 #ifdef TARGET_GNW
 #include <assert.h>
@@ -48,6 +49,11 @@ _Static_assert(offsetof(IdleState, img) == 2, "IdleState: img+14 must be word-al
 /* rejected pcs, so a busy frame's landing spot is not decoded every frame */
 static uint32_t s_reject[4];
 static uint8_t  s_reject_i;
+/* idle_span_sample's own: pcs whose loop does not poll the SA-1, and while it
+ * searches, that only such a loop is armed */
+static uint32_t s_span_reject[4];
+static uint8_t  s_span_reject_i;
+static bool     s_span_search;
 
 static void site_clear(IdleSkip *g) {
   *g = (IdleSkip){0};
@@ -59,10 +65,11 @@ void idle_reset(void) {
   for (int i = 0; i < IDLE_SITES; i++) site_clear(&g_idle_sites[i]);
   g_idlep = &g_idle_sites[0];
   g_idle_stats = (IdleStats){0};
-  g_idle_budget = g_idle_gsu_budget = g_idle_sa1_budget = 0;
+  g_idle_budget = g_idle_gsu_budget = g_idle_sa1_budget = g_idle_span_budget = 0;
+  s_span_pc = 0xffffffffu;
   s_frame = 0;
-  for (int i = 0; i < 4; i++) s_reject[i] = 0xffffffffu;
-  s_reject_i = 0;
+  for (int i = 0; i < 4; i++) s_reject[i] = s_span_reject[i] = 0xffffffffu;
+  s_reject_i = s_span_reject_i = 0;
 }
 
 /* $7e/$7f are WRAM, not a ROM mirror */
@@ -524,6 +531,7 @@ void idle_nmi_sample(Snes *s) {
   g_idle_budget = 2;
   g_idle_gsu_budget = 2;
   g_idle_sa1_budget = 128;
+  g_idle_span_budget = 8;
   s_frame++;
   idle_sample(s);
 }
@@ -549,14 +557,27 @@ void idle_irq_sample(Snes *s) {
   idle_sample(s);
 }
 
-void idle_line_select(Snes *s) {
+bool idle_line_select(Snes *s) {
   const Cpu *cpu = s->cpu;
-  if (site_has(&g_idle, cpu->k, cpu->pc) && idle_env_ok(cpu, &g_idle)) return;
+  if (site_has(&g_idle, cpu->k, cpu->pc) && idle_env_ok(cpu, &g_idle)) return true;
   for (int i = 0; i < IDLE_SITES; i++) {
     IdleSkip *g = &g_idle_sites[i];
     if (g->len == 0 && g->head == 0xffff) continue;
-    if (site_has(g, cpu->k, cpu->pc) && idle_env_ok(cpu, g) && idle_code_ok(s, g)) { g_idlep = g; return; }
+    if (site_has(g, cpu->k, cpu->pc) && idle_env_ok(cpu, g) && idle_code_ok(s, g)) { g_idlep = g; return true; }
   }
+  return false;
+}
+
+void idle_span_sample(Snes *s) {
+  const uint32_t pc24 = ((uint32_t)s->cpu->k << 16) | s->cpu->pc, prev = s_span_pc;
+  s_span_pc = pc24;
+  /* the same pc is no sign of a loop: a DMA stall, an MVN */
+  if (g_idle_span_budget == 0 || pc24 == prev || pc24 - prev + IDLE_MAX_LEN > 2 * IDLE_MAX_LEN) return;
+  for (int i = 0; i < 4; i++) if (s_reject[i] == pc24 || s_span_reject[i] == pc24) return;
+  g_idle_span_budget--;
+  s_span_search = true;
+  idle_sample(s);
+  s_span_search = false;
 }
 
 #ifdef HOST_BUILD
@@ -600,6 +621,10 @@ static void idle_sample(Snes *s) {
     if (head > pc) break;                                        /* wrapped below $0000 */
     site_clear(&cand);
     if (try_head(s, bank, head, pc, &cand)) {
+      if (s_span_search && cand.sa1_rd == 0) {                  /* the NMI sample's to find */
+        s_span_reject[s_span_reject_i++ & 3] = pc24;
+        return;
+      }
       if (slot < 0) {                                            /* an empty slot, else the oldest */
         slot = 0;
         for (int i = 0; i < IDLE_SITES; i++) {

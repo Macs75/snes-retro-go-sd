@@ -74,6 +74,15 @@
   Super Mario RPG on device (PERF replay): windows over budget 54 → 34, over
   120% 8 → 1, the worst 130.7% → 124.2%, mean speed 96.1% → 98.5%, DMA's share
   of the heavy windows 12.8% → 1.5%; state hashes unchanged.
+- **SA-1: the 65816's waits on an SA-1 flag are found where the NMI never
+  lands.** A new wait loop was only looked for where an NMI, an IRQ or a `$2300`
+  read caught the CPU; Mario RPG waits for the SA-1 in a WRAM loop polling
+  I-RAM `$3002` while its NMI always lands in another loop, so 3,552 laps a
+  frame ran. Two spans in a row starting within a loop's length of each other
+  now search for a loop there (8 searches a frame at most, SA-1 carts only),
+  and arm it if it polls SA-1 memory. Host: Mario RPG's recording 13.1% fewer
+  65816 instructions (its intro window 7,527 → 1,188 a frame), Kirby Super Star
+  0.2%, no window heavier, the same state every frame.
 
 ## [v0.0.8]
 

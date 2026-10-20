@@ -1397,8 +1397,9 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
 #if SNES_SA1
   /* An SA-1 cart's 65816 waits in more than one loop between two NMIs (for
    * the SA-1's message, for an I-RAM flag): a span outside the active site
-   * looks for the pc among the known ones */
-  if ((uint16_t)(s->cpu->pc - g_idle.head) > g_idle.len && g_sa1_iram) idle_line_select(s);
+   * looks for the pc among the known ones, else may search for a new one */
+  if ((uint16_t)(s->cpu->pc - g_idle.head) > g_idle.len && g_sa1_iram && !idle_line_select(s))
+    idle_span_sample(s);
 #endif
   /* One test per SPAN: is the CPU in the armed idle loop? */
   if ((uint16_t)(s->cpu->pc - g_idle.head) <= g_idle.len &&
