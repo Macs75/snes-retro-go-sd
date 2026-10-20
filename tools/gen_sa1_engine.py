@@ -28,8 +28,9 @@ The wait-loop proof (sa1.c, sa1_loop_head) is done here after every jump back
 of 1-64 bytes in the bank, on this engine's own snapshot (Sa1Run.asnap):
 return 3 when a lap recurred exactly. Returns 0 debt spent, 1 C runs the next
 instruction (an interrupt, WAI / STP, emulation mode, code outside the map),
-3 proven. Opcodes left to C (BRK, COP, RTI, MVN, MVP, WAI, STP, XCE, decimal
-ADC / SBC) go through sa1cpu_thumb2_fallback with the state flushed.
+3 proven. Opcodes left to C (BRK, COP, RTI, WAI, STP, XCE, decimal ADC / SBC,
+the memory opcode forms not in ASM_MEM / ASM_FORMS) go through sa1cpu_thumb2_fallback with the
+state flushed.
 
   tools/gen_sa1_engine.py            (writes the file; run from the repo root)
 """
@@ -239,16 +240,26 @@ def am(mode, x, write):
 # 0.02% of the SA-1's instructions in Kirby Super Star (the replay of a
 # recording), Kirby's Dream Land 3 or Super Mario RPG (intro and attract, host
 # SA1_PCHIST). The rest -- with them under 0.2% of the work -- go to the C copy,
-# as do BRK, COP, RTI, MVN, MVP, WAI, STP, XCE; every opcode without a memory
-# operand (flags, transfers, branches) is here regardless, being small.
+# as do BRK, COP, RTI, WAI, STP, XCE; every opcode without a memory operand
+# (flags, transfers, branches) is here regardless, being small.
 ASM_MEM = {int(o, 16) for o in """
     04 05 06 08 09 0a 0b 10 18 1a 20 22 25 26 28 29 2a 2b 2c 30
-    38 3a 3c 45 48 49 4a 4b 4c 54 5a 5c 60 64 65 68 69 6b 6c 6d
+    38 3a 3c 45 48 49 4a 4b 4c 5a 5c 60 64 65 68 69 6b 6c 6d
     70 74 79 7a 7b 7c 7d 7f 80 82 84 85 86 87 88 89 8a 8b 8c 8d
     8e 8f 90 95 98 99 9b 9c 9d 9e 9f a0 a2 a4 a5 a6 a7 a8 a9 aa
     ab ac ad ae b0 b5 b7 b9 bb bc bd be bf c0 c2 c5 c6 c8 c9 ca
     cd d0 d9 da dc dd de e0 e2 e4 e5 e6 e8 e9 ea eb ec ed ee f0
     f4 fa fc
+""".split()}
+
+# And these in one m / x form only (opcode/mx, as it ran): the forms that are
+# at least 0.1% of the SA-1's instructions, those same runs and the replay of
+# a Super Mario RPG recording (tools/sa1_engine_coverage.py), each worth some
+# 0.1% of the frame where it runs; a handler per form, not per opcode, since
+# these games keep x = 0. Their other forms go to C.
+ASM_FORMS = {(int(f[:2], 16), int(f[3]), int(f[4])) for f in """
+    0d/00 14/10 24/00 44/00 54/00 66/10 75/00 91/00 94/10 af/00 b4/00 c4/00
+    f6/10
 """.split()}
 
 
@@ -405,6 +416,19 @@ def bit(op, m, x, mode):
     return s + NEXT(CYC[op] + e + (0 if m else 1))
 
 
+def mvx(op, x, d):
+    """MVN (d = 'add') / MVP ('sub'): one byte per instruction, as cpu.c --
+    DB = the destination bank, [src:X] to [dest:Y], A - 1, X and Y step; the
+    instruction again (pc back to its opcode) until A wraps to $FFFF. Flags
+    untouched."""
+    s = ['ldrb r2, [r6], #1', 'strb r2, [r4, #CPU_DB]', 'ldrb r1, [r6], #1', 'orr r1, r8, r1, lsl #16']
+    s += RD8('l') + ['ldrb r2, [r4, #CPU_DB]', 'orr r1, r9, r2, lsl #16'] + WR8('l')
+    w = 'uxtb' if x else 'uxth'
+    s += ['%s r8, r8, #1' % d, '%s r8, r8' % w, '%s r9, r9, #1' % d, '%s r9, r9' % w,
+          'subs r7, r7, #1', 'it pl', 'subpl r6, r6, #3', 'uxth r7, r7']
+    return s + NEXT(CYC[op])
+
+
 # --- stack (bank 0, native mode: no page-1 clamp) ----------------------------
 
 def push8():          # r0 = byte
@@ -459,12 +483,14 @@ def gen():
     def put(op, fn, dep, mem=True):
         """dep: which flags the handler's code depends on ('', 'm', 'x', 'mx');
         mem: the opcode has a memory operand (then only if in ASM_MEM)"""
-        if mem and op not in ASM_MEM:
-            return
         made = {}
         for m in (0, 1):
             for x in (0, 1):
                 key = (m if 'm' in dep else 0, x if 'x' in dep else 0)
+                if mem and op not in ASM_MEM and not any(
+                        o == op and (fm if 'm' in dep else 0, fx if 'x' in dep else 0) == key
+                        for o, fm, fx in ASM_FORMS):
+                    continue
                 if key not in made:
                     made[key] = add(op, key[0], key[1], fn(key[0] if 'm' in dep else 1, key[1] if 'x' in dep else 1))
                 tab[(m, x)][op] = made[key]
@@ -502,6 +528,8 @@ def gen():
         put(op, lambda m, x, op=op, mode=mode: cpxy('r9', op, x, mode), 'x')
     for op, mode in ((0x24, 'dp'), (0x2c, 'abs'), (0x34, 'dpx'), (0x3c, 'abx'), (0x89, 'imm')):
         put(op, lambda m, x, op=op, mode=mode: bit(op, m, x, mode), 'm')
+    put(0x54, lambda m, x: mvx(0x54, x, 'add'), 'x')
+    put(0x44, lambda m, x: mvx(0x44, x, 'sub'), 'x')
 
     # --- accumulator / implied -------------------------------------------
     def acc(op, m8, m16):

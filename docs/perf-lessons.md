@@ -593,6 +593,23 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
 - **More proven loops need more site slots.** With the new loops accepted, 8
   idle sites evicted each other and five Kirby Super Star windows got heavier
   on the host (`tools/host_attract_compare.sh` flagged them); 12 sites, none.
+- **Count the sync calls that run nothing.** In Mario RPG's heaviest window
+  DMA was 12.8% of the budget: 3,616 bytes a frame DMA'd from BW-RAM to the
+  PPU, each through `snes_read`, the cart and a sync of the SA-1 to a dot it
+  had already reached (3,616 calls, 0 runs). A transfer runs at one dot, so
+  one sync then a flat read is the same machine: DMA 12.8% -> 1.5%.
+- **An opcode set chosen on one game's histogram misses the next game's.**
+  The engine's memory opcodes were picked on Kirby Super Star and two
+  attracts; Mario RPG's gameplay sent 9.8% of its SA-1 instructions to C in
+  the heavy scenes (MVN alone 6%). Every m/x variant of the missing opcodes
+  cost 9.2 KB; only the forms that run (these games keep x = 0), at least 0.1%
+  of the instructions each, cost 4.3 KB for the same 0.6% left in C
+  (`tools/sa1_engine_coverage.py` reads the engine's dispatch tables against
+  `SA1_PCHIST`). The gain was smaller than estimated (SA-1 share -3 to -4
+  points, not -10): a C fallback costs less than assumed.
+- **gwemu runs only replays: give the attract an empty recording.**
+  `tools/make_idle_rec.py` writes one, so a game without a recording (Kirby's
+  Dream Land 3) gets its engine paths checked there too.
 
 ---
 

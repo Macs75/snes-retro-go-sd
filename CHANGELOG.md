@@ -66,6 +66,14 @@
   recording): windows over budget 59 → 54, over 110% 40 → 22, the worst
   140.8% → 130.7%, mean speed 93.5% → 96.1%, the 65816's instructions a third
   fewer; the replay's state hashes equal the host's.
+- **SA-1: DMA from BW-RAM reads it directly, and the SA-1 engine covers more
+  opcodes.** A DMA from BW-RAM banks `$40-$4F` brings the SA-1 up to date once
+  and reads the bytes straight from memory, not one by one through the cart;
+  MVN and MVP and 11 more opcode forms run in the Thumb-2 engine (+4.3 KB),
+  so Mario RPG's SA-1 runs 0.6% of its instructions in C instead of 4.2%.
+  Super Mario RPG on device (PERF replay): windows over budget 54 → 34, over
+  120% 8 → 1, the worst 130.7% → 124.2%, mean speed 96.1% → 98.5%, DMA's share
+  of the heavy windows 12.8% → 1.5%; state hashes unchanged.
 
 ## [v0.0.8]
 

@@ -10,6 +10,7 @@
 #include "dma.h"
 #include "snes.h"
 #include "cart.h"
+#include "sa1.h"
 #include "snes_gnw_alloc.h"
 
 static const int bAdrOffsets[8][4] = {
@@ -283,6 +284,23 @@ static uint16_t dma_to_ppu(Snes* sn, const uint8_t regs[4], unsigned oi, const u
   return aAdr;
 }
 
+#if SNES_SA1
+/* An SA-1 cart's BW-RAM banks $40-$4F as a flat DMA source, as sa1_snes_read
+ * reads them (not during a type 1 character conversion, whose reads are the
+ * converter's: g_sa1_bwlin is NULL then). Each byte read through
+ * sa1_snes_read would first bring the SA-1 up to now, but a transfer runs at
+ * one dot, so only the first catch-up runs anything: it runs here, once. The
+ * $6000-$7FFF window keeps the per-byte path (no game here DMAs from it).
+ * Else NULL. */
+static const uint8_t* dma_sa1_bwram(Snes* sn, uint8_t aBank, uint32_t* ofs, uint32_t* mask) {
+  if (aBank < 0x40 || aBank >= 0x50 || !g_sa1_bwlin) return NULL;
+  *ofs = (uint32_t)(aBank & 0x0f) << 16;
+  *mask = g_sa1_bwmask;
+  sa1_sync(sn->cart->sa1, sn->vPos, sn->hPos);
+  return g_sa1_bwlin;
+}
+#endif
+
 /* dma_doDma's A->B transfer, out of line so the BUS window keeps only the
  * channel scan: it runs once a transfer (snes_core.ld pins it after the
  * window). */
@@ -315,6 +333,7 @@ static void dma_runAtoB(Dma* dma, DmaChannel* ch) {
    *   WRAM $7E/$7F        -> snes->ram + ((bank&1)<<16), mask 0xffff
    *   plain HiROM bank    -> bankBase[bank&0x3f], mask 0xffff (romDmaDirect)
    *   Super FX $70-$73    -> the Game Pak RAM (cart_gsu_dma_ram)
+ *   SA-1 BW-RAM $40-$4F -> its BW-RAM (dma_sa1_bwram)
    * Anything else reads through the CPU's page map, g_snes_rdmap: per 8 KB page
    * a host pointer where snes_read reads plain memory (WRAM and its mirror,
    * ROM), else NULL, and that byte goes through snes_read as before. Except
@@ -338,6 +357,9 @@ static void dma_runAtoB(Dma* dma, DmaChannel* ch) {
     src = cart->bankBase[aBank & 0x3f];
   } else {
     src = cart_gsu_dma_ram(cart, aBank, &ofs, &mask);
+#if SNES_SA1
+    if (!src && g_sa1_iram) src = dma_sa1_bwram(sn, aBank, &ofs, &mask);
+#endif
 #if SNES_PAGEMAP
     if (!src)
       paged = !(cart->type == 1 && cart->ramSize > 0 && cart->romSize < 0x200000 &&

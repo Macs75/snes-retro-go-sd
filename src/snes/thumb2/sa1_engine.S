@@ -201,55 +201,55 @@ sa1_engine_run:
         ldr r0, [sp, #F_RUN]
         ldrh r2, [r0, #RUN_CANDPC]
         cmp r2, r1
-        bne.w .Larm361
+        bne.w .Larm399
         ldrb r2, [r0, #RUN_CANDK]
         ldrb r3, [r4, #CPU_K]
         cmp r2, r3
-        bne.w .Larm361
+        bne.w .Larm399
         ldrb r2, [r0, #RUN_DIRTY]
         ldr r3, [sp, #F_IRAM]
         ldr r3, [r3, #SA1E_WDIRTY]
         orrs r2, r2, r3
-        bne.w .Larm361
+        bne.w .Larm399
         ldr r2, [r0, #RUN_EXTEV]
         ldr r3, [r0, #RUN_LAPEV]
         cmp r2, r3
-        bne.w .Larm361
+        bne.w .Larm399
         ldr r2, [r0, #(RUN_AS + 0)]
         cmp r2, r7
-        bne.w .Larm361
+        bne.w .Larm399
         ldr r2, [r0, #(RUN_AS + 4)]
         cmp r2, r8
-        bne.w .Larm361
+        bne.w .Larm399
         ldr r2, [r0, #(RUN_AS + 8)]
         cmp r2, r9
-        bne.w .Larm361
+        bne.w .Larm399
         ldr r2, [r0, #(RUN_AS + 12)]
         cmp r2, r10
-        bne.w .Larm361
+        bne.w .Larm399
         ldr r2, [r0, #(RUN_AS + 16)]
         ldrh r3, [r4, #CPU_SP]
         cmp r2, r3
-        bne.w .Larm361
+        bne.w .Larm399
         ldr r2, [r0, #(RUN_AS + 20)]
         ldr r3, [r4, #16]
         cmp r2, r3
-        bne.w .Larm361
+        bne.w .Larm399
         ldr r2, [r0, #(RUN_AS + 24)]
         ldr r3, [r4, #20]
         cmp r2, r3
-        bne.w .Larm361
+        bne.w .Larm399
         ldr r2, [r0, #(RUN_AS + 28)]
         ldr r3, [r4, #24]
         cmp r2, r3
-        bne.w .Larm361
+        bne.w .Larm399
         ldrb r2, [r0, #(RUN_AS + 32)]
         ldrb r3, [r4, #CPU_E]
         cmp r2, r3
-        bne.w .Larm361
+        bne.w .Larm399
         mov.w r0, #3
         b.w .Lexit_r1
-.Larm361:
+.Larm399:
         strh r1, [r0, #RUN_CANDPC]
         ldrb r3, [r4, #CPU_K]
         strb r3, [r0, #RUN_CANDK]
@@ -324,55 +324,55 @@ sa1_engine_run:
         ldr r0, [sp, #F_RUN]
         ldrh r2, [r0, #RUN_CANDPC]
         cmp r2, r1
-        bne.w .Larm362
+        bne.w .Larm400
         ldrb r2, [r0, #RUN_CANDK]
         ldrb r3, [r4, #CPU_K]
         cmp r2, r3
-        bne.w .Larm362
+        bne.w .Larm400
         ldrb r2, [r0, #RUN_DIRTY]
         ldr r3, [sp, #F_IRAM]
         ldr r3, [r3, #SA1E_WDIRTY]
         orrs r2, r2, r3
-        bne.w .Larm362
+        bne.w .Larm400
         ldr r2, [r0, #RUN_EXTEV]
         ldr r3, [r0, #RUN_LAPEV]
         cmp r2, r3
-        bne.w .Larm362
+        bne.w .Larm400
         ldr r2, [r0, #(RUN_AS + 0)]
         cmp r2, r7
-        bne.w .Larm362
+        bne.w .Larm400
         ldr r2, [r0, #(RUN_AS + 4)]
         cmp r2, r8
-        bne.w .Larm362
+        bne.w .Larm400
         ldr r2, [r0, #(RUN_AS + 8)]
         cmp r2, r9
-        bne.w .Larm362
+        bne.w .Larm400
         ldr r2, [r0, #(RUN_AS + 12)]
         cmp r2, r10
-        bne.w .Larm362
+        bne.w .Larm400
         ldr r2, [r0, #(RUN_AS + 16)]
         ldrh r3, [r4, #CPU_SP]
         cmp r2, r3
-        bne.w .Larm362
+        bne.w .Larm400
         ldr r2, [r0, #(RUN_AS + 20)]
         ldr r3, [r4, #16]
         cmp r2, r3
-        bne.w .Larm362
+        bne.w .Larm400
         ldr r2, [r0, #(RUN_AS + 24)]
         ldr r3, [r4, #20]
         cmp r2, r3
-        bne.w .Larm362
+        bne.w .Larm400
         ldr r2, [r0, #(RUN_AS + 28)]
         ldr r3, [r4, #24]
         cmp r2, r3
-        bne.w .Larm362
+        bne.w .Larm400
         ldrb r2, [r0, #(RUN_AS + 32)]
         ldrb r3, [r4, #CPU_E]
         cmp r2, r3
-        bne.w .Larm362
+        bne.w .Larm400
         mov.w r0, #3
         b.w .Lexit_r1
-.Larm362:
+.Larm400:
         strh r1, [r0, #RUN_CANDPC]
         ldrb r3, [r4, #CPU_K]
         strb r3, [r0, #RUN_CANDK]
@@ -588,6 +588,43 @@ sa1_engine_run:
         ldrb r0, [r6], #1
         ldr.w pc, [lr, r0, lsl #2]
 
+.Lh0d_00:
+        ldrh r1, [r6], #2
+        ldrb r2, [r4, #CPU_DB]
+        add r1, r1, r2, lsl #16
+        ldr r2, [sp, #F_SA1]
+        ubfx r3, r1, #13, #11
+        ldr r3, [r2, r3, lsl #2]
+        cmp r3, #0
+        beq.w .Lm5
+        add r2, r1, #1
+        lsls r2, r2, #19
+        beq.w .Lm5
+        ubfx r2, r1, #0, #13
+        add r3, r3, r2
+        ldrb r0, [r3]
+        ldrb r2, [r3, #1]
+        orr r0, r0, r2, lsl #8
+.Ld6:
+        .subsection 1
+.Lm5:
+        bl sa1e_rd16_s_l
+        b.w .Ld6
+        .subsection 0
+        orr r7, r7, r0
+        sxth r10, r7
+        subs r11, r11, #5
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
 .Lh25_00:
         ldrb r1, [r6], #1
         ldrh r2, [r4, #CPU_DP]
@@ -596,18 +633,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm5
+        bne.w .Lm7
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm5
+        beq.w .Lm7
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld6:
+.Ld8:
         .subsection 1
-.Lm5:
+.Lm7:
         bl sa1e_rd16_s_b0
-        b.w .Ld6
+        b.w .Ld8
         .subsection 0
         and r7, r7, r0
         sxth r10, r7
@@ -635,15 +672,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm7
+        bne.w .Lm9
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld8:
+.Ld10:
         .subsection 1
-.Lm7:
+.Lm9:
         bl sa1e_rd8_s
-        b.w .Ld8
+        b.w .Ld10
         .subsection 0
         and r2, r7, r0
         bfi r7, r2, #0, #8
@@ -705,18 +742,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm9
+        bne.w .Lm11
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm9
+        beq.w .Lm11
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld10:
+.Ld12:
         .subsection 1
-.Lm9:
+.Lm11:
         bl sa1e_rd16_s_b0
-        b.w .Ld10
+        b.w .Ld12
         .subsection 0
         eor r7, r7, r0
         sxth r10, r7
@@ -744,15 +781,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm11
+        bne.w .Lm13
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld12:
+.Ld14:
         .subsection 1
-.Lm11:
+.Lm13:
         bl sa1e_rd8_s
-        b.w .Ld12
+        b.w .Ld14
         .subsection 0
         eor r2, r7, r0
         bfi r7, r2, #0, #8
@@ -817,18 +854,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm13
+        bne.w .Lm15
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm13
+        beq.w .Lm15
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld14:
+.Ld16:
         .subsection 1
-.Lm13:
+.Lm15:
         bl sa1e_rd16_s_b0
-        b.w .Ld14
+        b.w .Ld16
         .subsection 0
         ldrb r3, [r4, #CPU_C]
         lsl r2, r7, #16
@@ -870,15 +907,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm15
+        bne.w .Lm17
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld16:
+.Ld18:
         .subsection 1
-.Lm15:
+.Lm17:
         bl sa1e_rd8_s
-        b.w .Ld16
+        b.w .Ld18
         .subsection 0
         ldrb r3, [r4, #CPU_C]
         lsl r2, r7, #24
@@ -980,20 +1017,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm17
+        beq.w .Lm19
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm17
+        beq.w .Lm19
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld18:
+.Ld20:
         .subsection 1
-.Lm17:
+.Lm19:
         bl sa1e_rd16_s_l
-        b.w .Ld18
+        b.w .Ld20
         .subsection 0
         ldrb r3, [r4, #CPU_C]
         lsl r2, r7, #16
@@ -1031,14 +1068,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm19
+        beq.w .Lm21
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld20:
+.Ld22:
         .subsection 1
-.Lm19:
+.Lm21:
         bl sa1e_rd8_s
-        b.w .Ld20
+        b.w .Ld22
         .subsection 0
         ldrb r3, [r4, #CPU_C]
         lsl r2, r7, #24
@@ -1054,6 +1091,60 @@ sa1_engine_run:
         ubfx r0, r3, #28, #1
         strb r0, [r4, #CPU_V]
         subs r11, r11, #4
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh75_00:
+        ldrb r3, [r4, #CPU_D]
+        cmp r3, #0
+        bne.w .Lfb
+        ldrb r1, [r6], #1
+        ldrh r2, [r4, #CPU_DP]
+        add r1, r1, r2
+        add r1, r1, r8
+        uxth r1, r1
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm23
+        add r2, r1, #1
+        lsls r2, r2, #21
+        beq.w .Lm23
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        ldrh r0, [r2, r3]
+.Ld24:
+        .subsection 1
+.Lm23:
+        bl sa1e_rd16_s_b0
+        b.w .Ld24
+        .subsection 0
+        ldrb r3, [r4, #CPU_C]
+        lsl r2, r7, #16
+        orr r2, r2, #0xff00
+        orr r2, r2, #0xff
+        lsrs r3, r3, #1
+        adcs r2, r2, r0, lsl #16
+        mrs r3, APSR
+        lsr r7, r2, #16
+        sxth r10, r7
+        ubfx r0, r3, #29, #1
+        strb r0, [r4, #CPU_C]
+        ubfx r0, r3, #28, #1
+        strb r0, [r4, #CPU_V]
+        ldrh r2, [r4, #CPU_DP]
+        tst r2, #0xff
+        it ne
+        subne r11, r11, #1
+        subs r11, r11, #5
         ble.w .Lx0
         cmp r6, r5
         bhi.w .Lpage
@@ -1071,106 +1162,6 @@ sa1_engine_run:
         bne.w .Lfb
         ldrh r1, [r6], #2
         add r1, r1, r9
-        ldrb r2, [r4, #CPU_DB]
-        add r1, r1, r2, lsl #16
-        bic r1, r1, #0xff000000
-        ldr r2, [sp, #F_SA1]
-        ubfx r3, r1, #13, #11
-        ldr r3, [r2, r3, lsl #2]
-        cmp r3, #0
-        beq.w .Lm21
-        add r2, r1, #1
-        lsls r2, r2, #19
-        beq.w .Lm21
-        ubfx r2, r1, #0, #13
-        add r3, r3, r2
-        ldrb r0, [r3]
-        ldrb r2, [r3, #1]
-        orr r0, r0, r2, lsl #8
-.Ld22:
-        .subsection 1
-.Lm21:
-        bl sa1e_rd16_s_l
-        b.w .Ld22
-        .subsection 0
-        ldrb r3, [r4, #CPU_C]
-        lsl r2, r7, #16
-        orr r2, r2, #0xff00
-        orr r2, r2, #0xff
-        lsrs r3, r3, #1
-        adcs r2, r2, r0, lsl #16
-        mrs r3, APSR
-        lsr r7, r2, #16
-        sxth r10, r7
-        ubfx r0, r3, #29, #1
-        strb r0, [r4, #CPU_C]
-        ubfx r0, r3, #28, #1
-        strb r0, [r4, #CPU_V]
-        subs r11, r11, #5
-        ble.w .Lx0
-        cmp r6, r5
-        bhi.w .Lpage
-#ifdef SA1E_COUNT
-        ldr     ip, [sp, #F_OPS]
-        add     ip, ip, #1
-        str     ip, [sp, #F_OPS]
-#endif
-        ldrb r0, [r6], #1
-        ldr.w pc, [lr, r0, lsl #2]
-
-.Lh79_10:
-        ldrb r3, [r4, #CPU_D]
-        cmp r3, #0
-        bne.w .Lfb
-        ldrh r1, [r6], #2
-        add r1, r1, r9
-        ldrb r2, [r4, #CPU_DB]
-        add r1, r1, r2, lsl #16
-        bic r1, r1, #0xff000000
-        ldr r2, [sp, #F_SA1]
-        ubfx r3, r1, #13, #11
-        ldr r3, [r2, r3, lsl #2]
-        cmp r3, #0
-        beq.w .Lm23
-        ubfx r2, r1, #0, #13
-        ldrb r0, [r3, r2]
-.Ld24:
-        .subsection 1
-.Lm23:
-        bl sa1e_rd8_s
-        b.w .Ld24
-        .subsection 0
-        ldrb r3, [r4, #CPU_C]
-        lsl r2, r7, #24
-        orn r2, r2, #0xff000000
-        lsrs r3, r3, #1
-        adcs r2, r2, r0, lsl #24
-        mrs r3, APSR
-        lsr r2, r2, #24
-        bfi r7, r2, #0, #8
-        sxtb r10, r2
-        ubfx r0, r3, #29, #1
-        strb r0, [r4, #CPU_C]
-        ubfx r0, r3, #28, #1
-        strb r0, [r4, #CPU_V]
-        subs r11, r11, #4
-        ble.w .Lx0
-        cmp r6, r5
-        bhi.w .Lpage
-#ifdef SA1E_COUNT
-        ldr     ip, [sp, #F_OPS]
-        add     ip, ip, #1
-        str     ip, [sp, #F_OPS]
-#endif
-        ldrb r0, [r6], #1
-        ldr.w pc, [lr, r0, lsl #2]
-
-.Lh7d_00:
-        ldrb r3, [r4, #CPU_D]
-        cmp r3, #0
-        bne.w .Lfb
-        ldrh r1, [r6], #2
-        add r1, r1, r8
         ldrb r2, [r4, #CPU_DB]
         add r1, r1, r2, lsl #16
         bic r1, r1, #0xff000000
@@ -1218,12 +1209,12 @@ sa1_engine_run:
         ldrb r0, [r6], #1
         ldr.w pc, [lr, r0, lsl #2]
 
-.Lh7d_10:
+.Lh79_10:
         ldrb r3, [r4, #CPU_D]
         cmp r3, #0
         bne.w .Lfb
         ldrh r1, [r6], #2
-        add r1, r1, r8
+        add r1, r1, r9
         ldrb r2, [r4, #CPU_DB]
         add r1, r1, r2, lsl #16
         bic r1, r1, #0xff000000
@@ -1265,14 +1256,14 @@ sa1_engine_run:
         ldrb r0, [r6], #1
         ldr.w pc, [lr, r0, lsl #2]
 
-.Lh7f_00:
+.Lh7d_00:
         ldrb r3, [r4, #CPU_D]
         cmp r3, #0
         bne.w .Lfb
         ldrh r1, [r6], #2
-        ldrb r2, [r6], #1
-        orr r1, r1, r2, lsl #16
         add r1, r1, r8
+        ldrb r2, [r4, #CPU_DB]
+        add r1, r1, r2, lsl #16
         bic r1, r1, #0xff000000
         ldr r2, [sp, #F_SA1]
         ubfx r3, r1, #13, #11
@@ -1292,6 +1283,106 @@ sa1_engine_run:
 .Lm29:
         bl sa1e_rd16_s_l
         b.w .Ld30
+        .subsection 0
+        ldrb r3, [r4, #CPU_C]
+        lsl r2, r7, #16
+        orr r2, r2, #0xff00
+        orr r2, r2, #0xff
+        lsrs r3, r3, #1
+        adcs r2, r2, r0, lsl #16
+        mrs r3, APSR
+        lsr r7, r2, #16
+        sxth r10, r7
+        ubfx r0, r3, #29, #1
+        strb r0, [r4, #CPU_C]
+        ubfx r0, r3, #28, #1
+        strb r0, [r4, #CPU_V]
+        subs r11, r11, #5
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh7d_10:
+        ldrb r3, [r4, #CPU_D]
+        cmp r3, #0
+        bne.w .Lfb
+        ldrh r1, [r6], #2
+        add r1, r1, r8
+        ldrb r2, [r4, #CPU_DB]
+        add r1, r1, r2, lsl #16
+        bic r1, r1, #0xff000000
+        ldr r2, [sp, #F_SA1]
+        ubfx r3, r1, #13, #11
+        ldr r3, [r2, r3, lsl #2]
+        cmp r3, #0
+        beq.w .Lm31
+        ubfx r2, r1, #0, #13
+        ldrb r0, [r3, r2]
+.Ld32:
+        .subsection 1
+.Lm31:
+        bl sa1e_rd8_s
+        b.w .Ld32
+        .subsection 0
+        ldrb r3, [r4, #CPU_C]
+        lsl r2, r7, #24
+        orn r2, r2, #0xff000000
+        lsrs r3, r3, #1
+        adcs r2, r2, r0, lsl #24
+        mrs r3, APSR
+        lsr r2, r2, #24
+        bfi r7, r2, #0, #8
+        sxtb r10, r2
+        ubfx r0, r3, #29, #1
+        strb r0, [r4, #CPU_C]
+        ubfx r0, r3, #28, #1
+        strb r0, [r4, #CPU_V]
+        subs r11, r11, #4
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh7f_00:
+        ldrb r3, [r4, #CPU_D]
+        cmp r3, #0
+        bne.w .Lfb
+        ldrh r1, [r6], #2
+        ldrb r2, [r6], #1
+        orr r1, r1, r2, lsl #16
+        add r1, r1, r8
+        bic r1, r1, #0xff000000
+        ldr r2, [sp, #F_SA1]
+        ubfx r3, r1, #13, #11
+        ldr r3, [r2, r3, lsl #2]
+        cmp r3, #0
+        beq.w .Lm33
+        add r2, r1, #1
+        lsls r2, r2, #19
+        beq.w .Lm33
+        ubfx r2, r1, #0, #13
+        add r3, r3, r2
+        ldrb r0, [r3]
+        ldrb r2, [r3, #1]
+        orr r0, r0, r2, lsl #8
+.Ld34:
+        .subsection 1
+.Lm33:
+        bl sa1e_rd16_s_l
+        b.w .Ld34
         .subsection 0
         ldrb r3, [r4, #CPU_C]
         lsl r2, r7, #16
@@ -1331,14 +1422,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm31
+        beq.w .Lm35
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld32:
+.Ld36:
         .subsection 1
-.Lm31:
+.Lm35:
         bl sa1e_rd8_s
-        b.w .Ld32
+        b.w .Ld36
         .subsection 0
         ldrb r3, [r4, #CPU_C]
         lsl r2, r7, #24
@@ -1374,19 +1465,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm33
+        bne.w .Lm37
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm33
+        beq.w .Lm37
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld34:
+.Ld38:
         .subsection 1
-.Lm33:
+.Lm37:
         bl sa1e_wr16_s_b0
-        b.w .Ld34
+        b.w .Ld38
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -1413,16 +1504,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm35
+        bne.w .Lm39
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld36:
+.Ld40:
         .subsection 1
-.Lm35:
+.Lm39:
         bl sa1e_wr8_s
-        b.w .Ld36
+        b.w .Ld40
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -1441,67 +1532,6 @@ sa1_engine_run:
         ldr.w pc, [lr, r0, lsl #2]
 
 .Lh87_00:
-        ldrb r1, [r6], #1
-        ldrh r2, [r4, #CPU_DP]
-        add r1, r1, r2
-        uxth r1, r1
-        ands r3, r1, #0xf800
-        it ne
-        cmpne r3, #0x3000
-        bne.w .Lm37
-        ubfx r3, r1, #0, #11
-        add r2, r3, #2
-        lsrs r2, r2, #11
-        bne.w .Lm37
-        ldr r2, [sp, #F_IRAM]
-        add r2, r2, r3
-        ldrh r0, [r2]
-        ldrb r3, [r2, #2]
-        orr r0, r0, r3, lsl #16
-.Ld38:
-        .subsection 1
-.Lm37:
-        bl sa1e_rd24_s
-        b.w .Ld38
-        .subsection 0
-        mov r1, r0
-        mov r0, r7
-        tst r1, #0x400000
-        bne.w .Lm39
-        ands r3, r1, #0xf800
-        it ne
-        cmpne r3, #0x3000
-        bne.w .Lm39
-        add r2, r1, #1
-        lsls r2, r2, #21
-        beq.w .Lm39
-        ldr r2, [sp, #F_IRAM]
-        ubfx r3, r1, #0, #11
-        strh r0, [r2, r3]
-        str r2, [r2, #SA1E_WDIRTY]
-.Ld40:
-        .subsection 1
-.Lm39:
-        bl sa1e_wr16_s_l
-        b.w .Ld40
-        .subsection 0
-        ldrh r2, [r4, #CPU_DP]
-        tst r2, #0xff
-        it ne
-        subne r11, r11, #1
-        subs r11, r11, #7
-        ble.w .Lx0
-        cmp r6, r5
-        bhi.w .Lpage
-#ifdef SA1E_COUNT
-        ldr     ip, [sp, #F_OPS]
-        add     ip, ip, #1
-        str     ip, [sp, #F_OPS]
-#endif
-        ldrb r0, [r6], #1
-        ldr.w pc, [lr, r0, lsl #2]
-
-.Lh87_10:
         ldrb r1, [r6], #1
         ldrh r2, [r4, #CPU_DP]
         add r1, r1, r2
@@ -1533,15 +1563,76 @@ sa1_engine_run:
         it ne
         cmpne r3, #0x3000
         bne.w .Lm43
+        add r2, r1, #1
+        lsls r2, r2, #21
+        beq.w .Lm43
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
-        strb r0, [r2, r3]
+        strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
 .Ld44:
         .subsection 1
 .Lm43:
-        bl sa1e_wr8_s
+        bl sa1e_wr16_s_l
         b.w .Ld44
+        .subsection 0
+        ldrh r2, [r4, #CPU_DP]
+        tst r2, #0xff
+        it ne
+        subne r11, r11, #1
+        subs r11, r11, #7
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh87_10:
+        ldrb r1, [r6], #1
+        ldrh r2, [r4, #CPU_DP]
+        add r1, r1, r2
+        uxth r1, r1
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm45
+        ubfx r3, r1, #0, #11
+        add r2, r3, #2
+        lsrs r2, r2, #11
+        bne.w .Lm45
+        ldr r2, [sp, #F_IRAM]
+        add r2, r2, r3
+        ldrh r0, [r2]
+        ldrb r3, [r2, #2]
+        orr r0, r0, r3, lsl #16
+.Ld46:
+        .subsection 1
+.Lm45:
+        bl sa1e_rd24_s
+        b.w .Ld46
+        .subsection 0
+        mov r1, r0
+        mov r0, r7
+        tst r1, #0x400000
+        bne.w .Lm47
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm47
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strb r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld48:
+        .subsection 1
+.Lm47:
+        bl sa1e_wr8_s
+        b.w .Ld48
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -1565,23 +1656,23 @@ sa1_engine_run:
         add r1, r1, r2, lsl #16
         mov r0, r7
         tst r1, #0x400000
-        bne.w .Lm45
+        bne.w .Lm49
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm45
+        bne.w .Lm49
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm45
+        beq.w .Lm49
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld46:
+.Ld50:
         .subsection 1
-.Lm45:
+.Lm49:
         bl sa1e_wr16_s_l
-        b.w .Ld46
+        b.w .Ld50
         .subsection 0
         subs r11, r11, #5
         ble.w .Lx0
@@ -1601,20 +1692,20 @@ sa1_engine_run:
         add r1, r1, r2, lsl #16
         mov r0, r7
         tst r1, #0x400000
-        bne.w .Lm47
+        bne.w .Lm51
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm47
+        bne.w .Lm51
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld48:
+.Ld52:
         .subsection 1
-.Lm47:
+.Lm51:
         bl sa1e_wr8_s
-        b.w .Ld48
+        b.w .Ld52
         .subsection 0
         subs r11, r11, #4
         ble.w .Lx0
@@ -1634,23 +1725,23 @@ sa1_engine_run:
         orr r1, r1, r2, lsl #16
         mov r0, r7
         tst r1, #0x400000
-        bne.w .Lm49
+        bne.w .Lm53
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm49
+        bne.w .Lm53
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm49
+        beq.w .Lm53
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld50:
+.Ld54:
         .subsection 1
-.Lm49:
+.Lm53:
         bl sa1e_wr16_s_l
-        b.w .Ld50
+        b.w .Ld54
         .subsection 0
         subs r11, r11, #6
         ble.w .Lx0
@@ -1670,22 +1761,83 @@ sa1_engine_run:
         orr r1, r1, r2, lsl #16
         mov r0, r7
         tst r1, #0x400000
-        bne.w .Lm51
+        bne.w .Lm55
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm51
+        bne.w .Lm55
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld52:
+.Ld56:
         .subsection 1
-.Lm51:
+.Lm55:
         bl sa1e_wr8_s
-        b.w .Ld52
+        b.w .Ld56
         .subsection 0
         subs r11, r11, #5
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh91_00:
+        ldrb r1, [r6], #1
+        ldrh r2, [r4, #CPU_DP]
+        add r1, r1, r2
+        uxth r1, r1
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm57
+        add r2, r1, #1
+        lsls r2, r2, #21
+        beq.w .Lm57
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        ldrh r0, [r2, r3]
+.Ld58:
+        .subsection 1
+.Lm57:
+        bl sa1e_rd16_s_b0
+        b.w .Ld58
+        .subsection 0
+        add r1, r0, r9
+        ldrb r2, [r4, #CPU_DB]
+        add r1, r1, r2, lsl #16
+        bic r1, r1, #0xff000000
+        mov r0, r7
+        tst r1, #0x400000
+        bne.w .Lm59
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm59
+        add r2, r1, #1
+        lsls r2, r2, #21
+        beq.w .Lm59
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strh r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld60:
+        .subsection 1
+.Lm59:
+        bl sa1e_wr16_s_l
+        b.w .Ld60
+        .subsection 0
+        ldrh r2, [r4, #CPU_DP]
+        tst r2, #0xff
+        it ne
+        subne r11, r11, #1
+        subs r11, r11, #8
         ble.w .Lx0
         cmp r6, r5
         bhi.w .Lpage
@@ -1707,19 +1859,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm53
+        bne.w .Lm61
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm53
+        beq.w .Lm61
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld54:
+.Ld62:
         .subsection 1
-.Lm53:
+.Lm61:
         bl sa1e_wr16_s_b0
-        b.w .Ld54
+        b.w .Ld62
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -1747,16 +1899,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm55
+        bne.w .Lm63
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld56:
+.Ld64:
         .subsection 1
-.Lm55:
+.Lm63:
         bl sa1e_wr8_s
-        b.w .Ld56
+        b.w .Ld64
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -1777,168 +1929,6 @@ sa1_engine_run:
 .Lh99_00:
         ldrh r1, [r6], #2
         add r1, r1, r9
-        ldrb r2, [r4, #CPU_DB]
-        add r1, r1, r2, lsl #16
-        bic r1, r1, #0xff000000
-        mov r0, r7
-        tst r1, #0x400000
-        bne.w .Lm57
-        ands r3, r1, #0xf800
-        it ne
-        cmpne r3, #0x3000
-        bne.w .Lm57
-        add r2, r1, #1
-        lsls r2, r2, #21
-        beq.w .Lm57
-        ldr r2, [sp, #F_IRAM]
-        ubfx r3, r1, #0, #11
-        strh r0, [r2, r3]
-        str r2, [r2, #SA1E_WDIRTY]
-.Ld58:
-        .subsection 1
-.Lm57:
-        bl sa1e_wr16_s_l
-        b.w .Ld58
-        .subsection 0
-        subs r11, r11, #7
-        ble.w .Lx0
-        cmp r6, r5
-        bhi.w .Lpage
-#ifdef SA1E_COUNT
-        ldr     ip, [sp, #F_OPS]
-        add     ip, ip, #1
-        str     ip, [sp, #F_OPS]
-#endif
-        ldrb r0, [r6], #1
-        ldr.w pc, [lr, r0, lsl #2]
-
-.Lh99_01:
-        ldrh r1, [r6], #2
-        add r3, r1, r9
-        eor r3, r3, r1
-        cmp r3, #0xff
-        add r1, r1, r9
-        ldrb r2, [r4, #CPU_DB]
-        add r1, r1, r2, lsl #16
-        bic r1, r1, #0xff000000
-        it hi
-        orrhi r1, r1, #0x80000000
-        mov r0, r7
-        tst r1, #0x400000
-        bne.w .Lm59
-        ands r3, r1, #0xf800
-        it ne
-        cmpne r3, #0x3000
-        bne.w .Lm59
-        add r2, r1, #1
-        lsls r2, r2, #21
-        beq.w .Lm59
-        ldr r2, [sp, #F_IRAM]
-        ubfx r3, r1, #0, #11
-        strh r0, [r2, r3]
-        str r2, [r2, #SA1E_WDIRTY]
-.Ld60:
-        .subsection 1
-.Lm59:
-        bl sa1e_wr16_s_l
-        b.w .Ld60
-        .subsection 0
-        tst r1, #0x80000000
-        it ne
-        subne r11, r11, #1
-        subs r11, r11, #6
-        ble.w .Lx0
-        cmp r6, r5
-        bhi.w .Lpage
-#ifdef SA1E_COUNT
-        ldr     ip, [sp, #F_OPS]
-        add     ip, ip, #1
-        str     ip, [sp, #F_OPS]
-#endif
-        ldrb r0, [r6], #1
-        ldr.w pc, [lr, r0, lsl #2]
-
-.Lh99_10:
-        ldrh r1, [r6], #2
-        add r1, r1, r9
-        ldrb r2, [r4, #CPU_DB]
-        add r1, r1, r2, lsl #16
-        bic r1, r1, #0xff000000
-        mov r0, r7
-        tst r1, #0x400000
-        bne.w .Lm61
-        ands r3, r1, #0xf800
-        it ne
-        cmpne r3, #0x3000
-        bne.w .Lm61
-        ldr r2, [sp, #F_IRAM]
-        ubfx r3, r1, #0, #11
-        strb r0, [r2, r3]
-        str r2, [r2, #SA1E_WDIRTY]
-.Ld62:
-        .subsection 1
-.Lm61:
-        bl sa1e_wr8_s
-        b.w .Ld62
-        .subsection 0
-        subs r11, r11, #6
-        ble.w .Lx0
-        cmp r6, r5
-        bhi.w .Lpage
-#ifdef SA1E_COUNT
-        ldr     ip, [sp, #F_OPS]
-        add     ip, ip, #1
-        str     ip, [sp, #F_OPS]
-#endif
-        ldrb r0, [r6], #1
-        ldr.w pc, [lr, r0, lsl #2]
-
-.Lh99_11:
-        ldrh r1, [r6], #2
-        add r3, r1, r9
-        eor r3, r3, r1
-        cmp r3, #0xff
-        add r1, r1, r9
-        ldrb r2, [r4, #CPU_DB]
-        add r1, r1, r2, lsl #16
-        bic r1, r1, #0xff000000
-        it hi
-        orrhi r1, r1, #0x80000000
-        mov r0, r7
-        tst r1, #0x400000
-        bne.w .Lm63
-        ands r3, r1, #0xf800
-        it ne
-        cmpne r3, #0x3000
-        bne.w .Lm63
-        ldr r2, [sp, #F_IRAM]
-        ubfx r3, r1, #0, #11
-        strb r0, [r2, r3]
-        str r2, [r2, #SA1E_WDIRTY]
-.Ld64:
-        .subsection 1
-.Lm63:
-        bl sa1e_wr8_s
-        b.w .Ld64
-        .subsection 0
-        tst r1, #0x80000000
-        it ne
-        subne r11, r11, #1
-        subs r11, r11, #5
-        ble.w .Lx0
-        cmp r6, r5
-        bhi.w .Lpage
-#ifdef SA1E_COUNT
-        ldr     ip, [sp, #F_OPS]
-        add     ip, ip, #1
-        str     ip, [sp, #F_OPS]
-#endif
-        ldrb r0, [r6], #1
-        ldr.w pc, [lr, r0, lsl #2]
-
-.Lh9d_00:
-        ldrh r1, [r6], #2
-        add r1, r1, r8
         ldrb r2, [r4, #CPU_DB]
         add r1, r1, r2, lsl #16
         bic r1, r1, #0xff000000
@@ -1974,12 +1964,12 @@ sa1_engine_run:
         ldrb r0, [r6], #1
         ldr.w pc, [lr, r0, lsl #2]
 
-.Lh9d_01:
+.Lh99_01:
         ldrh r1, [r6], #2
-        add r3, r1, r8
+        add r3, r1, r9
         eor r3, r3, r1
         cmp r3, #0xff
-        add r1, r1, r8
+        add r1, r1, r9
         ldrb r2, [r4, #CPU_DB]
         add r1, r1, r2, lsl #16
         bic r1, r1, #0xff000000
@@ -2020,9 +2010,9 @@ sa1_engine_run:
         ldrb r0, [r6], #1
         ldr.w pc, [lr, r0, lsl #2]
 
-.Lh9d_10:
+.Lh99_10:
         ldrh r1, [r6], #2
-        add r1, r1, r8
+        add r1, r1, r9
         ldrb r2, [r4, #CPU_DB]
         add r1, r1, r2, lsl #16
         bic r1, r1, #0xff000000
@@ -2055,12 +2045,12 @@ sa1_engine_run:
         ldrb r0, [r6], #1
         ldr.w pc, [lr, r0, lsl #2]
 
-.Lh9d_11:
+.Lh99_11:
         ldrh r1, [r6], #2
-        add r3, r1, r8
+        add r3, r1, r9
         eor r3, r3, r1
         cmp r3, #0xff
-        add r1, r1, r8
+        add r1, r1, r9
         ldrb r2, [r4, #CPU_DB]
         add r1, r1, r2, lsl #16
         bic r1, r1, #0xff000000
@@ -2098,11 +2088,11 @@ sa1_engine_run:
         ldrb r0, [r6], #1
         ldr.w pc, [lr, r0, lsl #2]
 
-.Lh9f_00:
+.Lh9d_00:
         ldrh r1, [r6], #2
-        ldrb r2, [r6], #1
-        orr r1, r1, r2, lsl #16
         add r1, r1, r8
+        ldrb r2, [r4, #CPU_DB]
+        add r1, r1, r2, lsl #16
         bic r1, r1, #0xff000000
         mov r0, r7
         tst r1, #0x400000
@@ -2124,6 +2114,168 @@ sa1_engine_run:
         bl sa1e_wr16_s_l
         b.w .Ld74
         .subsection 0
+        subs r11, r11, #7
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh9d_01:
+        ldrh r1, [r6], #2
+        add r3, r1, r8
+        eor r3, r3, r1
+        cmp r3, #0xff
+        add r1, r1, r8
+        ldrb r2, [r4, #CPU_DB]
+        add r1, r1, r2, lsl #16
+        bic r1, r1, #0xff000000
+        it hi
+        orrhi r1, r1, #0x80000000
+        mov r0, r7
+        tst r1, #0x400000
+        bne.w .Lm75
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm75
+        add r2, r1, #1
+        lsls r2, r2, #21
+        beq.w .Lm75
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strh r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld76:
+        .subsection 1
+.Lm75:
+        bl sa1e_wr16_s_l
+        b.w .Ld76
+        .subsection 0
+        tst r1, #0x80000000
+        it ne
+        subne r11, r11, #1
+        subs r11, r11, #6
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh9d_10:
+        ldrh r1, [r6], #2
+        add r1, r1, r8
+        ldrb r2, [r4, #CPU_DB]
+        add r1, r1, r2, lsl #16
+        bic r1, r1, #0xff000000
+        mov r0, r7
+        tst r1, #0x400000
+        bne.w .Lm77
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm77
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strb r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld78:
+        .subsection 1
+.Lm77:
+        bl sa1e_wr8_s
+        b.w .Ld78
+        .subsection 0
+        subs r11, r11, #6
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh9d_11:
+        ldrh r1, [r6], #2
+        add r3, r1, r8
+        eor r3, r3, r1
+        cmp r3, #0xff
+        add r1, r1, r8
+        ldrb r2, [r4, #CPU_DB]
+        add r1, r1, r2, lsl #16
+        bic r1, r1, #0xff000000
+        it hi
+        orrhi r1, r1, #0x80000000
+        mov r0, r7
+        tst r1, #0x400000
+        bne.w .Lm79
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm79
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strb r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld80:
+        .subsection 1
+.Lm79:
+        bl sa1e_wr8_s
+        b.w .Ld80
+        .subsection 0
+        tst r1, #0x80000000
+        it ne
+        subne r11, r11, #1
+        subs r11, r11, #5
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh9f_00:
+        ldrh r1, [r6], #2
+        ldrb r2, [r6], #1
+        orr r1, r1, r2, lsl #16
+        add r1, r1, r8
+        bic r1, r1, #0xff000000
+        mov r0, r7
+        tst r1, #0x400000
+        bne.w .Lm81
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm81
+        add r2, r1, #1
+        lsls r2, r2, #21
+        beq.w .Lm81
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strh r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld82:
+        .subsection 1
+.Lm81:
+        bl sa1e_wr16_s_l
+        b.w .Ld82
+        .subsection 0
         subs r11, r11, #6
         ble.w .Lx0
         cmp r6, r5
@@ -2144,20 +2296,20 @@ sa1_engine_run:
         bic r1, r1, #0xff000000
         mov r0, r7
         tst r1, #0x400000
-        bne.w .Lm75
+        bne.w .Lm83
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm75
+        bne.w .Lm83
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld76:
+.Ld84:
         .subsection 1
-.Lm75:
+.Lm83:
         bl sa1e_wr8_s
-        b.w .Ld76
+        b.w .Ld84
         .subsection 0
         subs r11, r11, #5
         ble.w .Lx0
@@ -2179,18 +2331,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm77
+        bne.w .Lm85
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm77
+        beq.w .Lm85
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld78:
+.Ld86:
         .subsection 1
-.Lm77:
+.Lm85:
         bl sa1e_rd16_s_b0
-        b.w .Ld78
+        b.w .Ld86
         .subsection 0
         mov r7, r0
         sxth r10, r0
@@ -2218,15 +2370,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm79
+        bne.w .Lm87
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld80:
+.Ld88:
         .subsection 1
-.Lm79:
+.Lm87:
         bl sa1e_rd8_s
-        b.w .Ld80
+        b.w .Ld88
         .subsection 0
         bfi r7, r0, #0, #8
         sxtb r10, r0
@@ -2254,41 +2406,41 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm81
+        bne.w .Lm89
         ubfx r3, r1, #0, #11
         add r2, r3, #2
         lsrs r2, r2, #11
-        bne.w .Lm81
+        bne.w .Lm89
         ldr r2, [sp, #F_IRAM]
         add r2, r2, r3
         ldrh r0, [r2]
         ldrb r3, [r2, #2]
         orr r0, r0, r3, lsl #16
-.Ld82:
+.Ld90:
         .subsection 1
-.Lm81:
+.Lm89:
         bl sa1e_rd24_s
-        b.w .Ld82
+        b.w .Ld90
         .subsection 0
         mov r1, r0
         ldr r2, [sp, #F_SA1]
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm83
+        beq.w .Lm91
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm83
+        beq.w .Lm91
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld84:
+.Ld92:
         .subsection 1
-.Lm83:
+.Lm91:
         bl sa1e_rd16_s_l
-        b.w .Ld84
+        b.w .Ld92
         .subsection 0
         mov r7, r0
         sxth r10, r0
@@ -2316,35 +2468,35 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm85
+        bne.w .Lm93
         ubfx r3, r1, #0, #11
         add r2, r3, #2
         lsrs r2, r2, #11
-        bne.w .Lm85
+        bne.w .Lm93
         ldr r2, [sp, #F_IRAM]
         add r2, r2, r3
         ldrh r0, [r2]
         ldrb r3, [r2, #2]
         orr r0, r0, r3, lsl #16
-.Ld86:
+.Ld94:
         .subsection 1
-.Lm85:
+.Lm93:
         bl sa1e_rd24_s
-        b.w .Ld86
+        b.w .Ld94
         .subsection 0
         mov r1, r0
         ldr r2, [sp, #F_SA1]
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm87
+        beq.w .Lm95
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld88:
+.Ld96:
         .subsection 1
-.Lm87:
+.Lm95:
         bl sa1e_rd8_s
-        b.w .Ld88
+        b.w .Ld96
         .subsection 0
         bfi r7, r0, #0, #8
         sxtb r10, r0
@@ -2404,20 +2556,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm89
+        beq.w .Lm97
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm89
+        beq.w .Lm97
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld90:
+.Ld98:
         .subsection 1
-.Lm89:
+.Lm97:
         bl sa1e_rd16_s_l
-        b.w .Ld90
+        b.w .Ld98
         .subsection 0
         mov r7, r0
         sxth r10, r0
@@ -2441,18 +2593,55 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm91
+        beq.w .Lm99
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld92:
+.Ld100:
         .subsection 1
-.Lm91:
+.Lm99:
         bl sa1e_rd8_s
-        b.w .Ld92
+        b.w .Ld100
         .subsection 0
         bfi r7, r0, #0, #8
         sxtb r10, r0
         subs r11, r11, #4
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lhaf_00:
+        ldrh r1, [r6], #2
+        ldrb r2, [r6], #1
+        orr r1, r1, r2, lsl #16
+        ldr r2, [sp, #F_SA1]
+        ubfx r3, r1, #13, #11
+        ldr r3, [r2, r3, lsl #2]
+        cmp r3, #0
+        beq.w .Lm101
+        add r2, r1, #1
+        lsls r2, r2, #19
+        beq.w .Lm101
+        ubfx r2, r1, #0, #13
+        add r3, r3, r2
+        ldrb r0, [r3]
+        ldrb r2, [r3, #1]
+        orr r0, r0, r2, lsl #8
+.Ld102:
+        .subsection 1
+.Lm101:
+        bl sa1e_rd16_s_l
+        b.w .Ld102
+        .subsection 0
+        mov r7, r0
+        sxth r10, r0
+        subs r11, r11, #6
         ble.w .Lx0
         cmp r6, r5
         bhi.w .Lpage
@@ -2473,18 +2662,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm93
+        bne.w .Lm103
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm93
+        beq.w .Lm103
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld94:
+.Ld104:
         .subsection 1
-.Lm93:
+.Lm103:
         bl sa1e_rd16_s_b0
-        b.w .Ld94
+        b.w .Ld104
         .subsection 0
         mov r7, r0
         sxth r10, r0
@@ -2513,15 +2702,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm95
+        bne.w .Lm105
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld96:
+.Ld106:
         .subsection 1
-.Lm95:
+.Lm105:
         bl sa1e_rd8_s
-        b.w .Ld96
+        b.w .Ld106
         .subsection 0
         bfi r7, r0, #0, #8
         sxtb r10, r0
@@ -2549,21 +2738,21 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm97
+        bne.w .Lm107
         ubfx r3, r1, #0, #11
         add r2, r3, #2
         lsrs r2, r2, #11
-        bne.w .Lm97
+        bne.w .Lm107
         ldr r2, [sp, #F_IRAM]
         add r2, r2, r3
         ldrh r0, [r2]
         ldrb r3, [r2, #2]
         orr r0, r0, r3, lsl #16
-.Ld98:
+.Ld108:
         .subsection 1
-.Lm97:
+.Lm107:
         bl sa1e_rd24_s
-        b.w .Ld98
+        b.w .Ld108
         .subsection 0
         add r1, r0, r9
         bic r1, r1, #0xff000000
@@ -2571,20 +2760,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm99
+        beq.w .Lm109
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm99
+        beq.w .Lm109
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld100:
+.Ld110:
         .subsection 1
-.Lm99:
+.Lm109:
         bl sa1e_rd16_s_l
-        b.w .Ld100
+        b.w .Ld110
         .subsection 0
         mov r7, r0
         sxth r10, r0
@@ -2612,21 +2801,21 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm101
+        bne.w .Lm111
         ubfx r3, r1, #0, #11
         add r2, r3, #2
         lsrs r2, r2, #11
-        bne.w .Lm101
+        bne.w .Lm111
         ldr r2, [sp, #F_IRAM]
         add r2, r2, r3
         ldrh r0, [r2]
         ldrb r3, [r2, #2]
         orr r0, r0, r3, lsl #16
-.Ld102:
+.Ld112:
         .subsection 1
-.Lm101:
+.Lm111:
         bl sa1e_rd24_s
-        b.w .Ld102
+        b.w .Ld112
         .subsection 0
         add r1, r0, r9
         bic r1, r1, #0xff000000
@@ -2634,14 +2823,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm103
+        beq.w .Lm113
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld104:
+.Ld114:
         .subsection 1
-.Lm103:
+.Lm113:
         bl sa1e_rd8_s
-        b.w .Ld104
+        b.w .Ld114
         .subsection 0
         bfi r7, r0, #0, #8
         sxtb r10, r0
@@ -2671,20 +2860,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm105
+        beq.w .Lm115
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm105
+        beq.w .Lm115
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld106:
+.Ld116:
         .subsection 1
-.Lm105:
+.Lm115:
         bl sa1e_rd16_s_l
-        b.w .Ld106
+        b.w .Ld116
         .subsection 0
         mov r7, r0
         sxth r10, r0
@@ -2710,14 +2899,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm107
+        beq.w .Lm117
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld108:
+.Ld118:
         .subsection 1
-.Lm107:
+.Lm117:
         bl sa1e_rd8_s
-        b.w .Ld108
+        b.w .Ld118
         .subsection 0
         bfi r7, r0, #0, #8
         sxtb r10, r0
@@ -2743,20 +2932,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm109
+        beq.w .Lm119
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm109
+        beq.w .Lm119
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld110:
+.Ld120:
         .subsection 1
-.Lm109:
+.Lm119:
         bl sa1e_rd16_s_l
-        b.w .Ld110
+        b.w .Ld120
         .subsection 0
         mov r7, r0
         sxth r10, r0
@@ -2782,14 +2971,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm111
+        beq.w .Lm121
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld112:
+.Ld122:
         .subsection 1
-.Lm111:
+.Lm121:
         bl sa1e_rd8_s
-        b.w .Ld112
+        b.w .Ld122
         .subsection 0
         bfi r7, r0, #0, #8
         sxtb r10, r0
@@ -2815,20 +3004,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm113
+        beq.w .Lm123
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm113
+        beq.w .Lm123
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld114:
+.Ld124:
         .subsection 1
-.Lm113:
+.Lm123:
         bl sa1e_rd16_s_l
-        b.w .Ld114
+        b.w .Ld124
         .subsection 0
         mov r7, r0
         sxth r10, r0
@@ -2854,14 +3043,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm115
+        beq.w .Lm125
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld116:
+.Ld126:
         .subsection 1
-.Lm115:
+.Lm125:
         bl sa1e_rd8_s
-        b.w .Ld116
+        b.w .Ld126
         .subsection 0
         bfi r7, r0, #0, #8
         sxtb r10, r0
@@ -2885,18 +3074,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm117
+        bne.w .Lm127
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm117
+        beq.w .Lm127
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld118:
+.Ld128:
         .subsection 1
-.Lm117:
+.Lm127:
         bl sa1e_rd16_s_b0
-        b.w .Ld118
+        b.w .Ld128
         .subsection 0
         subs r2, r7, r0
         mov.w r3, #0
@@ -2927,15 +3116,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm119
+        bne.w .Lm129
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld120:
+.Ld130:
         .subsection 1
-.Lm119:
+.Lm129:
         bl sa1e_rd8_s
-        b.w .Ld120
+        b.w .Ld130
         .subsection 0
         uxtb r2, r7
         subs r2, r2, r0
@@ -3006,20 +3195,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm121
+        beq.w .Lm131
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm121
+        beq.w .Lm131
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld122:
+.Ld132:
         .subsection 1
-.Lm121:
+.Lm131:
         bl sa1e_rd16_s_l
-        b.w .Ld122
+        b.w .Ld132
         .subsection 0
         subs r2, r7, r0
         mov.w r3, #0
@@ -3046,14 +3235,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm123
+        beq.w .Lm133
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld124:
+.Ld134:
         .subsection 1
-.Lm123:
+.Lm133:
         bl sa1e_rd8_s
-        b.w .Ld124
+        b.w .Ld134
         .subsection 0
         uxtb r2, r7
         subs r2, r2, r0
@@ -3083,20 +3272,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm125
+        beq.w .Lm135
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm125
+        beq.w .Lm135
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld126:
+.Ld136:
         .subsection 1
-.Lm125:
+.Lm135:
         bl sa1e_rd16_s_l
-        b.w .Ld126
+        b.w .Ld136
         .subsection 0
         subs r2, r7, r0
         mov.w r3, #0
@@ -3125,14 +3314,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm127
+        beq.w .Lm137
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld128:
+.Ld138:
         .subsection 1
-.Lm127:
+.Lm137:
         bl sa1e_rd8_s
-        b.w .Ld128
+        b.w .Ld138
         .subsection 0
         uxtb r2, r7
         subs r2, r2, r0
@@ -3162,20 +3351,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm129
+        beq.w .Lm139
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm129
+        beq.w .Lm139
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld130:
+.Ld140:
         .subsection 1
-.Lm129:
+.Lm139:
         bl sa1e_rd16_s_l
-        b.w .Ld130
+        b.w .Ld140
         .subsection 0
         subs r2, r7, r0
         mov.w r3, #0
@@ -3204,14 +3393,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm131
+        beq.w .Lm141
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld132:
+.Ld142:
         .subsection 1
-.Lm131:
+.Lm141:
         bl sa1e_rd8_s
-        b.w .Ld132
+        b.w .Ld142
         .subsection 0
         uxtb r2, r7
         subs r2, r2, r0
@@ -3242,18 +3431,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm133
+        bne.w .Lm143
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm133
+        beq.w .Lm143
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld134:
+.Ld144:
         .subsection 1
-.Lm133:
+.Lm143:
         bl sa1e_rd16_s_b0
-        b.w .Ld134
+        b.w .Ld144
         .subsection 0
         mvn r0, r0
         uxth r0, r0
@@ -3297,15 +3486,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm135
+        bne.w .Lm145
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld136:
+.Ld146:
         .subsection 1
-.Lm135:
+.Lm145:
         bl sa1e_rd8_s
-        b.w .Ld136
+        b.w .Ld146
         .subsection 0
         eor r0, r0, #0xff
         ldrb r3, [r4, #CPU_C]
@@ -3411,20 +3600,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm137
+        beq.w .Lm147
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm137
+        beq.w .Lm147
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld138:
+.Ld148:
         .subsection 1
-.Lm137:
+.Lm147:
         bl sa1e_rd16_s_l
-        b.w .Ld138
+        b.w .Ld148
         .subsection 0
         mvn r0, r0
         uxth r0, r0
@@ -3464,14 +3653,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm139
+        beq.w .Lm149
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld140:
+.Ld150:
         .subsection 1
-.Lm139:
+.Lm149:
         bl sa1e_rd8_s
-        b.w .Ld140
+        b.w .Ld150
         .subsection 0
         eor r0, r0, #0xff
         ldrb r3, [r4, #CPU_C]
@@ -3507,18 +3696,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm141
+        bne.w .Lm151
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm141
+        beq.w .Lm151
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld142:
+.Ld152:
         .subsection 1
-.Lm141:
+.Lm151:
         bl sa1e_rd16_s_b0
-        b.w .Ld142
+        b.w .Ld152
         .subsection 0
         lsl r0, r0, #1
         ubfx r3, r0, #16, #1
@@ -3527,19 +3716,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm143
+        bne.w .Lm153
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm143
+        beq.w .Lm153
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld144:
+.Ld154:
         .subsection 1
-.Lm143:
+.Lm153:
         bl sa1e_wr16_s_b0r
-        b.w .Ld144
+        b.w .Ld154
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -3565,15 +3754,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm145
+        bne.w .Lm155
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld146:
+.Ld156:
         .subsection 1
-.Lm145:
+.Lm155:
         bl sa1e_rd8_s
-        b.w .Ld146
+        b.w .Ld156
         .subsection 0
         lsl r0, r0, #1
         ubfx r3, r0, #8, #1
@@ -3582,16 +3771,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm147
+        bne.w .Lm157
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld148:
+.Ld158:
         .subsection 1
-.Lm147:
+.Lm157:
         bl sa1e_wr8_s
-        b.w .Ld148
+        b.w .Ld158
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -3617,18 +3806,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm149
+        bne.w .Lm159
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm149
+        beq.w .Lm159
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld150:
+.Ld160:
         .subsection 1
-.Lm149:
+.Lm159:
         bl sa1e_rd16_s_b0
-        b.w .Ld150
+        b.w .Ld160
         .subsection 0
         ldrb r3, [r4, #CPU_C]
         orr r0, r3, r0, lsl #1
@@ -3638,19 +3827,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm151
+        bne.w .Lm161
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm151
+        beq.w .Lm161
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld152:
+.Ld162:
         .subsection 1
-.Lm151:
+.Lm161:
         bl sa1e_wr16_s_b0r
-        b.w .Ld152
+        b.w .Ld162
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -3676,15 +3865,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm153
+        bne.w .Lm163
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld154:
+.Ld164:
         .subsection 1
-.Lm153:
+.Lm163:
         bl sa1e_rd8_s
-        b.w .Ld154
+        b.w .Ld164
         .subsection 0
         ldrb r3, [r4, #CPU_C]
         orr r0, r3, r0, lsl #1
@@ -3694,16 +3883,70 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm155
+        bne.w .Lm165
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld156:
+.Ld166:
         .subsection 1
-.Lm155:
+.Lm165:
         bl sa1e_wr8_s
-        b.w .Ld156
+        b.w .Ld166
+        .subsection 0
+        ldrh r2, [r4, #CPU_DP]
+        tst r2, #0xff
+        it ne
+        subne r11, r11, #1
+        subs r11, r11, #5
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh66_10:
+        ldrb r1, [r6], #1
+        ldrh r2, [r4, #CPU_DP]
+        add r1, r1, r2
+        uxth r1, r1
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm167
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        ldrb r0, [r2, r3]
+.Ld168:
+        .subsection 1
+.Lm167:
+        bl sa1e_rd8_s
+        b.w .Ld168
+        .subsection 0
+        ldrb r3, [r4, #CPU_C]
+        and ip, r0, #1
+        lsr r0, r0, #1
+        orr r0, r0, r3, lsl #7
+        strb ip, [r4, #CPU_C]
+        sxtb r10, r0
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm169
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strb r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld170:
+        .subsection 1
+.Lm169:
+        bl sa1e_wr8_s
+        b.w .Ld170
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -3729,37 +3972,37 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm157
+        bne.w .Lm171
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm157
+        beq.w .Lm171
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld158:
+.Ld172:
         .subsection 1
-.Lm157:
+.Lm171:
         bl sa1e_rd16_s_b0
-        b.w .Ld158
+        b.w .Ld172
         .subsection 0
         sub r0, r0, #1
         sxth r10, r0
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm159
+        bne.w .Lm173
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm159
+        beq.w .Lm173
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld160:
+.Ld174:
         .subsection 1
-.Lm159:
+.Lm173:
         bl sa1e_wr16_s_b0r
-        b.w .Ld160
+        b.w .Ld174
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -3785,31 +4028,31 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm161
+        bne.w .Lm175
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld162:
+.Ld176:
         .subsection 1
-.Lm161:
+.Lm175:
         bl sa1e_rd8_s
-        b.w .Ld162
+        b.w .Ld176
         .subsection 0
         sub r0, r0, #1
         sxtb r10, r0
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm163
+        bne.w .Lm177
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld164:
+.Ld178:
         .subsection 1
-.Lm163:
+.Lm177:
         bl sa1e_wr8_s
-        b.w .Ld164
+        b.w .Ld178
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -3837,41 +4080,41 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm165
+        beq.w .Lm179
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm165
+        beq.w .Lm179
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld166:
+.Ld180:
         .subsection 1
-.Lm165:
+.Lm179:
         bl sa1e_rd16_s_l
-        b.w .Ld166
+        b.w .Ld180
         .subsection 0
         sub r0, r0, #1
         sxth r10, r0
         tst r1, #0x400000
-        bne.w .Lm167
+        bne.w .Lm181
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm167
+        bne.w .Lm181
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm167
+        beq.w .Lm181
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld168:
+.Ld182:
         .subsection 1
-.Lm167:
+.Lm181:
         bl sa1e_wr16_s_lr
-        b.w .Ld168
+        b.w .Ld182
         .subsection 0
         subs r11, r11, #10
         ble.w .Lx0
@@ -3900,41 +4143,41 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm169
+        beq.w .Lm183
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm169
+        beq.w .Lm183
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld170:
+.Ld184:
         .subsection 1
-.Lm169:
+.Lm183:
         bl sa1e_rd16_s_l
-        b.w .Ld170
+        b.w .Ld184
         .subsection 0
         sub r0, r0, #1
         sxth r10, r0
         tst r1, #0x400000
-        bne.w .Lm171
+        bne.w .Lm185
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm171
+        bne.w .Lm185
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm171
+        beq.w .Lm185
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld172:
+.Ld186:
         .subsection 1
-.Lm171:
+.Lm185:
         bl sa1e_wr16_s_lr
-        b.w .Ld172
+        b.w .Ld186
         .subsection 0
         tst r1, #0x80000000
         it ne
@@ -3961,32 +4204,32 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm173
+        beq.w .Lm187
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld174:
+.Ld188:
         .subsection 1
-.Lm173:
+.Lm187:
         bl sa1e_rd8_s
-        b.w .Ld174
+        b.w .Ld188
         .subsection 0
         sub r0, r0, #1
         sxtb r10, r0
         tst r1, #0x400000
-        bne.w .Lm175
+        bne.w .Lm189
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm175
+        bne.w .Lm189
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld176:
+.Ld190:
         .subsection 1
-.Lm175:
+.Lm189:
         bl sa1e_wr8_s
-        b.w .Ld176
+        b.w .Ld190
         .subsection 0
         subs r11, r11, #8
         ble.w .Lx0
@@ -4015,32 +4258,32 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm177
+        beq.w .Lm191
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld178:
+.Ld192:
         .subsection 1
-.Lm177:
+.Lm191:
         bl sa1e_rd8_s
-        b.w .Ld178
+        b.w .Ld192
         .subsection 0
         sub r0, r0, #1
         sxtb r10, r0
         tst r1, #0x400000
-        bne.w .Lm179
+        bne.w .Lm193
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm179
+        bne.w .Lm193
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld180:
+.Ld194:
         .subsection 1
-.Lm179:
+.Lm193:
         bl sa1e_wr8_s
-        b.w .Ld180
+        b.w .Ld194
         .subsection 0
         tst r1, #0x80000000
         it ne
@@ -4065,37 +4308,37 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm181
+        bne.w .Lm195
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm181
+        beq.w .Lm195
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld182:
+.Ld196:
         .subsection 1
-.Lm181:
+.Lm195:
         bl sa1e_rd16_s_b0
-        b.w .Ld182
+        b.w .Ld196
         .subsection 0
         add r0, r0, #1
         sxth r10, r0
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm183
+        bne.w .Lm197
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm183
+        beq.w .Lm197
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld184:
+.Ld198:
         .subsection 1
-.Lm183:
+.Lm197:
         bl sa1e_wr16_s_b0r
-        b.w .Ld184
+        b.w .Ld198
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -4121,31 +4364,31 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm185
+        bne.w .Lm199
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld186:
+.Ld200:
         .subsection 1
-.Lm185:
+.Lm199:
         bl sa1e_rd8_s
-        b.w .Ld186
+        b.w .Ld200
         .subsection 0
         add r0, r0, #1
         sxtb r10, r0
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm187
+        bne.w .Lm201
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld188:
+.Ld202:
         .subsection 1
-.Lm187:
+.Lm201:
         bl sa1e_wr8_s
-        b.w .Ld188
+        b.w .Ld202
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -4171,41 +4414,41 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm189
+        beq.w .Lm203
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm189
+        beq.w .Lm203
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld190:
+.Ld204:
         .subsection 1
-.Lm189:
+.Lm203:
         bl sa1e_rd16_s_l
-        b.w .Ld190
+        b.w .Ld204
         .subsection 0
         add r0, r0, #1
         sxth r10, r0
         tst r1, #0x400000
-        bne.w .Lm191
+        bne.w .Lm205
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm191
+        bne.w .Lm205
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm191
+        beq.w .Lm205
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld192:
+.Ld206:
         .subsection 1
-.Lm191:
+.Lm205:
         bl sa1e_wr16_s_lr
-        b.w .Ld192
+        b.w .Ld206
         .subsection 0
         subs r11, r11, #8
         ble.w .Lx0
@@ -4227,33 +4470,84 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm193
+        beq.w .Lm207
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld194:
+.Ld208:
         .subsection 1
-.Lm193:
+.Lm207:
         bl sa1e_rd8_s
-        b.w .Ld194
+        b.w .Ld208
         .subsection 0
         add r0, r0, #1
         sxtb r10, r0
         tst r1, #0x400000
-        bne.w .Lm195
+        bne.w .Lm209
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm195
+        bne.w .Lm209
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld196:
+.Ld210:
         .subsection 1
-.Lm195:
+.Lm209:
         bl sa1e_wr8_s
-        b.w .Ld196
+        b.w .Ld210
         .subsection 0
+        subs r11, r11, #6
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lhf6_10:
+        ldrb r1, [r6], #1
+        ldrh r2, [r4, #CPU_DP]
+        add r1, r1, r2
+        add r1, r1, r8
+        uxth r1, r1
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm211
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        ldrb r0, [r2, r3]
+.Ld212:
+        .subsection 1
+.Lm211:
+        bl sa1e_rd8_s
+        b.w .Ld212
+        .subsection 0
+        add r0, r0, #1
+        sxtb r10, r0
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm213
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strb r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld214:
+        .subsection 1
+.Lm213:
+        bl sa1e_wr8_s
+        b.w .Ld214
+        .subsection 0
+        ldrh r2, [r4, #CPU_DP]
+        tst r2, #0xff
+        it ne
+        subne r11, r11, #1
         subs r11, r11, #6
         ble.w .Lx0
         cmp r6, r5
@@ -4274,18 +4568,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm197
+        bne.w .Lm215
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm197
+        beq.w .Lm215
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld198:
+.Ld216:
         .subsection 1
-.Lm197:
+.Lm215:
         bl sa1e_rd16_s_b0
-        b.w .Ld198
+        b.w .Ld216
         .subsection 0
         ands r2, r7, r0
         and r10, r10, #0x80000000
@@ -4295,19 +4589,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm199
+        bne.w .Lm217
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm199
+        beq.w .Lm217
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld200:
+.Ld218:
         .subsection 1
-.Lm199:
+.Lm217:
         bl sa1e_wr16_s_b0r
-        b.w .Ld200
+        b.w .Ld218
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -4333,15 +4627,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm201
+        bne.w .Lm219
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld202:
+.Ld220:
         .subsection 1
-.Lm201:
+.Lm219:
         bl sa1e_rd8_s
-        b.w .Ld202
+        b.w .Ld220
         .subsection 0
         uxtb r2, r7
         ands r2, r2, r0
@@ -4352,16 +4646,70 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm203
+        bne.w .Lm221
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld204:
+.Ld222:
         .subsection 1
-.Lm203:
+.Lm221:
         bl sa1e_wr8_s
-        b.w .Ld204
+        b.w .Ld222
+        .subsection 0
+        ldrh r2, [r4, #CPU_DP]
+        tst r2, #0xff
+        it ne
+        subne r11, r11, #1
+        subs r11, r11, #5
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh14_10:
+        ldrb r1, [r6], #1
+        ldrh r2, [r4, #CPU_DP]
+        add r1, r1, r2
+        uxth r1, r1
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm223
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        ldrb r0, [r2, r3]
+.Ld224:
+        .subsection 1
+.Lm223:
+        bl sa1e_rd8_s
+        b.w .Ld224
+        .subsection 0
+        uxtb r2, r7
+        ands r2, r2, r0
+        and r10, r10, #0x80000000
+        it ne
+        orrne r10, r10, #1
+        bic r0, r0, r7
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm225
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strb r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld226:
+        .subsection 1
+.Lm225:
+        bl sa1e_wr8_s
+        b.w .Ld226
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -4417,18 +4765,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm205
+        bne.w .Lm227
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm205
+        beq.w .Lm227
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld206:
+.Ld228:
         .subsection 1
-.Lm205:
+.Lm227:
         bl sa1e_rd16_s_b0
-        b.w .Ld206
+        b.w .Ld228
         .subsection 0
         mov r8, r0
         sxth r10, r8
@@ -4456,15 +4804,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm207
+        bne.w .Lm229
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld208:
+.Ld230:
         .subsection 1
-.Lm207:
+.Lm229:
         bl sa1e_rd8_s
-        b.w .Ld208
+        b.w .Ld230
         .subsection 0
         mov r8, r0
         sxtb r10, r8
@@ -4492,20 +4840,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm209
+        beq.w .Lm231
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm209
+        beq.w .Lm231
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld210:
+.Ld232:
         .subsection 1
-.Lm209:
+.Lm231:
         bl sa1e_rd16_s_l
-        b.w .Ld210
+        b.w .Ld232
         .subsection 0
         mov r8, r0
         sxth r10, r8
@@ -4529,14 +4877,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm211
+        beq.w .Lm233
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld212:
+.Ld234:
         .subsection 1
-.Lm211:
+.Lm233:
         bl sa1e_rd8_s
-        b.w .Ld212
+        b.w .Ld234
         .subsection 0
         mov r8, r0
         sxtb r10, r8
@@ -4562,20 +4910,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm213
+        beq.w .Lm235
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm213
+        beq.w .Lm235
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld214:
+.Ld236:
         .subsection 1
-.Lm213:
+.Lm235:
         bl sa1e_rd16_s_l
-        b.w .Ld214
+        b.w .Ld236
         .subsection 0
         mov r8, r0
         sxth r10, r8
@@ -4601,14 +4949,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm215
+        beq.w .Lm237
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld216:
+.Ld238:
         .subsection 1
-.Lm215:
+.Lm237:
         bl sa1e_rd8_s
-        b.w .Ld216
+        b.w .Ld238
         .subsection 0
         mov r8, r0
         sxtb r10, r8
@@ -4662,18 +5010,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm217
+        bne.w .Lm239
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm217
+        beq.w .Lm239
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld218:
+.Ld240:
         .subsection 1
-.Lm217:
+.Lm239:
         bl sa1e_rd16_s_b0
-        b.w .Ld218
+        b.w .Ld240
         .subsection 0
         mov r9, r0
         sxth r10, r9
@@ -4701,15 +5049,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm219
+        bne.w .Lm241
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld220:
+.Ld242:
         .subsection 1
-.Lm219:
+.Lm241:
         bl sa1e_rd8_s
-        b.w .Ld220
+        b.w .Ld242
         .subsection 0
         mov r9, r0
         sxtb r10, r9
@@ -4737,20 +5085,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm221
+        beq.w .Lm243
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm221
+        beq.w .Lm243
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld222:
+.Ld244:
         .subsection 1
-.Lm221:
+.Lm243:
         bl sa1e_rd16_s_l
-        b.w .Ld222
+        b.w .Ld244
         .subsection 0
         mov r9, r0
         sxth r10, r9
@@ -4774,18 +5122,58 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm223
+        beq.w .Lm245
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld224:
+.Ld246:
         .subsection 1
-.Lm223:
+.Lm245:
         bl sa1e_rd8_s
-        b.w .Ld224
+        b.w .Ld246
         .subsection 0
         mov r9, r0
         sxtb r10, r9
         subs r11, r11, #4
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lhb4_00:
+        ldrb r1, [r6], #1
+        ldrh r2, [r4, #CPU_DP]
+        add r1, r1, r2
+        add r1, r1, r8
+        uxth r1, r1
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm247
+        add r2, r1, #1
+        lsls r2, r2, #21
+        beq.w .Lm247
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        ldrh r0, [r2, r3]
+.Ld248:
+        .subsection 1
+.Lm247:
+        bl sa1e_rd16_s_b0
+        b.w .Ld248
+        .subsection 0
+        mov r9, r0
+        sxth r10, r9
+        ldrh r2, [r4, #CPU_DP]
+        tst r2, #0xff
+        it ne
+        subne r11, r11, #1
+        subs r11, r11, #5
         ble.w .Lx0
         cmp r6, r5
         bhi.w .Lpage
@@ -4807,20 +5195,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm225
+        beq.w .Lm249
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm225
+        beq.w .Lm249
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld226:
+.Ld250:
         .subsection 1
-.Lm225:
+.Lm249:
         bl sa1e_rd16_s_l
-        b.w .Ld226
+        b.w .Ld250
         .subsection 0
         mov r9, r0
         sxth r10, r9
@@ -4846,14 +5234,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm227
+        beq.w .Lm251
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld228:
+.Ld252:
         .subsection 1
-.Lm227:
+.Lm251:
         bl sa1e_rd8_s
-        b.w .Ld228
+        b.w .Ld252
         .subsection 0
         mov r9, r0
         sxtb r10, r9
@@ -4878,19 +5266,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm229
+        bne.w .Lm253
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm229
+        beq.w .Lm253
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld230:
+.Ld254:
         .subsection 1
-.Lm229:
+.Lm253:
         bl sa1e_wr16_s_b0
-        b.w .Ld230
+        b.w .Ld254
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -4917,16 +5305,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm231
+        bne.w .Lm255
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld232:
+.Ld256:
         .subsection 1
-.Lm231:
+.Lm255:
         bl sa1e_wr8_s
-        b.w .Ld232
+        b.w .Ld256
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -4950,23 +5338,23 @@ sa1_engine_run:
         add r1, r1, r2, lsl #16
         mov r0, r8
         tst r1, #0x400000
-        bne.w .Lm233
+        bne.w .Lm257
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm233
+        bne.w .Lm257
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm233
+        beq.w .Lm257
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld234:
+.Ld258:
         .subsection 1
-.Lm233:
+.Lm257:
         bl sa1e_wr16_s_l
-        b.w .Ld234
+        b.w .Ld258
         .subsection 0
         subs r11, r11, #5
         ble.w .Lx0
@@ -4986,20 +5374,20 @@ sa1_engine_run:
         add r1, r1, r2, lsl #16
         mov r0, r8
         tst r1, #0x400000
-        bne.w .Lm235
+        bne.w .Lm259
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm235
+        bne.w .Lm259
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld236:
+.Ld260:
         .subsection 1
-.Lm235:
+.Lm259:
         bl sa1e_wr8_s
-        b.w .Ld236
+        b.w .Ld260
         .subsection 0
         subs r11, r11, #4
         ble.w .Lx0
@@ -5022,19 +5410,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm237
+        bne.w .Lm261
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm237
+        beq.w .Lm261
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld238:
+.Ld262:
         .subsection 1
-.Lm237:
+.Lm261:
         bl sa1e_wr16_s_b0
-        b.w .Ld238
+        b.w .Ld262
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -5061,16 +5449,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm239
+        bne.w .Lm263
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld240:
+.Ld264:
         .subsection 1
-.Lm239:
+.Lm263:
         bl sa1e_wr8_s
-        b.w .Ld240
+        b.w .Ld264
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -5094,23 +5482,23 @@ sa1_engine_run:
         add r1, r1, r2, lsl #16
         mov r0, r9
         tst r1, #0x400000
-        bne.w .Lm241
+        bne.w .Lm265
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm241
+        bne.w .Lm265
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm241
+        beq.w .Lm265
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld242:
+.Ld266:
         .subsection 1
-.Lm241:
+.Lm265:
         bl sa1e_wr16_s_l
-        b.w .Ld242
+        b.w .Ld266
         .subsection 0
         subs r11, r11, #5
         ble.w .Lx0
@@ -5130,22 +5518,62 @@ sa1_engine_run:
         add r1, r1, r2, lsl #16
         mov r0, r9
         tst r1, #0x400000
-        bne.w .Lm243
+        bne.w .Lm267
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm243
+        bne.w .Lm267
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld244:
+.Ld268:
         .subsection 1
-.Lm243:
+.Lm267:
         bl sa1e_wr8_s
-        b.w .Ld244
+        b.w .Ld268
         .subsection 0
         subs r11, r11, #4
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh94_00:
+        ldrb r1, [r6], #1
+        ldrh r2, [r4, #CPU_DP]
+        add r1, r1, r2
+        add r1, r1, r8
+        uxth r1, r1
+        mov r0, r9
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm269
+        add r2, r1, #1
+        lsls r2, r2, #21
+        beq.w .Lm269
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strh r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld270:
+        .subsection 1
+.Lm269:
+        bl sa1e_wr16_s_b0
+        b.w .Ld270
+        .subsection 0
+        ldrh r2, [r4, #CPU_DP]
+        tst r2, #0xff
+        it ne
+        subne r11, r11, #1
+        subs r11, r11, #5
         ble.w .Lx0
         cmp r6, r5
         bhi.w .Lpage
@@ -5166,19 +5594,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm245
+        bne.w .Lm271
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm245
+        beq.w .Lm271
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld246:
+.Ld272:
         .subsection 1
-.Lm245:
+.Lm271:
         bl sa1e_wr16_s_b0
-        b.w .Ld246
+        b.w .Ld272
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -5205,16 +5633,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm247
+        bne.w .Lm273
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld248:
+.Ld274:
         .subsection 1
-.Lm247:
+.Lm273:
         bl sa1e_wr8_s
-        b.w .Ld248
+        b.w .Ld274
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -5242,19 +5670,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm249
+        bne.w .Lm275
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm249
+        beq.w .Lm275
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld250:
+.Ld276:
         .subsection 1
-.Lm249:
+.Lm275:
         bl sa1e_wr16_s_b0
-        b.w .Ld250
+        b.w .Ld276
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -5282,16 +5710,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm251
+        bne.w .Lm277
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld252:
+.Ld278:
         .subsection 1
-.Lm251:
+.Lm277:
         bl sa1e_wr8_s
-        b.w .Ld252
+        b.w .Ld278
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
         tst r2, #0xff
@@ -5315,23 +5743,23 @@ sa1_engine_run:
         add r1, r1, r2, lsl #16
         mov.w r0, #0
         tst r1, #0x400000
-        bne.w .Lm253
+        bne.w .Lm279
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm253
+        bne.w .Lm279
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm253
+        beq.w .Lm279
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld254:
+.Ld280:
         .subsection 1
-.Lm253:
+.Lm279:
         bl sa1e_wr16_s_l
-        b.w .Ld254
+        b.w .Ld280
         .subsection 0
         subs r11, r11, #5
         ble.w .Lx0
@@ -5351,20 +5779,20 @@ sa1_engine_run:
         add r1, r1, r2, lsl #16
         mov.w r0, #0
         tst r1, #0x400000
-        bne.w .Lm255
+        bne.w .Lm281
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm255
+        bne.w .Lm281
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld256:
+.Ld282:
         .subsection 1
-.Lm255:
+.Lm281:
         bl sa1e_wr8_s
-        b.w .Ld256
+        b.w .Ld282
         .subsection 0
         subs r11, r11, #4
         ble.w .Lx0
@@ -5386,23 +5814,23 @@ sa1_engine_run:
         bic r1, r1, #0xff000000
         mov.w r0, #0
         tst r1, #0x400000
-        bne.w .Lm257
+        bne.w .Lm283
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm257
+        bne.w .Lm283
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm257
+        beq.w .Lm283
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld258:
+.Ld284:
         .subsection 1
-.Lm257:
+.Lm283:
         bl sa1e_wr16_s_l
-        b.w .Ld258
+        b.w .Ld284
         .subsection 0
         subs r11, r11, #7
         ble.w .Lx0
@@ -5429,23 +5857,23 @@ sa1_engine_run:
         orrhi r1, r1, #0x80000000
         mov.w r0, #0
         tst r1, #0x400000
-        bne.w .Lm259
+        bne.w .Lm285
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm259
+        bne.w .Lm285
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm259
+        beq.w .Lm285
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld260:
+.Ld286:
         .subsection 1
-.Lm259:
+.Lm285:
         bl sa1e_wr16_s_l
-        b.w .Ld260
+        b.w .Ld286
         .subsection 0
         tst r1, #0x80000000
         it ne
@@ -5470,20 +5898,20 @@ sa1_engine_run:
         bic r1, r1, #0xff000000
         mov.w r0, #0
         tst r1, #0x400000
-        bne.w .Lm261
+        bne.w .Lm287
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm261
+        bne.w .Lm287
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld262:
+.Ld288:
         .subsection 1
-.Lm261:
+.Lm287:
         bl sa1e_wr8_s
-        b.w .Ld262
+        b.w .Ld288
         .subsection 0
         subs r11, r11, #6
         ble.w .Lx0
@@ -5510,20 +5938,20 @@ sa1_engine_run:
         orrhi r1, r1, #0x80000000
         mov.w r0, #0
         tst r1, #0x400000
-        bne.w .Lm263
+        bne.w .Lm289
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm263
+        bne.w .Lm289
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld264:
+.Ld290:
         .subsection 1
-.Lm263:
+.Lm289:
         bl sa1e_wr8_s
-        b.w .Ld264
+        b.w .Ld290
         .subsection 0
         tst r1, #0x80000000
         it ne
@@ -5586,18 +6014,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm265
+        bne.w .Lm291
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm265
+        beq.w .Lm291
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld266:
+.Ld292:
         .subsection 1
-.Lm265:
+.Lm291:
         bl sa1e_rd16_s_b0
-        b.w .Ld266
+        b.w .Ld292
         .subsection 0
         subs r2, r8, r0
         mov.w r3, #0
@@ -5628,15 +6056,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm267
+        bne.w .Lm293
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld268:
+.Ld294:
         .subsection 1
-.Lm267:
+.Lm293:
         bl sa1e_rd8_s
-        b.w .Ld268
+        b.w .Ld294
         .subsection 0
         subs r2, r8, r0
         mov.w r3, #0
@@ -5667,20 +6095,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm269
+        beq.w .Lm295
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm269
+        beq.w .Lm295
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld270:
+.Ld296:
         .subsection 1
-.Lm269:
+.Lm295:
         bl sa1e_rd16_s_l
-        b.w .Ld270
+        b.w .Ld296
         .subsection 0
         subs r2, r8, r0
         mov.w r3, #0
@@ -5707,14 +6135,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm271
+        beq.w .Lm297
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld272:
+.Ld298:
         .subsection 1
-.Lm271:
+.Lm297:
         bl sa1e_rd8_s
-        b.w .Ld272
+        b.w .Ld298
         .subsection 0
         subs r2, r8, r0
         mov.w r3, #0
@@ -5771,6 +6199,92 @@ sa1_engine_run:
         ldrb r0, [r6], #1
         ldr.w pc, [lr, r0, lsl #2]
 
+.Lhc4_00:
+        ldrb r1, [r6], #1
+        ldrh r2, [r4, #CPU_DP]
+        add r1, r1, r2
+        uxth r1, r1
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm299
+        add r2, r1, #1
+        lsls r2, r2, #21
+        beq.w .Lm299
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        ldrh r0, [r2, r3]
+.Ld300:
+        .subsection 1
+.Lm299:
+        bl sa1e_rd16_s_b0
+        b.w .Ld300
+        .subsection 0
+        subs r2, r9, r0
+        mov.w r3, #0
+        adc r3, r3, #0
+        strb r3, [r4, #CPU_C]
+        sxth r10, r2
+        ldrh r2, [r4, #CPU_DP]
+        tst r2, #0xff
+        it ne
+        subne r11, r11, #1
+        subs r11, r11, #4
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh24_00:
+        ldrb r1, [r6], #1
+        ldrh r2, [r4, #CPU_DP]
+        add r1, r1, r2
+        uxth r1, r1
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm301
+        add r2, r1, #1
+        lsls r2, r2, #21
+        beq.w .Lm301
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        ldrh r0, [r2, r3]
+.Ld302:
+        .subsection 1
+.Lm301:
+        bl sa1e_rd16_s_b0
+        b.w .Ld302
+        .subsection 0
+        ands r2, r7, r0
+        and r10, r0, #0x8000
+        lsl r10, r10, #16
+        it ne
+        orrne r10, r10, #1
+        ubfx r3, r0, #14, #1
+        strb r3, [r4, #CPU_V]
+        ldrh r2, [r4, #CPU_DP]
+        tst r2, #0xff
+        it ne
+        subne r11, r11, #1
+        subs r11, r11, #4
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
 .Lh2c_00:
         ldrh r1, [r6], #2
         ldrb r2, [r4, #CPU_DB]
@@ -5779,20 +6293,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm273
+        beq.w .Lm303
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm273
+        beq.w .Lm303
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld274:
+.Ld304:
         .subsection 1
-.Lm273:
+.Lm303:
         bl sa1e_rd16_s_l
-        b.w .Ld274
+        b.w .Ld304
         .subsection 0
         ands r2, r7, r0
         and r10, r0, #0x8000
@@ -5821,14 +6335,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm275
+        beq.w .Lm305
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld276:
+.Ld306:
         .subsection 1
-.Lm275:
+.Lm305:
         bl sa1e_rd8_s
-        b.w .Ld276
+        b.w .Ld306
         .subsection 0
         uxtb r2, r7
         ands r2, r2, r0
@@ -5860,20 +6374,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm277
+        beq.w .Lm307
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm277
+        beq.w .Lm307
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld278:
+.Ld308:
         .subsection 1
-.Lm277:
+.Lm307:
         bl sa1e_rd16_s_l
-        b.w .Ld278
+        b.w .Ld308
         .subsection 0
         ands r2, r7, r0
         and r10, r0, #0x8000
@@ -5904,14 +6418,14 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm279
+        beq.w .Lm309
         ubfx r2, r1, #0, #13
         ldrb r0, [r3, r2]
-.Ld280:
+.Ld310:
         .subsection 1
-.Lm279:
+.Lm309:
         bl sa1e_rd8_s
-        b.w .Ld280
+        b.w .Ld310
         .subsection 0
         uxtb r2, r7
         ands r2, r2, r0
@@ -5959,6 +6473,118 @@ sa1_engine_run:
         it ne
         orrne r10, r10, #1
         subs r11, r11, #2
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh54_00:
+        ldrb r2, [r6], #1
+        strb r2, [r4, #CPU_DB]
+        ldrb r1, [r6], #1
+        orr r1, r8, r1, lsl #16
+        ldr r2, [sp, #F_SA1]
+        ubfx r3, r1, #13, #11
+        ldr r3, [r2, r3, lsl #2]
+        cmp r3, #0
+        beq.w .Lm311
+        ubfx r2, r1, #0, #13
+        ldrb r0, [r3, r2]
+.Ld312:
+        .subsection 1
+.Lm311:
+        bl sa1e_rd8_s
+        b.w .Ld312
+        .subsection 0
+        ldrb r2, [r4, #CPU_DB]
+        orr r1, r9, r2, lsl #16
+        tst r1, #0x400000
+        bne.w .Lm313
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm313
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strb r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld314:
+        .subsection 1
+.Lm313:
+        bl sa1e_wr8_s
+        b.w .Ld314
+        .subsection 0
+        add r8, r8, #1
+        uxth r8, r8
+        add r9, r9, #1
+        uxth r9, r9
+        subs r7, r7, #1
+        it pl
+        subpl r6, r6, #3
+        uxth r7, r7
+        subs r11, r11, #7
+        ble.w .Lx0
+        cmp r6, r5
+        bhi.w .Lpage
+#ifdef SA1E_COUNT
+        ldr     ip, [sp, #F_OPS]
+        add     ip, ip, #1
+        str     ip, [sp, #F_OPS]
+#endif
+        ldrb r0, [r6], #1
+        ldr.w pc, [lr, r0, lsl #2]
+
+.Lh44_00:
+        ldrb r2, [r6], #1
+        strb r2, [r4, #CPU_DB]
+        ldrb r1, [r6], #1
+        orr r1, r8, r1, lsl #16
+        ldr r2, [sp, #F_SA1]
+        ubfx r3, r1, #13, #11
+        ldr r3, [r2, r3, lsl #2]
+        cmp r3, #0
+        beq.w .Lm315
+        ubfx r2, r1, #0, #13
+        ldrb r0, [r3, r2]
+.Ld316:
+        .subsection 1
+.Lm315:
+        bl sa1e_rd8_s
+        b.w .Ld316
+        .subsection 0
+        ldrb r2, [r4, #CPU_DB]
+        orr r1, r9, r2, lsl #16
+        tst r1, #0x400000
+        bne.w .Lm317
+        ands r3, r1, #0xf800
+        it ne
+        cmpne r3, #0x3000
+        bne.w .Lm317
+        ldr r2, [sp, #F_IRAM]
+        ubfx r3, r1, #0, #11
+        strb r0, [r2, r3]
+        str r2, [r2, #SA1E_WDIRTY]
+.Ld318:
+        .subsection 1
+.Lm317:
+        bl sa1e_wr8_s
+        b.w .Ld318
+        .subsection 0
+        sub r8, r8, #1
+        uxth r8, r8
+        sub r9, r9, #1
+        uxth r9, r9
+        subs r7, r7, #1
+        it pl
+        subpl r6, r6, #3
+        uxth r7, r7
+        subs r11, r11, #7
         ble.w .Lx0
         cmp r6, r5
         bhi.w .Lpage
@@ -6762,15 +7388,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm281
+        bne.w .Lm319
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld282:
+.Ld320:
         .subsection 1
-.Lm281:
+.Lm319:
         bl sa1e_rd8_s
-        b.w .Ld282
+        b.w .Ld320
         .subsection 0
         strh r1, [r4, #CPU_SP]
         subs r11, r11, #4
@@ -6783,16 +7409,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm283
+        bne.w .Lm321
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld284:
+.Ld322:
         .subsection 1
-.Lm283:
+.Lm321:
         bl sa1e_wr8_s
-        b.w .Ld284
+        b.w .Ld322
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -6816,19 +7442,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm285
+        bne.w .Lm323
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm285
+        beq.w .Lm323
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld286:
+.Ld324:
         .subsection 1
-.Lm285:
+.Lm323:
         bl sa1e_wr16_s_b0r
-        b.w .Ld286
+        b.w .Ld324
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -6850,16 +7476,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm287
+        bne.w .Lm325
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld288:
+.Ld326:
         .subsection 1
-.Lm287:
+.Lm325:
         bl sa1e_wr8_s
-        b.w .Ld288
+        b.w .Ld326
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -6883,19 +7509,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm289
+        bne.w .Lm327
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm289
+        beq.w .Lm327
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld290:
+.Ld328:
         .subsection 1
-.Lm289:
+.Lm327:
         bl sa1e_wr16_s_b0r
-        b.w .Ld290
+        b.w .Ld328
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -6917,16 +7543,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm291
+        bne.w .Lm329
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld292:
+.Ld330:
         .subsection 1
-.Lm291:
+.Lm329:
         bl sa1e_wr8_s
-        b.w .Ld292
+        b.w .Ld330
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -6950,19 +7576,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm293
+        bne.w .Lm331
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm293
+        beq.w .Lm331
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld294:
+.Ld332:
         .subsection 1
-.Lm293:
+.Lm331:
         bl sa1e_wr16_s_b0r
-        b.w .Ld294
+        b.w .Ld332
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -6984,16 +7610,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm295
+        bne.w .Lm333
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld296:
+.Ld334:
         .subsection 1
-.Lm295:
+.Lm333:
         bl sa1e_wr8_s
-        b.w .Ld296
+        b.w .Ld334
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7016,18 +7642,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm297
+        bne.w .Lm335
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm297
+        beq.w .Lm335
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld298:
+.Ld336:
         .subsection 1
-.Lm297:
+.Lm335:
         bl sa1e_rd16_s_b0
-        b.w .Ld298
+        b.w .Ld336
         .subsection 0
         add r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7052,15 +7678,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm299
+        bne.w .Lm337
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld300:
+.Ld338:
         .subsection 1
-.Lm299:
+.Lm337:
         bl sa1e_rd8_s
-        b.w .Ld300
+        b.w .Ld338
         .subsection 0
         strh r1, [r4, #CPU_SP]
         bfi r7, r0, #0, #8
@@ -7084,18 +7710,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm301
+        bne.w .Lm339
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm301
+        beq.w .Lm339
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld302:
+.Ld340:
         .subsection 1
-.Lm301:
+.Lm339:
         bl sa1e_rd16_s_b0
-        b.w .Ld302
+        b.w .Ld340
         .subsection 0
         add r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7120,15 +7746,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm303
+        bne.w .Lm341
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld304:
+.Ld342:
         .subsection 1
-.Lm303:
+.Lm341:
         bl sa1e_rd8_s
-        b.w .Ld304
+        b.w .Ld342
         .subsection 0
         strh r1, [r4, #CPU_SP]
         mov r8, r0
@@ -7152,18 +7778,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm305
+        bne.w .Lm343
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm305
+        beq.w .Lm343
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld306:
+.Ld344:
         .subsection 1
-.Lm305:
+.Lm343:
         bl sa1e_rd16_s_b0
-        b.w .Ld306
+        b.w .Ld344
         .subsection 0
         add r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7188,15 +7814,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm307
+        bne.w .Lm345
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld308:
+.Ld346:
         .subsection 1
-.Lm307:
+.Lm345:
         bl sa1e_rd8_s
-        b.w .Ld308
+        b.w .Ld346
         .subsection 0
         strh r1, [r4, #CPU_SP]
         mov r9, r0
@@ -7219,16 +7845,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm309
+        bne.w .Lm347
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld310:
+.Ld348:
         .subsection 1
-.Lm309:
+.Lm347:
         bl sa1e_wr8_s
-        b.w .Ld310
+        b.w .Ld348
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7250,16 +7876,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm311
+        bne.w .Lm349
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld312:
+.Ld350:
         .subsection 1
-.Lm311:
+.Lm349:
         bl sa1e_wr8_s
-        b.w .Ld312
+        b.w .Ld350
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7283,19 +7909,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm313
+        bne.w .Lm351
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm313
+        beq.w .Lm351
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld314:
+.Ld352:
         .subsection 1
-.Lm313:
+.Lm351:
         bl sa1e_wr16_s_b0r
-        b.w .Ld314
+        b.w .Ld352
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7318,15 +7944,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm315
+        bne.w .Lm353
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld316:
+.Ld354:
         .subsection 1
-.Lm315:
+.Lm353:
         bl sa1e_rd8_s
-        b.w .Ld316
+        b.w .Ld354
         .subsection 0
         strh r1, [r4, #CPU_SP]
         strb r0, [r4, #CPU_DB]
@@ -7350,18 +7976,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm317
+        bne.w .Lm355
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm317
+        beq.w .Lm355
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld318:
+.Ld356:
         .subsection 1
-.Lm317:
+.Lm355:
         bl sa1e_rd16_s_b0
-        b.w .Ld318
+        b.w .Ld356
         .subsection 0
         add r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7391,19 +8017,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm319
+        bne.w .Lm357
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm319
+        beq.w .Lm357
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld320:
+.Ld358:
         .subsection 1
-.Lm319:
+.Lm357:
         bl sa1e_wr16_s_b0r
-        b.w .Ld320
+        b.w .Ld358
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7422,9 +8048,9 @@ sa1_engine_run:
 .Lh10_00:
         ldrsb r1, [r6], #1
         cmp r10, #0
-        bmi .Lnt327
+        bmi .Lnt365
         b.w .Ltaken3
-.Lnt327:
+.Lnt365:
         subs r11, r11, #2
         ble.w .Lx0
         cmp r6, r5
@@ -7440,9 +8066,9 @@ sa1_engine_run:
 .Lh30_00:
         ldrsb r1, [r6], #1
         cmp r10, #0
-        bpl .Lnt328
+        bpl .Lnt366
         b.w .Ltaken3
-.Lnt328:
+.Lnt366:
         subs r11, r11, #2
         ble.w .Lx0
         cmp r6, r5
@@ -7459,9 +8085,9 @@ sa1_engine_run:
         ldrsb r1, [r6], #1
         ldrb r0, [r4, #CPU_V]
         cmp r0, #0
-        bne .Lnt329
+        bne .Lnt367
         b.w .Ltaken3
-.Lnt329:
+.Lnt367:
         subs r11, r11, #2
         ble.w .Lx0
         cmp r6, r5
@@ -7478,9 +8104,9 @@ sa1_engine_run:
         ldrsb r1, [r6], #1
         ldrb r0, [r4, #CPU_V]
         cmp r0, #0
-        beq .Lnt330
+        beq .Lnt368
         b.w .Ltaken3
-.Lnt330:
+.Lnt368:
         subs r11, r11, #2
         ble.w .Lx0
         cmp r6, r5
@@ -7497,9 +8123,9 @@ sa1_engine_run:
         ldrsb r1, [r6], #1
         ldrb r0, [r4, #CPU_C]
         cmp r0, #0
-        bne .Lnt331
+        bne .Lnt369
         b.w .Ltaken3
-.Lnt331:
+.Lnt369:
         subs r11, r11, #2
         ble.w .Lx0
         cmp r6, r5
@@ -7516,9 +8142,9 @@ sa1_engine_run:
         ldrsb r1, [r6], #1
         ldrb r0, [r4, #CPU_C]
         cmp r0, #0
-        beq .Lnt332
+        beq .Lnt370
         b.w .Ltaken3
-.Lnt332:
+.Lnt370:
         subs r11, r11, #2
         ble.w .Lx0
         cmp r6, r5
@@ -7534,9 +8160,9 @@ sa1_engine_run:
 .Lhd0_00:
         ldrsb r1, [r6], #1
         lsls r0, r10, #1
-        beq .Lnt333
+        beq .Lnt371
         b.w .Ltaken3
-.Lnt333:
+.Lnt371:
         subs r11, r11, #2
         ble.w .Lx0
         cmp r6, r5
@@ -7552,9 +8178,9 @@ sa1_engine_run:
 .Lhf0_00:
         ldrsb r1, [r6], #1
         lsls r0, r10, #1
-        bne .Lnt334
+        bne .Lnt372
         b.w .Ltaken3
-.Lnt334:
+.Lnt372:
         subs r11, r11, #2
         ble.w .Lx0
         cmp r6, r5
@@ -7621,18 +8247,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm335
+        bne.w .Lm373
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm335
+        beq.w .Lm373
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld336:
+.Ld374:
         .subsection 1
-.Lm335:
+.Lm373:
         bl sa1e_rd16_s_b0
-        b.w .Ld336
+        b.w .Ld374
         .subsection 0
         mov r1, r0
         subs r11, r11, #5
@@ -7660,20 +8286,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm337
+        beq.w .Lm375
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm337
+        beq.w .Lm375
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld338:
+.Ld376:
         .subsection 1
-.Lm337:
+.Lm375:
         bl sa1e_rd16_s_k
-        b.w .Ld338
+        b.w .Ld376
         .subsection 0
         mov r1, r0
         subs r11, r11, #6
@@ -7697,7 +8323,7 @@ sa1_engine_run:
         ldrb r3, [r4, #CPU_K]
         strb r2, [r4, #CPU_K]
         cmp r2, r3
-        bne .Lk339
+        bne .Lk377
         subs r11, r11, #4
         ldr r3, [sp, #F_BIAS]
         add r6, r3, r1
@@ -7707,7 +8333,7 @@ sa1_engine_run:
         cmp r0, #64
         blo.w .Lhead
         b.w .Lcont
-.Lk339:
+.Lk377:
         subs r11, r11, #4
         ble.w .Lx0_r1
         b.w .Lsync
@@ -7722,28 +8348,28 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm340
+        bne.w .Lm378
         ubfx r3, r1, #0, #11
         add r2, r3, #2
         lsrs r2, r2, #11
-        bne.w .Lm340
+        bne.w .Lm378
         ldr r2, [sp, #F_IRAM]
         add r2, r2, r3
         ldrh r0, [r2]
         ldrb r3, [r2, #2]
         orr r0, r0, r3, lsl #16
-.Ld341:
+.Ld379:
         .subsection 1
-.Lm340:
+.Lm378:
         bl sa1e_rd24_s
-        b.w .Ld341
+        b.w .Ld379
         .subsection 0
         uxth r1, r0
         lsr r2, r0, #16
         ldrb r3, [r4, #CPU_K]
         strb r2, [r4, #CPU_K]
         cmp r2, r3
-        bne .Lk342
+        bne .Lk380
         subs r11, r11, #6
         ldr r3, [sp, #F_BIAS]
         add r6, r3, r1
@@ -7753,7 +8379,7 @@ sa1_engine_run:
         cmp r0, #64
         blo.w .Lhead
         b.w .Lcont
-.Lk342:
+.Lk380:
         subs r11, r11, #6
         ble.w .Lx0_r1
         b.w .Lsync
@@ -7777,19 +8403,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm343
+        bne.w .Lm381
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm343
+        beq.w .Lm381
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld344:
+.Ld382:
         .subsection 1
-.Lm343:
+.Lm381:
         bl sa1e_wr16_s_b0r
-        b.w .Ld344
+        b.w .Ld382
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7819,20 +8445,20 @@ sa1_engine_run:
         ubfx r3, r1, #13, #11
         ldr r3, [r2, r3, lsl #2]
         cmp r3, #0
-        beq.w .Lm345
+        beq.w .Lm383
         add r2, r1, #1
         lsls r2, r2, #19
-        beq.w .Lm345
+        beq.w .Lm383
         ubfx r2, r1, #0, #13
         add r3, r3, r2
         ldrb r0, [r3]
         ldrb r2, [r3, #1]
         orr r0, r0, r2, lsl #8
-.Ld346:
+.Ld384:
         .subsection 1
-.Lm345:
+.Lm383:
         bl sa1e_rd16_s_k
-        b.w .Ld346
+        b.w .Ld384
         .subsection 0
         str r0, [sp, #F_TMP]
         ldr r3, [sp, #F_BIAS]
@@ -7846,19 +8472,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm347
+        bne.w .Lm385
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm347
+        beq.w .Lm385
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld348:
+.Ld386:
         .subsection 1
-.Lm347:
+.Lm385:
         bl sa1e_wr16_s_b0r
-        b.w .Ld348
+        b.w .Ld386
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7888,16 +8514,16 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm349
+        bne.w .Lm387
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strb r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld350:
+.Ld388:
         .subsection 1
-.Lm349:
+.Lm387:
         bl sa1e_wr8_s
-        b.w .Ld350
+        b.w .Ld388
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7912,19 +8538,19 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm351
+        bne.w .Lm389
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm351
+        beq.w .Lm389
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         strh r0, [r2, r3]
         str r2, [r2, #SA1E_WDIRTY]
-.Ld352:
+.Ld390:
         .subsection 1
-.Lm351:
+.Lm389:
         bl sa1e_wr16_s_b0r
-        b.w .Ld352
+        b.w .Ld390
         .subsection 0
         sub r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -7934,7 +8560,7 @@ sa1_engine_run:
         ldrb r3, [r4, #CPU_K]
         strb r2, [r4, #CPU_K]
         cmp r2, r3
-        bne .Lk353
+        bne .Lk391
         subs r11, r11, #8
         ldr r3, [sp, #F_BIAS]
         add r6, r3, r1
@@ -7944,7 +8570,7 @@ sa1_engine_run:
         cmp r0, #64
         blo.w .Lhead
         b.w .Lcont
-.Lk353:
+.Lk391:
         subs r11, r11, #8
         ble.w .Lx0_r1
         b.w .Lsync
@@ -7961,18 +8587,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm354
+        bne.w .Lm392
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm354
+        beq.w .Lm392
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld355:
+.Ld393:
         .subsection 1
-.Lm354:
+.Lm392:
         bl sa1e_rd16_s_b0
-        b.w .Ld355
+        b.w .Ld393
         .subsection 0
         add r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -8000,18 +8626,18 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm356
+        bne.w .Lm394
         add r2, r1, #1
         lsls r2, r2, #21
-        beq.w .Lm356
+        beq.w .Lm394
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrh r0, [r2, r3]
-.Ld357:
+.Ld395:
         .subsection 1
-.Lm356:
+.Lm394:
         bl sa1e_rd16_s_b0
-        b.w .Ld357
+        b.w .Ld395
         .subsection 0
         add r3, r1, #1
         strh r3, [r4, #CPU_SP]
@@ -8024,15 +8650,15 @@ sa1_engine_run:
         ands r3, r1, #0xf800
         it ne
         cmpne r3, #0x3000
-        bne.w .Lm358
+        bne.w .Lm396
         ldr r2, [sp, #F_IRAM]
         ubfx r3, r1, #0, #11
         ldrb r0, [r2, r3]
-.Ld359:
+.Ld397:
         .subsection 1
-.Lm358:
+.Lm396:
         bl sa1e_rd8_s
-        b.w .Ld359
+        b.w .Ld397
         .subsection 0
         strh r1, [r4, #CPU_SP]
         mov r2, r0
@@ -8040,7 +8666,7 @@ sa1_engine_run:
         ldrb r3, [r4, #CPU_K]
         strb r2, [r4, #CPU_K]
         cmp r2, r3
-        bne .Lk360
+        bne .Lk398
         subs r11, r11, #6
         ldr r3, [sp, #F_BIAS]
         add r6, r3, r1
@@ -8050,7 +8676,7 @@ sa1_engine_run:
         cmp r0, #64
         blo.w .Lhead
         b.w .Lcont
-.Lk360:
+.Lk398:
         subs r11, r11, #6
         ble.w .Lx0_r1
         b.w .Lsync
@@ -8124,7 +8750,7 @@ sa1e_tab:
         .word   .Lh0a_00 + 1
         .word   .Lh0b_00 + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh0d_00 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lh10_00 + 1
@@ -8147,7 +8773,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lh22_00 + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh24_00 + 1
         .word   .Lh25_00 + 1
         .word   .Lh26_00 + 1
         .word   .Lfb + 1
@@ -8179,7 +8805,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lh42_00 + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh44_00 + 1
         .word   .Lh45_00 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
@@ -8195,7 +8821,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh54_00 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
@@ -8228,7 +8854,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lh74_00 + 1
-        .word   .Lfb + 1
+        .word   .Lh75_00 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lh78_00 + 1
@@ -8256,10 +8882,10 @@ sa1e_tab:
         .word   .Lh8e_00 + 1
         .word   .Lh8f_00 + 1
         .word   .Lh90_00 + 1
+        .word   .Lh91_00 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh94_00 + 1
         .word   .Lh95_00 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
@@ -8286,12 +8912,12 @@ sa1e_tab:
         .word   .Lhac_00 + 1
         .word   .Lhad_00 + 1
         .word   .Lhae_00 + 1
-        .word   .Lfb + 1
+        .word   .Lhaf_00 + 1
         .word   .Lhb0_00 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lhb4_00 + 1
         .word   .Lhb5_00 + 1
         .word   .Lfb + 1
         .word   .Lhb7_00 + 1
@@ -8307,7 +8933,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lhc2_00 + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lhc4_00 + 1
         .word   .Lhc5_00 + 1
         .word   .Lhc6_00 + 1
         .word   .Lfb + 1
@@ -8381,7 +9007,7 @@ sa1e_tab:
         .word   .Lh0a_00 + 1
         .word   .Lh0b_00 + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh0d_00 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lh10_00 + 1
@@ -8404,7 +9030,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lh22_00 + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh24_00 + 1
         .word   .Lh25_00 + 1
         .word   .Lh26_00 + 1
         .word   .Lfb + 1
@@ -8485,7 +9111,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lh74_00 + 1
-        .word   .Lfb + 1
+        .word   .Lh75_00 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lh78_00 + 1
@@ -8543,7 +9169,7 @@ sa1e_tab:
         .word   .Lhac_01 + 1
         .word   .Lhad_00 + 1
         .word   .Lhae_01 + 1
-        .word   .Lfb + 1
+        .word   .Lhaf_00 + 1
         .word   .Lhb0_00 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
@@ -8645,7 +9271,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh14_10 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
@@ -8693,7 +9319,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lh42_00 + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh44_00 + 1
         .word   .Lh45_10 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
@@ -8709,7 +9335,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh54_00 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
@@ -8727,7 +9353,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lh64_10 + 1
         .word   .Lh65_10 + 1
-        .word   .Lfb + 1
+        .word   .Lh66_10 + 1
         .word   .Lfb + 1
         .word   .Lh68_10 + 1
         .word   .Lh69_10 + 1
@@ -8773,7 +9399,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh94_00 + 1
         .word   .Lh95_10 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
@@ -8805,7 +9431,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lhb4_00 + 1
         .word   .Lhb5_10 + 1
         .word   .Lfb + 1
         .word   .Lhb7_10 + 1
@@ -8821,7 +9447,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lhc2_00 + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lhc4_00 + 1
         .word   .Lhc5_10 + 1
         .word   .Lhc6_10 + 1
         .word   .Lfb + 1
@@ -8871,7 +9497,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lhf4_00 + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lhf6_10 + 1
         .word   .Lfb + 1
         .word   .Lhf8_00 + 1
         .word   .Lfb + 1
@@ -8902,7 +9528,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lh14_10 + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
         .word   .Lfb + 1
@@ -8984,7 +9610,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lh64_10 + 1
         .word   .Lh65_10 + 1
-        .word   .Lfb + 1
+        .word   .Lh66_10 + 1
         .word   .Lfb + 1
         .word   .Lh68_10 + 1
         .word   .Lh69_10 + 1
@@ -9128,7 +9754,7 @@ sa1e_tab:
         .word   .Lfb + 1
         .word   .Lhf4_00 + 1
         .word   .Lfb + 1
-        .word   .Lfb + 1
+        .word   .Lhf6_10 + 1
         .word   .Lfb + 1
         .word   .Lhf8_00 + 1
         .word   .Lfb + 1
