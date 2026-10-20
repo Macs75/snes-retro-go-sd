@@ -96,6 +96,19 @@
   remembers the pcs it rejected. Super Mario RPG on device (PERF replay):
   windows over budget 34 → 29, the worst 116.0% → 113.1%, mean speed 99.0%,
   late frames 7,777 → 7,390, no window heavier.
+- **Idle skip: a `$4212` wait is skipped in both halves of the line.** `BIT
+  $4212` copies the h-blank bit into V, so a lap in the other half of the line
+  is another lap, and a third of the spans of Mario RPG's vblank wait ran in
+  full. The loop now keeps a proof for each value it reads (one site at a
+  time, the second proof in DTCM), a lap whose first read leaves a stale flag
+  is proven one lap later, and a span that starts on such a flag runs one lap
+  before it is skipped instead of spending a proof. While the SA-1 works, a
+  loop that reads none of its memory is skipped as usual. Host, ten
+  recordings: Mario RPG 42.8% fewer 65816 instructions, Kirby Super Star 1.5%,
+  Star Fox 1.2%, no window heavier in any, the same state every frame. Super
+  Mario RPG on device (PERF replay, 60 fps): windows over budget 29 → 24, over
+  110% 6 → 2, the worst 113.1% → 111.2%, late frames 7,452 → 6,777, 582 more
+  frames drawn; state hashes unchanged.
 
 ## [v0.0.8]
 

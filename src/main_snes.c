@@ -883,10 +883,31 @@ static inline void idle_consume(Snes *s, int *dots) {
   s->hPos += step; *dots -= step;
 }
 
+/* One opcode for real, as run_dots' ordinary path runs it, consumed. False
+ * when that leaves the CPU off an opcode boundary inside the span: a DMA
+ * started (run_dots' started_dma step taken; the burst is run_dots' to run),
+ * or the span ran out. charge: the opcode's. */
+__attribute__((noinline))
+static bool idle_step(Snes *s, int *dots, uint32_t *charge) {
+  idle_sa1_sync(s);
+  apply_irq_match(s);
+  const uint32_t c = run_one_opcode_charge(s);
+  *charge = c;
+  s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
+  if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) {
+    s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft - 2);
+    s->apuDotsAccum += 2; s->hPos += 2; *dots -= 2;
+    return false;
+  }
+  while (s->cpuCyclesLeft && *dots > 0) idle_consume(s, dots);
+  return !s->cpuCyclesLeft && *dots > 0;
+}
+
 /* Observe one lap from the current boundary, opcode by opcode exactly as
  * run_dots' ordinary path would run it. Returns true if it came back to the
  * starting boundary in the starting state, filling the proof. On any other
  * outcome the opcodes it ran are simply the span's own, already accounted. */
+__attribute__((noinline))
 static bool idle_prove(Snes *s, int *dots) {
   IdleSkip *g = &g_idle;
   IdleState start, cur;
@@ -894,33 +915,33 @@ static bool idle_prove(Snes *s, int *dots) {
   if (!idle_code_ok(s, g) || !idle_prepare_reads(s, g)) return false;
   idle_state(s, &start);
   for (int i = 0; i < g->npmem; i++) mem[i] = idle_peek(s, g->pmem_off[i]);
-  const uint16_t sfr0 = g->gsu_poll ? gsu_sfr_peek() : 0;
+  uint16_t sfr0 = g->gsu_poll ? gsu_sfr_peek() : 0;
   IdleState seen[IDLE_MAX_STATES];
   uint8_t seen_ch[IDLE_MAX_STATES];
   int nseen = 0;
   uint32_t lap = 0;
+  bool again = true;
   for (;;) {
     if (nseen == IDLE_MAX_STATES) return false;
     idle_state(s, &seen[nseen++]);
-    idle_sa1_sync(s);
-    apply_irq_match(s);
-    const uint32_t c = run_one_opcode_charge(s);
-    s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
+    uint32_t c;
+    const bool on = idle_step(s, dots, &c);
     lap += c;
     seen_ch[nseen - 1] = (uint8_t)c;
-    if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) {
-      /* run_dots' started_dma step; the burst is run_dots' to run */
-      s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft - 2);
-      s->apuDotsAccum += 2;
-      s->hPos += 2; *dots -= 2;
-      return false;
-    }
-    while (s->cpuCyclesLeft && *dots > 0) idle_consume(s, dots);
-    if (s->cpuCyclesLeft || *dots <= 0) return false;
+    if (!on) return false;
     if (!idle_boundary_ok(s) || lap > 4000) return false;
     idle_state(s, &cur);
     if (cur.pc == start.pc) {
-      if (!idle_state_eq(&cur, &start) || !idle_mem_eq(s, mem)) return false;
+      if (!idle_mem_eq(s, mem)) return false;
+      if (!idle_state_eq(&cur, &start)) {
+        /* a flag the first lap set again from what it read (BIT $4212's V,
+         * set in another part of the line): one more lap, from here */
+        if (!again) return false;
+        again = false;
+        start = cur; nseen = 0; lap = 0;
+        if (g->gsu_poll) sfr0 = gsu_sfr_peek();
+        continue;
+      }
       if (g->gsu_poll) {
         /* The bits of the GSU status the polling instruction can observe:
          * BIT sets only N/V (bits 15/14, or 7/6 of the byte read) and Z from
@@ -965,26 +986,17 @@ static int idle_prove_span(Snes *s, int dots) {
 
 /* Run opcodes for real, as run_dots' ordinary path does, until the CPU is at
  * the armed loop's head (at most the rest of one lap; any DMA, the loop being
- * left, or the span running out stops it). Out of the ITCM skip: it only runs
- * for a GSU poll whose status moved in bits the loop drops (idle_skip_laps). */
+ * left, or the span running out stops it). Out of the ITCM skip, with the
+ * interpreter that runs the opcodes: it only runs for a GSU poll whose status
+ * moved in bits the loop drops (idle_skip_laps). */
 __attribute__((noinline))
 static int idle_align_head(Snes *s, int dots) {
   Cpu *cpu = s->cpu;
   const IdleSkip *g = &g_idle;
   for (int cap = IDLE_MAX_STATES; cpu->pc != g->head; ) {
     if (--cap < 0 || (uint16_t)(cpu->pc - g->head) > g->len) return dots;
-    idle_sa1_sync(s);
-    apply_irq_match(s);
-    const uint32_t c = run_one_opcode_charge(s);
-    s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
-    if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) {
-      /* run_dots' started_dma step; the burst is run_dots' to run */
-      s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft - 2);
-      s->apuDotsAccum += 2; s->hPos += 2;
-      return dots - 2;
-    }
-    while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
-    if (s->cpuCyclesLeft || dots <= 0) return dots;
+    uint32_t c;
+    if (!idle_step(s, &dots, &c)) return dots;
   }
   return dots;
 }
@@ -1332,10 +1344,113 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
 }
 #endif
 
+/* A $4212 loop's span that starts where no stored state matches, its other
+ * reads still holding what the proof read: the flags the last read of $4212
+ * set in another part of the line (BIT's V from h-blank), which the next lap
+ * sets again. So the loop runs for real, as run_dots would, for at most one
+ * lap, and from the first boundary that is a stored state the laps are
+ * skipped. Only if it comes to none is a lap proven from there (the proof's
+ * budget). A loop reading only memory that holds has no such flags: its
+ * state differs because it was entered with other registers, and is proven
+ * at once. In RAM, with the interpreter that runs the lap. */
+__attribute__((noinline))
+static int idle_resume_span(Snes *s, int dots) {
+  Cpu *cpu = s->cpu;
+  const IdleSkip *g = &g_idle;
+  if (!g->hvbjoy || g->gsu_poll || g->kind != IDLE_KIND_RECUR || !idle_mem_eq(s, g->smem))
+    return idle_prove_span(s, dots);
+  for (int n = 0; n < g->nst; n++) {
+    uint32_t c;
+    if ((uint16_t)(cpu->pc - g->head) > g->len || !idle_step(s, &dots, &c)) return dots;
+    for (int i = 0; i < g->nst; i++) {
+      if (g->st[i].pc != cpu->pc || !idle_img_eq((const uint8_t *)&cpu->a, g->st[i].img)) continue;
+      const int r = idle_skip_laps(s, dots);
+      return r >= 0 ? r : idle_prove_span(s, -1 - r);
+    }
+  }
+  return idle_prove_span(s, dots);
+}
+
+/* A loop reading $4212 sees its h-blank bit move twice a line, and BIT copies
+ * that bit into V: a lap in the other part of the line is another lap, which
+ * the stored proof is not (Mario RPG's vblank wait BIT $4212 / BEQ, refused a
+ * third of its spans). So one site at a time keeps a second proof, for the
+ * other value: a span reading that value swaps the two. A proof only says
+ * what the loop does from its states with its reads holding their bytes, all
+ * compared again before any lap is skipped, so the one swapped in is as good
+ * as a new one. A failed proof leaves both as they were. The second proof
+ * is g_idle_alt (idle_skip.h). */
+
+/* The proof between a site and an IdleProof, in ITCM with the span runner
+ * that swaps them (a few hundred times a frame): copied word by word here,
+ * not unrolled and not by a call to memcpy in RAM. An IdleState is 8 words. */
+#define IDLE_PROOF_MOVE(d, p) do {                                           \
+    (d)->hvb_val = (p)->hvb_val; (d)->nst = (p)->nst;                        \
+    (d)->npmem = (p)->npmem; (d)->lap = (p)->lap;                            \
+    uint32_t *d_ = (uint32_t *)(d)->st; const uint32_t *p_ = (const uint32_t *)(p)->st; \
+    _Pragma("GCC unroll 1")                                                  \
+    for (int i_ = 0; i_ < (p)->nst * 8; i_++) d_[i_] = p_[i_];               \
+    _Pragma("GCC unroll 1")                                                  \
+    for (int i_ = 0; i_ < (p)->nst; i_++) (d)->ch[i_] = (p)->ch[i_];         \
+    _Pragma("GCC unroll 1")                                                  \
+    for (int i_ = 0; i_ < (p)->npmem; i_++) {                                \
+      (d)->pmem_off[i_] = (p)->pmem_off[i_]; (d)->smem[i_] = (p)->smem[i_]; \
+    }                                                                        \
+  } while (0)
+_Static_assert(sizeof(IdleState) == 32, "IDLE_PROOF_MOVE copies an IdleState as 8 words");
+#define IDLE_NO_MEMCPY __attribute__((noinline, optimize("no-tree-loop-distribute-patterns", "no-tree-vectorize")))
+static IDLE_NO_MEMCPY void SNES_ITCM_IDLE idle_proof_save(const IdleSkip *g, IdleProof *p) { IDLE_PROOF_MOVE(p, g); }
+static IDLE_NO_MEMCPY void SNES_ITCM_IDLE idle_proof_load(IdleSkip *g, const IdleProof *p) { IDLE_PROOF_MOVE(g, p); }
+static IDLE_NO_MEMCPY void SNES_ITCM_IDLE idle_proof_copy(IdleProof *d, const IdleProof *p) { IDLE_PROOF_MOVE(d, p); }
+
+/* No second proof for v yet: prove one, from the proof's budget, the stored
+ * lap set aside meanwhile (the cold half, in RAM: a few a frame). */
+__attribute__((noinline))
+static int idle_hvb_prove(Snes *s, IdleSkip *g, int dots, bool sa1_busy) {
+  uint8_t *budget = sa1_busy ? &g_idle_sa1_budget : &g_idle_hvb_budget;
+  if (*budget == 0 || !idle_boundary_ok(s)) return dots;
+  (*budget)--;
+  IdleProof keep;
+  idle_proof_save(g, &keep);
+  g->snap_ok = false;
+  if (!idle_prove(s, &dots)) {            /* the stored lap back */
+    idle_proof_load(g, &keep);
+    g->snap_ok = true;
+    return dots;
+  }
+  if (!(g->alt && g_idle_alt->owner == g)) {
+    if (g_idle_alt->owner) g_idle_alt->owner->alt = false;
+    g_idle_alt->owner = g; g->alt = true;
+  }
+  idle_proof_copy(g_idle_alt, &keep);
+  return -1 - dots;
+}
+
+/* The span reads v from $4212, the active site's proof another value.
+ * Returns the dots to end the span with, or -1-dots to go on with a proof
+ * for v (swapped in, or made from the proof's budget). */
+__attribute__((noinline))
+static int SNES_ITCM_IDLE idle_hvb_proof(Snes *s, IdleSkip *g, uint8_t v, int dots, bool sa1_busy) {
+  if (g->gsu_poll || g->kind != IDLE_KIND_RECUR) return dots;
+  if (g->alt && g_idle_alt->owner == g && g_idle_alt->hvb_val == v) {
+    IdleProof keep;
+    idle_proof_save(g, &keep);
+    idle_proof_load(g, g_idle_alt);
+    idle_proof_copy(g_idle_alt, &keep);
+    return -1 - dots;
+  }
+  return idle_hvb_prove(s, g, dots, sa1_busy);
+}
+
 __attribute__((noinline))
 static int SNES_ITCM_IDLE idle_run_span(Snes *s, int dots) {
   if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) return dots;
-  const bool sa1_busy = !idle_sa1_quiet(s);
+  /* While the SA-1 works, a loop that reads memory it shares runs lap by lap
+   * (idle_sa1_awake_span). One that reads none of it is skipped as usual:
+   * the SA-1 cannot reach WRAM or the 65816's registers, and it runs only at
+   * the contacts, which such a loop makes none of, and at the events that
+   * bound a span -- so inside the span it runs nothing either way. */
+  const bool sa1_busy = !idle_sa1_quiet(s) && g_idle.sa1_rd != 0;
   if (sa1_busy && (uint8_t)(g_idle.sa1_rd - 1) >= IDLE_SA1_READS) return dots;
   if (idle_hirq_in(s, s->hPos, dots)) return dots;
   /* the opcode in flight finishes first: pure arithmetic, as run_dots does */
@@ -1346,7 +1461,11 @@ static int SNES_ITCM_IDLE idle_run_span(Snes *s, int dots) {
     /* $4212 must hold over the span, and be what the proof read */
     const uint8_t v = snes_hvbjoy_at(s, s->hPos);
     if (v != snes_hvbjoy_at(s, (uint16_t)(s->hPos + dots - 1))) return dots;
-    if (g_idle.snap_ok && v != g_idle.hvb_val) return dots;
+    if (g_idle.snap_ok && v != g_idle.hvb_val) {
+      const int r = idle_hvb_proof(s, &g_idle, v, dots, sa1_busy);
+      if (r >= 0) return r;
+      dots = -1 - r;
+    }
   }
 #if SNES_SA1
   if (sa1_busy) return g_idle.kind == IDLE_KIND_RECUR ? idle_sa1_awake_span(s, dots) : dots;
@@ -1357,7 +1476,7 @@ static int SNES_ITCM_IDLE idle_run_span(Snes *s, int dots) {
   if (!g_idle.snap_ok) return idle_prove_span(s, dots);
   const int r = idle_skip_laps(s, dots);
   if (r >= 0) return r;
-  return idle_prove_span(s, -1 - r);      /* a stored lap exists but not here */
+  return idle_resume_span(s, -1 - r);     /* a stored lap exists but not here */
 }
 #endif
 

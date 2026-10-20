@@ -1,0 +1,13 @@
+# tools/host_regress.py's default set: ROM paths, each with its recording
+# (same name, .rec). The regress/ copies are input-free attracts or play
+# recordings made for the SA-1 / GSU work.
+~/retro/roms/snes/regress/smrpg.sfc
+~/retro/roms/snes/regress/kdl3.sfc
+~/retro/roms/snes/Kirby Super Star (USA).sfc
+~/retro/roms/snes/regress/ff3.sfc
+~/retro/roms/snes/Adventures of Batman & Robin, The (USA).sfc
+~/retro/roms/snes/Castlevania - Vampire's Kiss (E).sfc
+~/retro/roms/snes/Super Mario Kart (USA).sfc
+~/retro/roms/snes/Teenage Mutant Ninja Turtles IV - Turtles in Time (USA).sfc
+~/retro/roms/snes/regress/starfox.sfc
+~/retro/roms/snes/regress/yoshi.sfc

@@ -111,6 +111,9 @@ typedef struct {
    * WRAM it reads (the same all lap: the loop writes nothing), and its charge */
   bool     snap_ok;
   uint8_t  nst;
+  /* a $4212 loop: the shared second proof (idle_hvb_proof in main_snes.c)
+   * holds this site's lap for the other value it reads */
+  bool     alt;
   IdleState st[IDLE_MAX_STATES];
   uint8_t  ch[IDLE_MAX_STATES];   /* charge of the opcode at each boundary */
   uint8_t  npmem;
@@ -142,6 +145,19 @@ typedef struct {
 
 enum { IDLE_KIND_RECUR = 0, IDLE_KIND_ACCUM = 1 };
 
+/* The second proof of a $4212 loop, for the other value it reads, kept for
+ * one site at a time (owner, whose alt is set): see idle_hvb_proof in
+ * main_snes.c. In DTCM with the sites. */
+typedef struct {
+  IdleSkip *owner;
+  uint8_t  hvb_val, nst, npmem;
+  uint32_t lap;
+  IdleState st[IDLE_MAX_STATES];
+  uint8_t  ch[IDLE_MAX_STATES];
+  uint32_t pmem_off[IDLE_MAX_MEM + IDLE_MAX_IDX * 2];
+  uint8_t  smem[IDLE_MAX_MEM + IDLE_MAX_IDX * 2];
+} IdleProof;
+
 #ifndef SNES_IDLE_ACCUM
 #define SNES_IDLE_ACCUM 1
 #endif
@@ -163,6 +179,7 @@ typedef struct {
  * because some games alternate between two identical wait loops. */
 extern IdleSkip *g_idle_sites;
 extern IdleSkip *g_idlep;
+extern IdleProof *g_idle_alt;
 #define g_idle (*g_idlep)
 extern IdleStats g_idle_stats;
 extern uint8_t g_idle_budget;   /* proving laps left this frame, refilled at the NMI */
@@ -171,8 +188,10 @@ extern uint8_t g_idle_gsu_budget;   /* the same for GSU poll sites, so they neve
 extern uint8_t g_idle_sa1_budget;   /* and for a loop polling the SA-1 while it works,
                                      * entered with other registers at each request */
 extern uint8_t g_idle_span_budget;  /* idle_span_sample's site searches left this frame */
+extern uint8_t g_idle_hvb_budget;   /* and the second proofs of $4212 loops (main_snes.c) */
 
-/* once, after snes_init: move the state to DTCM (no-op off the device) */
+/* once, after snes_init: move the state (sites, second proof) to DTCM (no-op
+ * off the device) */
 void idle_alloc(void);
 
 void idle_reset(void);

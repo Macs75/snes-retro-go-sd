@@ -1874,11 +1874,13 @@ uint64_t g_tile_opaque_px[2];
  * work. If it is zero, the sub screen draws something the main screen does not
  * and there is nothing to share.
  *
- * COUNTED: 42,191 sub passes, of which **0** draw a layer the main screen also
- * draws. The sub screen is never a second pass over the same content -- it is a
- * different layer entirely. So the "single-pass main+sub" idea has nothing to
- * collapse, and the subscreen's 33 tiles per line are irreducible work in this
- * design, not duplication. Closed before it was written. */
+ * COUNTED, Zelda 3 rain: 42,191 sub passes, of which **0** draw a layer the
+ * main screen also draws -- there the sub screen is a different layer.
+ * Super Mario RPG's sub screen is BG1 and the sprites, both also on the main
+ * screen: handing the main buffer to the sub screen after them (exact, every
+ * frame's picture unchanged) took 5-12% off the PPU per drawn frame in those
+ * scenes on the device, but they were not the heavy windows, and the 280 bytes
+ * it added to ppu_runLine cost the others ~0.4%: no net gain, not kept. */
 uint32_t g_sub_also_main, g_sub_only;
 #endif
 
@@ -4014,24 +4016,26 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
   }
 
 #ifdef HOST_BUILD
+  /* HOST_PPU_LOG=1: the PPU's setup at line 1 when it changes; =all: every frame */
   if (getenv("HOST_PPU_LOG") && y == 1) {
     static uint32 prev;
+    const bool all = getenv("HOST_PPU_LOG")[0] == 'a';
     uint32 key = (uint32)ppu->mode
       | ((uint32)ppu->bgLayer[0].bigTiles << 3)
       | ((uint32)ppu->bgLayer[1].bigTiles << 4)
       | ((uint32)ppu->mosaicEnabled << 8)
       | ((uint32)ppu->screenEnabled[0] << 16)
       | ((uint32)ppu->screenEnabled[1] << 24);
-    if (key != prev) {
+    if (key != prev || all) {
       prev = key;
       fprintf(stderr,
-              "ppu: mode=%u blank=%d bright=%u clip=%u prevent=%u "
+              "ppu: frame=%lu mode=%u blank=%d bright=%u clip=%u prevent=%u "
               "big=%d%d%d%d mosaic=%02x size=%u start=%u bgmos=%d%d%d%d "
               "tm=%02x ts=%02x tw=%02x tsw=%02x "
-              "math=%d%d%d%d%d%d addsub=%d hires=%d sprites=%d direct=%d "
+              "math=%d%d%d%d%d%d addsub=%d sub=%d half=%d hires=%d sprites=%d direct=%d "
               "win=%u-%u/%u-%u extra=%u "
               "cgram0=%03x cgram1=%03x c32=%03x c64=%03x c96=%03x\n",
-              ppu->mode, (int)ppu->forcedBlank, ppu->brightness,
+              (unsigned long)ppu->snes->frames, ppu->mode, (int)ppu->forcedBlank, ppu->brightness,
               ppu->clipMode, ppu->preventMathMode,
               (int)ppu->bgLayer[0].bigTiles, (int)ppu->bgLayer[1].bigTiles,
               (int)ppu->bgLayer[2].bigTiles, (int)ppu->bgLayer[3].bigTiles,
@@ -4043,7 +4047,7 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
               (int)ppu->mathEnabled[0], (int)ppu->mathEnabled[1],
               (int)ppu->mathEnabled[2], (int)ppu->mathEnabled[3],
               (int)ppu->mathEnabled[4], (int)ppu->mathEnabled[5],
-              (int)ppu->addSubscreen, (int)ppu->pseudoHires,
+              (int)ppu->addSubscreen, (int)ppu->subtractColor, (int)ppu->halfColor, (int)ppu->pseudoHires,
               (int)ppu->lineHasSprites, (int)ppu->directColor,
               ppu->window1left, ppu->window1right,
               ppu->window2left, ppu->window2right,

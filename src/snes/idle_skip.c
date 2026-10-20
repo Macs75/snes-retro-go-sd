@@ -9,13 +9,16 @@
 /* allocated by idle_alloc() before anything reads them */
 IdleSkip *g_idle_sites;
 IdleSkip *g_idlep;
+IdleProof *g_idle_alt;
 #else
 static IdleSkip s_sites_static[IDLE_SITES];
+static IdleProof s_alt_static;
 IdleSkip *g_idle_sites = s_sites_static;
 IdleSkip *g_idlep = &s_sites_static[0];
+IdleProof *g_idle_alt = &s_alt_static;
 #endif
 IdleStats g_idle_stats;
-uint8_t g_idle_budget, g_idle_gsu_budget, g_idle_sa1_budget, g_idle_span_budget;
+uint8_t g_idle_budget, g_idle_gsu_budget, g_idle_sa1_budget, g_idle_span_budget, g_idle_hvb_budget;
 static uint32_t s_frame;
 static uint32_t s_span_pc[4];   /* idle_span_sample: the last spans' pcs, [0] the last */
 
@@ -34,6 +37,11 @@ void idle_alloc(void) {
   if (!p) p = ram_calloc(1, n);
   assert(p);
   g_idle_sites = (IdleSkip *)p; g_idlep = &g_idle_sites[0];
+  void *q = dtc_malloc(sizeof(IdleProof));
+  if (!q || q == (void *)-1) q = ahb_calloc(1, sizeof(IdleProof));
+  if (!q) q = ram_calloc(1, sizeof(IdleProof));
+  assert(q);
+  g_idle_alt = (IdleProof *)q;
 #endif
 }
 
@@ -72,8 +80,9 @@ static void site_clear(IdleSkip *g) {
 void idle_reset(void) {
   for (int i = 0; i < IDLE_SITES; i++) site_clear(&g_idle_sites[i]);
   g_idlep = &g_idle_sites[0];
+  g_idle_alt->owner = NULL;
   g_idle_stats = (IdleStats){0};
-  g_idle_budget = g_idle_gsu_budget = g_idle_sa1_budget = g_idle_span_budget = 0;
+  g_idle_budget = g_idle_gsu_budget = g_idle_sa1_budget = g_idle_span_budget = g_idle_hvb_budget = 0;
   for (int i = 0; i < 4; i++) s_span_pc[i] = 0xffffffffu;
   s_frame = 0;
   for (int i = 0; i < 4; i++) s_reject[i] = 0xffffffffu;
@@ -541,6 +550,7 @@ void idle_nmi_sample(Snes *s) {
   g_idle_gsu_budget = 2;
   g_idle_sa1_budget = 128;
   g_idle_span_budget = 8;
+  g_idle_hvb_budget = 2;
   s_frame++;
   idle_sample(s);
 }

@@ -178,6 +178,16 @@ confirmed those stayed byte-identical. The §5.1 blow-up only happens when the
 inlined code carries *loop-carried* state that competes for the hot loop's
 registers.
 
+**Shared layers between main and sub screen: tried, not kept.** Zelda's sub
+screen never draws a layer the main screen draws (0 of 42,191 sub passes),
+but Super Mario RPG's is BG1 and the sprites, both also on the main screen.
+Handing the main buffer to the sub screen after those layers is exact (every
+frame's picture hash unchanged) and took 5-12% off the PPU per drawn frame in
+those scenes on the device -- which were not the heavy windows. Its 280 bytes
+in `ppu_runLine` (first a 32-byte shift of everything behind the PPU window,
+then, re-laid out without it, still ~0.4% on the other scenes) left no net
+gain. A renderer change pays only where the frame is PPU-bound.
+
 ### 4.5 Super FX (GSU): per-game block code, and the PLOT that called `memcpy` — branch `superfx-poc`
 
 The GSU is the ZSNES 2 core (`src/snes/gsu_zsnes/`): one table dispatch per
@@ -637,6 +647,38 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   cleared. Fewer resyncs and inline BW-RAM writes: 30.8 instructions, 4.4%
   fewer device cycles per SA-1 instruction (9% in the heaviest window) -- the
   profiled frames overstated the gain.
+- **A loop reading `$4212` has two proven laps, not one.** Its h-blank bit
+  moves twice a line and `BIT` copies it into V, so a span in the other half
+  of the line is another lap: Mario RPG's vblank wait was refused 241,672
+  times by frame 3,720. A second proof per value was not enough by itself
+  (65816 instructions +17% on the host): a span starts with V as the last lap
+  of the *other* half left it, so its state matches no stored one and every
+  attempt to prove from there failed and took the frame's two proofs. Three
+  parts made it pay: a proof that comes back with a different flag gets one
+  more lap from there; a `$4212` loop's span that matches nothing runs one
+  lap for real before it asks for a proof; and the second proofs have their
+  own budget. Then -42.8% on the host. The resume step was also applied to
+  every loop at first and cost FF3 1.1% in one window -- a loop that reads
+  only WRAM has no stale flag, its other state is a new entry -- so it is
+  `$4212` loops only. On device the heavy windows lost 2-4 points, the
+  skipped laps' ~70 cycles each; they are now SA-1 work (34-41%) and the
+  65816's own (38-43%).
+- **Room is found by size, not by moving the overlays.** The coprocessor
+  overlays are not pinned: they follow the core's bss, and Star Fox's GSU
+  blocks end ~1 KB short of RAM_EMU's end, so 2.2 KB of new code broke the
+  link. Most of it was codegen, not code: the proof copies' struct loops
+  unrolled to 1.1 KB each (word loops with `GCC unroll 1` and no
+  `memcpy` recognition: ~130 B), and three copies of the run-one-opcode loop
+  (one shared `idle_step`). What runs every span (the swap and its copies)
+  sits in ITCM next to the span runner, without a call out to RAM; what runs
+  opcodes sits in RAM with the C interpreter it calls; the proof slot is in
+  DTCM. Star Fox's margin 468 B, ITCM 3.4 KB free.
+- **Make the regression check cheap enough to run every time.** The ten-game
+  host check took 30 minutes: four replays per game (hashes and counts in
+  separate runs, old and new), the unchanged baseline re-run every round, one
+  replay at a time. `tools/host_regress.py` runs each build once per game,
+  caches the results by the binary's contents, and runs six at a time: 39 s,
+  0.2 s cached.
 
 ---
 
@@ -840,6 +882,10 @@ unreferenced.
 ## 6. Tooling quick reference
 
 ```sh
+# Host regression, two builds over the ten-recording set (tools/host_regress.set):
+# same state (REC/hash, SA-1 every frame), per-window instruction counts; ~40 s
+tools/host_regress.py --old <baseline snes_host> --new snes_host -j 6
+
 # Host bit-exact replay (correctness). .rec sits next to the ROM.
 make host
 SNES_REPLAY=1 SNES_FRAMES=<rec_len> SNES_FAST=1 ./snes_host "<rom>.sfc" \
@@ -873,5 +919,7 @@ the opcode census (and disables opcode batching, so it can overflow ITCM — a
 diagnostic build only). Its per-opcode cost is therefore that of a path normal
 builds don't run: to split the 65816 figure of a normal build, use
 `PERF=1 PERF_CPUB=1` (batch / events / idle / rest, `PROF/cpub`, summed per phase
-by `tools/prof_log_compare.py`). A change to the Thumb-2 engines or bridges is
+by `tools/prof_log_compare.py`). Two PERF logs of an SA-1 replay, window by
+window: `tools/prof_sa1_compare.py`; the PPU's split per drawn frame of a
+`PERF_PPU=1` log: `tools/prof_ppu_windows.py`. A change to the Thumb-2 engines or bridges is
 checked with `tools/qemu_vs_host.py` (gwemu against the host, per recording).
