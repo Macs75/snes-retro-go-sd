@@ -428,7 +428,7 @@ sa1_engine_run:
 
 @ cpu_setFlags(r0) in native mode (the engine never runs in emulation mode),
 @ clocks already charged; the table for the new m / x, and a resync (r5 = 0)
-@ for an IRQ the I flag may now let in
+@ when I is cleared: an IRQ it may now let in
 .Lsetp:
         ubfx    r2, r0, #7, #1
         lsl     r10, r2, #31
@@ -444,7 +444,11 @@ sa1_engine_run:
         ubfx    r2, r0, #3, #1
         strb    r2, [r4, #CPU_D]
         ubfx    r2, r0, #2, #1
+        ldrb    r3, [r4, #CPU_I]
         strb    r2, [r4, #CPU_I]
+        cmp     r3, r2
+        it      hi
+        movhi   r5, #0                  @ I cleared: an IRQ may now be let in
         and     r2, r0, #1
         strb    r2, [r4, #CPU_C]
         tst     r0, #0x10
@@ -456,7 +460,6 @@ sa1_engine_run:
         movt    r3, #:upper16:sa1e_tab
         add     lr, r3, r2, lsl #10
         str     lr, [sp, #F_TAB]
-        mov.w   r5, #0
         cmp r11, #0
         ble.w .Lx0
         cmp r6, r5
@@ -1573,7 +1576,7 @@ sa1_engine_run:
 .Ld44:
         .subsection 1
 .Lm43:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld44
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
@@ -1631,7 +1634,7 @@ sa1_engine_run:
 .Ld48:
         .subsection 1
 .Lm47:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld48
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
@@ -1671,7 +1674,7 @@ sa1_engine_run:
 .Ld50:
         .subsection 1
 .Lm49:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld50
         .subsection 0
         subs r11, r11, #5
@@ -1704,7 +1707,7 @@ sa1_engine_run:
 .Ld52:
         .subsection 1
 .Lm51:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld52
         .subsection 0
         subs r11, r11, #4
@@ -1740,7 +1743,7 @@ sa1_engine_run:
 .Ld54:
         .subsection 1
 .Lm53:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld54
         .subsection 0
         subs r11, r11, #6
@@ -1773,7 +1776,7 @@ sa1_engine_run:
 .Ld56:
         .subsection 1
 .Lm55:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld56
         .subsection 0
         subs r11, r11, #5
@@ -1830,7 +1833,7 @@ sa1_engine_run:
 .Ld60:
         .subsection 1
 .Lm59:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld60
         .subsection 0
         ldrh r2, [r4, #CPU_DP]
@@ -1949,7 +1952,7 @@ sa1_engine_run:
 .Ld66:
         .subsection 1
 .Lm65:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld66
         .subsection 0
         subs r11, r11, #7
@@ -1992,7 +1995,7 @@ sa1_engine_run:
 .Ld68:
         .subsection 1
 .Lm67:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld68
         .subsection 0
         tst r1, #0x80000000
@@ -2030,7 +2033,7 @@ sa1_engine_run:
 .Ld70:
         .subsection 1
 .Lm69:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld70
         .subsection 0
         subs r11, r11, #6
@@ -2070,7 +2073,7 @@ sa1_engine_run:
 .Ld72:
         .subsection 1
 .Lm71:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld72
         .subsection 0
         tst r1, #0x80000000
@@ -2111,7 +2114,7 @@ sa1_engine_run:
 .Ld74:
         .subsection 1
 .Lm73:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld74
         .subsection 0
         subs r11, r11, #7
@@ -2154,7 +2157,7 @@ sa1_engine_run:
 .Ld76:
         .subsection 1
 .Lm75:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld76
         .subsection 0
         tst r1, #0x80000000
@@ -2192,7 +2195,7 @@ sa1_engine_run:
 .Ld78:
         .subsection 1
 .Lm77:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld78
         .subsection 0
         subs r11, r11, #6
@@ -2232,7 +2235,7 @@ sa1_engine_run:
 .Ld80:
         .subsection 1
 .Lm79:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld80
         .subsection 0
         tst r1, #0x80000000
@@ -2273,7 +2276,7 @@ sa1_engine_run:
 .Ld82:
         .subsection 1
 .Lm81:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld82
         .subsection 0
         subs r11, r11, #6
@@ -2308,7 +2311,7 @@ sa1_engine_run:
 .Ld84:
         .subsection 1
 .Lm83:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld84
         .subsection 0
         subs r11, r11, #5
@@ -4113,7 +4116,7 @@ sa1_engine_run:
 .Ld182:
         .subsection 1
 .Lm181:
-        bl sa1e_wr16_s_lr
+        bl sa1e_wr16_lr
         b.w .Ld182
         .subsection 0
         subs r11, r11, #10
@@ -4176,7 +4179,7 @@ sa1_engine_run:
 .Ld186:
         .subsection 1
 .Lm185:
-        bl sa1e_wr16_s_lr
+        bl sa1e_wr16_lr
         b.w .Ld186
         .subsection 0
         tst r1, #0x80000000
@@ -4228,7 +4231,7 @@ sa1_engine_run:
 .Ld190:
         .subsection 1
 .Lm189:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld190
         .subsection 0
         subs r11, r11, #8
@@ -4282,7 +4285,7 @@ sa1_engine_run:
 .Ld194:
         .subsection 1
 .Lm193:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld194
         .subsection 0
         tst r1, #0x80000000
@@ -4447,7 +4450,7 @@ sa1_engine_run:
 .Ld206:
         .subsection 1
 .Lm205:
-        bl sa1e_wr16_s_lr
+        bl sa1e_wr16_lr
         b.w .Ld206
         .subsection 0
         subs r11, r11, #8
@@ -4494,7 +4497,7 @@ sa1_engine_run:
 .Ld210:
         .subsection 1
 .Lm209:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld210
         .subsection 0
         subs r11, r11, #6
@@ -5353,7 +5356,7 @@ sa1_engine_run:
 .Ld258:
         .subsection 1
 .Lm257:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld258
         .subsection 0
         subs r11, r11, #5
@@ -5386,7 +5389,7 @@ sa1_engine_run:
 .Ld260:
         .subsection 1
 .Lm259:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld260
         .subsection 0
         subs r11, r11, #4
@@ -5497,7 +5500,7 @@ sa1_engine_run:
 .Ld266:
         .subsection 1
 .Lm265:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld266
         .subsection 0
         subs r11, r11, #5
@@ -5530,7 +5533,7 @@ sa1_engine_run:
 .Ld268:
         .subsection 1
 .Lm267:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld268
         .subsection 0
         subs r11, r11, #4
@@ -5758,7 +5761,7 @@ sa1_engine_run:
 .Ld280:
         .subsection 1
 .Lm279:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld280
         .subsection 0
         subs r11, r11, #5
@@ -5791,7 +5794,7 @@ sa1_engine_run:
 .Ld282:
         .subsection 1
 .Lm281:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld282
         .subsection 0
         subs r11, r11, #4
@@ -5829,7 +5832,7 @@ sa1_engine_run:
 .Ld284:
         .subsection 1
 .Lm283:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld284
         .subsection 0
         subs r11, r11, #7
@@ -5872,7 +5875,7 @@ sa1_engine_run:
 .Ld286:
         .subsection 1
 .Lm285:
-        bl sa1e_wr16_s_l
+        bl sa1e_wr16_l
         b.w .Ld286
         .subsection 0
         tst r1, #0x80000000
@@ -5910,7 +5913,7 @@ sa1_engine_run:
 .Ld288:
         .subsection 1
 .Lm287:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld288
         .subsection 0
         subs r11, r11, #6
@@ -5950,7 +5953,7 @@ sa1_engine_run:
 .Ld290:
         .subsection 1
 .Lm289:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld290
         .subsection 0
         tst r1, #0x80000000
@@ -6517,7 +6520,7 @@ sa1_engine_run:
 .Ld314:
         .subsection 1
 .Lm313:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld314
         .subsection 0
         add r8, r8, #1
@@ -6573,7 +6576,7 @@ sa1_engine_run:
 .Ld318:
         .subsection 1
 .Lm317:
-        bl sa1e_wr8_s
+        bl sa1e_wr8_l
         b.w .Ld318
         .subsection 0
         sub r8, r8, #1
@@ -8704,8 +8707,8 @@ sa1_engine_run:
         STUB    sa1e_rd24_s, sa1e_rd24_b0, "nop"
 
 @ writes: sa1e_wr8 / sa1e_wr16 / sa1e_wr16r return non-zero for a write to
-@ the SA-1's registers, which can move the read map or raise an interrupt:
-@ then r5 = 0, a resync before the next opcode. Sa1Run.wdebt gets the debt
+@ an SA-1 register that can move the read map or raise an interrupt, or that
+@ stopped a run-ahead: then r5 = 0, a resync before the next opcode. Sa1Run.wdebt gets the debt
 @ the instruction started with (r11: its extra cycles come at its end), for
 @ the run-ahead (sa1.c, sa1_ahead).
         .macro  WSTUB name, call, prep
@@ -8730,6 +8733,55 @@ sa1_engine_run:
         WSTUB   sa1e_wr16_s_b0r, sa1e_wr16r, "uxth r3, r0; add r2, r1, #1; uxth r2, r2"
         WSTUB   sa1e_wr16_s_l, sa1e_wr16, "uxth r3, r0; add r2, r1, #1; bic r2, r2, #0xff000000"
         WSTUB   sa1e_wr16_s_lr, sa1e_wr16r, "uxth r3, r0; add r2, r1, #1; bic r2, r2, #0xff000000"
+
+@ 24-bit writes: BW-RAM banks $40-$4F straight to the read map's page (the
+@ same bytes sa1_cpu_write writes; no page during a type 1 character
+@ conversion or for BW-RAM under 8 KB) and the lap marked, as the I-RAM
+@ path does; the rest, or a word crossing a page, the C stubs above
+        .thumb_func
+sa1e_wr8_l:
+        and     r3, r1, #0xf00000
+        cmp     r3, #0x400000
+        bne     sa1e_wr8_s
+        ldr     r2, [sp, #F_SA1]
+        ubfx    r3, r1, #13, #11
+        ldr     r3, [r2, r3, lsl #2]
+        cmp     r3, #0
+        beq     sa1e_wr8_s
+        ubfx    r2, r1, #0, #13
+        strb    r0, [r3, r2]
+        b       .Lwr_bw_done
+
+        .macro  WR16L name, slow
+        .thumb_func
+\name:
+        and     r3, r1, #0xf00000
+        cmp     r3, #0x400000
+        bne     \slow
+        ubfx    r2, r1, #0, #13
+        movw    r3, #0x1fff
+        cmp     r2, r3
+        beq     \slow
+        ldr     r3, [sp, #F_SA1]
+        ubfx    ip, r1, #13, #11
+        ldr     r3, [r3, ip, lsl #2]
+        cmp     r3, #0
+        beq     \slow
+        add     r3, r3, r2
+        strb    r0, [r3]
+        lsr     ip, r0, #8
+        strb    ip, [r3, #1]
+        b       .Lwr_bw_done
+        .endm
+
+        WR16L   sa1e_wr16_l, sa1e_wr16_s_l
+        WR16L   sa1e_wr16_lr, sa1e_wr16_s_lr
+.Lwr_bw_done:
+        ldr     r2, [sp, #F_IRAM]
+        str     r2, [r2, #SA1E_WDIRTY]
+        mov     r2, lr
+        ldr     lr, [sp, #F_TAB]
+        bx      r2
 
 @ the dispatch tables: m = 0/1, x = 0/1, 256 entries each
         .section .rodata.sa1_engine,"a",%progbits

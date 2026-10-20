@@ -83,6 +83,19 @@
   and arm it if it polls SA-1 memory. Host: Mario RPG's recording 13.1% fewer
   65816 instructions (its intro window 7,527 → 1,188 a frame), Kirby Super Star
   0.2%, no window heavier, the same state every frame.
+- **SA-1 engine: fewer resyncs, BW-RAM writes inline.** REP/SEP/PLP resync
+  only when they clear the I flag, writes to the SA-1's arithmetic, bit-reader
+  and vector registers no longer resync, and writes to BW-RAM banks `$40-$4F`
+  go straight to memory instead of through C. Counted on gwemu: 36.7 → 30.8 ARM
+  instructions per SA-1 instruction. Super Mario RPG on device (PERF replay):
+  engine cycles per SA-1 instruction 79.2 → 75.7, the SA-1's share 18.7% →
+  18.0%, no window heavier; state hashes unchanged.
+- **The new SA-1 wait-loop search no longer costs where it finds nothing.** It
+  ran its 8 searches a frame in scenes without such a loop and failed each
+  time: now it searches only at a pc a recent span already started at, and
+  remembers the pcs it rejected. Super Mario RPG on device (PERF replay):
+  windows over budget 34 → 29, the worst 116.0% → 113.1%, mean speed 99.0%,
+  late frames 7,777 → 7,390, no window heavier.
 
 ## [v0.0.8]
 

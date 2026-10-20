@@ -133,7 +133,7 @@ def WR8(kind):
     s = ['tst r1, #0x400000', 'bne.w %s' % m] if kind == 'l' else []
     s += iram_test(m) + ['ldr r2, [sp, #F_IRAM]', 'ubfx r3, r1, #0, #11', 'strb r0, [r2, r3]',
                          'str r2, [r2, #SA1E_WDIRTY]']
-    return s + [d + ':'] + cold([m + ':', 'bl sa1e_wr8_s', 'b.w %s' % d])
+    return s + [d + ':'] + cold([m + ':', 'bl sa1e_wr8_%s' % ('l' if kind == 'l' else 's'), 'b.w %s' % d])
 
 
 def WR16(kind, rev):
@@ -142,7 +142,8 @@ def WR16(kind, rev):
     s += iram_test(m) + ['add r2, r1, #1', 'lsls r2, r2, #21', 'beq.w %s' % m,
                          'ldr r2, [sp, #F_IRAM]', 'ubfx r3, r1, #0, #11', 'strh r0, [r2, r3]',
                          'str r2, [r2, #SA1E_WDIRTY]']
-    return s + [d + ':'] + cold([m + ':', 'bl sa1e_wr16_s_%s%s' % (kind, 'r' if rev else ''), 'b.w %s' % d])
+    stub = 'sa1e_wr16_l%s' % ('r' if rev else '') if kind == 'l' else 'sa1e_wr16_s_%s%s' % (kind, 'r' if rev else '')
+    return s + [d + ':'] + cold([m + ':', 'bl ' + stub, 'b.w %s' % d])
 
 
 # --- addressing modes: r1 = the low address; returns (code, kind) -----------
@@ -909,7 +910,7 @@ HEADCORE_B
 
 @ cpu_setFlags(r0) in native mode (the engine never runs in emulation mode),
 @ clocks already charged; the table for the new m / x, and a resync (r5 = 0)
-@ for an IRQ the I flag may now let in
+@ when I is cleared: an IRQ it may now let in
 .Lsetp:
         ubfx    r2, r0, #7, #1
         lsl     r10, r2, #31
@@ -925,7 +926,11 @@ HEADCORE_B
         ubfx    r2, r0, #3, #1
         strb    r2, [r4, #CPU_D]
         ubfx    r2, r0, #2, #1
+        ldrb    r3, [r4, #CPU_I]
         strb    r2, [r4, #CPU_I]
+        cmp     r3, r2
+        it      hi
+        movhi   r5, #0                  @ I cleared: an IRQ may now be let in
         and     r2, r0, #1
         strb    r2, [r4, #CPU_C]
         tst     r0, #0x10
@@ -937,7 +942,6 @@ HEADCORE_B
         movt    r3, #:upper16:sa1e_tab
         add     lr, r3, r2, lsl #10
         str     lr, [sp, #F_TAB]
-        mov.w   r5, #0
 ''' + '\n'.join(code(NEXT(0)))
 
 
@@ -1002,8 +1006,8 @@ STUBS = r'''
         STUB    sa1e_rd24_s, sa1e_rd24_b0, "nop"
 
 @ writes: sa1e_wr8 / sa1e_wr16 / sa1e_wr16r return non-zero for a write to
-@ the SA-1's registers, which can move the read map or raise an interrupt:
-@ then r5 = 0, a resync before the next opcode. Sa1Run.wdebt gets the debt
+@ an SA-1 register that can move the read map or raise an interrupt, or that
+@ stopped a run-ahead: then r5 = 0, a resync before the next opcode. Sa1Run.wdebt gets the debt
 @ the instruction started with (r11: its extra cycles come at its end), for
 @ the run-ahead (sa1.c, sa1_ahead).
         .macro  WSTUB name, call, prep
@@ -1028,6 +1032,55 @@ STUBS = r'''
         WSTUB   sa1e_wr16_s_b0r, sa1e_wr16r, "uxth r3, r0; add r2, r1, #1; uxth r2, r2"
         WSTUB   sa1e_wr16_s_l, sa1e_wr16, "uxth r3, r0; add r2, r1, #1; bic r2, r2, #0xff000000"
         WSTUB   sa1e_wr16_s_lr, sa1e_wr16r, "uxth r3, r0; add r2, r1, #1; bic r2, r2, #0xff000000"
+
+@ 24-bit writes: BW-RAM banks $40-$4F straight to the read map's page (the
+@ same bytes sa1_cpu_write writes; no page during a type 1 character
+@ conversion or for BW-RAM under 8 KB) and the lap marked, as the I-RAM
+@ path does; the rest, or a word crossing a page, the C stubs above
+        .thumb_func
+sa1e_wr8_l:
+        and     r3, r1, #0xf00000
+        cmp     r3, #0x400000
+        bne     sa1e_wr8_s
+        ldr     r2, [sp, #F_SA1]
+        ubfx    r3, r1, #13, #11
+        ldr     r3, [r2, r3, lsl #2]
+        cmp     r3, #0
+        beq     sa1e_wr8_s
+        ubfx    r2, r1, #0, #13
+        strb    r0, [r3, r2]
+        b       .Lwr_bw_done
+
+        .macro  WR16L name, slow
+        .thumb_func
+\name:
+        and     r3, r1, #0xf00000
+        cmp     r3, #0x400000
+        bne     \slow
+        ubfx    r2, r1, #0, #13
+        movw    r3, #0x1fff
+        cmp     r2, r3
+        beq     \slow
+        ldr     r3, [sp, #F_SA1]
+        ubfx    ip, r1, #13, #11
+        ldr     r3, [r3, ip, lsl #2]
+        cmp     r3, #0
+        beq     \slow
+        add     r3, r3, r2
+        strb    r0, [r3]
+        lsr     ip, r0, #8
+        strb    ip, [r3, #1]
+        b       .Lwr_bw_done
+        .endm
+
+        WR16L   sa1e_wr16_l, sa1e_wr16_s_l
+        WR16L   sa1e_wr16_lr, sa1e_wr16_s_lr
+.Lwr_bw_done:
+        ldr     r2, [sp, #F_IRAM]
+        str     r2, [r2, #SA1E_WDIRTY]
+        mov     r2, lr
+        ldr     lr, [sp, #F_TAB]
+        bx      r2
 '''
 
 

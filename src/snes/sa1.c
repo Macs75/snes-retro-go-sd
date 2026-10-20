@@ -981,6 +981,14 @@ uint32_t sa1e_rd24_b0(Sa1* s, uint32_t lo) {
   return v | (uint32_t)sa1e_read(s, (lo + 2) & 0xffff) << 16;
 }
 
+/* A register the engine's state never depends on: a write to it needs no
+ * resync -- the arithmetic unit, the bit reader, the vectors, the bit-map
+ * format (read through C at each access) */
+static inline bool sa1_reg_passive(uint16_t adr) {
+  return (adr >= 0x2250 && adr <= 0x2254) || (adr >= 0x2258 && adr <= 0x225b) ||
+         (adr >= 0x2203 && adr <= 0x2208) || (adr >= 0x220c && adr <= 0x220f) || adr == 0x223f;
+}
+
 int sa1e_wr8(Sa1* s, uint32_t adr, uint32_t val) {
   const uint32_t a = adr & 0x40f800;
   if (a == 0 || a == 0x3000) {
@@ -989,7 +997,8 @@ int sa1e_wr8(Sa1* s, uint32_t adr, uint32_t val) {
     return 0;
   }
   sa1_cpu_write(s, adr, (uint8_t)val);
-  return (adr & 0x400000) == 0 && (adr & 0xfe00) == 0x2200;
+  return (adr & 0x400000) == 0 && (adr & 0xfe00) == 0x2200 &&
+         (!sa1_reg_passive((uint16_t)adr) || s->run.stop);
 }
 
 int sa1e_wr16(Sa1* s, uint32_t lo, uint32_t hi, uint32_t val) {

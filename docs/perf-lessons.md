@@ -620,6 +620,23 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   same pc is no loop), and arming every loop found let a `$4212` wait take the
   frame's two proofs from the vblank wait the NMI had found (the first windows
   +25%); arming only loops that poll SA-1 memory left no window heavier.
+- **A search that fails every frame is a fixed cost: count its failures.** On
+  the device the first version took window 8 from 124% to 114% but made 47
+  windows 1-3 points heavier with the same instructions, laps and span-runner
+  time: it ran its 8 searches a frame and failed (96,681 rejects over the
+  recording, against 724), because Mario RPG's own code often starts two
+  spans within 32 bytes and 4 remembered rejects could not hold ~200 pcs a
+  window. Requiring the pc to repeat one of the 3 span starts before the last,
+  and a 64-entry reject table, left 3,327 and no window heavier.
+- **Count the ARM instructions before guessing at stalls.** The SA-1 cost
+  48-99 device cycles per instruction. `tools/qemu_exec_profile.py` logs every
+  block gwemu runs over a few frames and counts SA-1 instructions through the
+  engine's dispatch table: 37 ARM instructions each, ~1.9 cycles apiece -- the
+  work, not memory. 40% of it was entering, resyncing and leaving the engine,
+  and most resyncs came from REP/SEP, which never needed one unless I was
+  cleared. Fewer resyncs and inline BW-RAM writes: 30.8 instructions, 4.4%
+  fewer device cycles per SA-1 instruction (9% in the heaviest window) -- the
+  profiled frames overstated the gain.
 
 ---
 
