@@ -132,6 +132,7 @@ void snes_runFrame(Snes* snes);
 uint8_t snes_readBBus(Snes* snes, uint8_t adr);
 void snes_writeBBus(Snes* snes, uint8_t adr, uint8_t val);
 uint8_t snes_read(Snes* snes, uint32_t adr);
+uint8_t snes_hvbjoy_at(const Snes* snes, uint16_t h);   /* $4212 at dot h, no side effect */
 void snes_write(Snes* snes, uint32_t adr, uint8_t val);
 uint8_t snes_cpuRead(Snes* snes, uint32_t adr);
 #ifndef SNES_PAGEMAP

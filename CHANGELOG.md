@@ -57,6 +57,15 @@
   99.0%), late frames 1,397 → 1,173. Host: Mario RPG's attract runs 5.5% fewer
   65816 instructions, Kirby's Dream Land 3's 0.4%, both with the same state
   every frame.
+- **Idle skip: loops reading up to three SA-1 addresses, and `$4212` polls.**
+  While the SA-1 works, the 65816's wait loop is now skipped lap by lap when
+  it reads up to three addresses the SA-1 shares (one before), the SA-1
+  brought to each read's dot in turn. And a loop polling `$4212` (vblank,
+  hblank, auto-joypad busy) is skipped over a span in which that value holds.
+  Super Mario RPG's intro and attract on device (PERF replay of a gameplay
+  recording): windows over budget 59 → 54, over 110% 40 → 22, the worst
+  140.8% → 130.7%, mean speed 93.5% → 96.1%, the 65816's instructions a third
+  fewer; the replay's state hashes equal the host's.
 
 ## [v0.0.8]
 

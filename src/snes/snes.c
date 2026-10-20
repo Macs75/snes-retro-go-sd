@@ -617,6 +617,18 @@ static uint16_t SwapInputBits(uint16_t x) {
  * rather than counted down every dot. Star Fox's briefing waits for it to SET
  * before reading the pad, and hung while it never did. Out of line, placed
  * after the BUS window (snes_core.ld), so snes_read keeps its size. */
+/* $4212 as a read at dot h of this line returns it, with no side effect: the
+ * idle skip (main_snes.c) holds a loop polling it only over a span where this
+ * is the same at its first and last dot -- vblank and hblank change only on
+ * span boundaries (dots 0 and 1024), the auto-joypad busy bit at most once. */
+uint8_t snes_hvbjoy_at(const Snes* snes, uint16_t h) {
+  uint8_t val = snes->autoJoyTimer &&
+                (uint32_t)(uint16_t)(snes->vPos - snes->autoJoyTimer) * 1364 + h < 4224;
+  val |= (h >= 1024) << 6;
+  val |= snes->inVblank << 7;
+  return val | (snes->openBus & 0x3e);
+}
+
 __attribute__((noinline)) static uint8_t snes_autoJoyBusy(const Snes* snes) {
   return snes->autoJoyTimer &&
          (uint32_t)(uint16_t)(snes->vPos - snes->autoJoyTimer) * 1364 + snes->hPos < 4224;

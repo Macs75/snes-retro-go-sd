@@ -71,7 +71,7 @@ static uint8_t mirror_bank(uint8_t bank) {
   return (uint8_t)(bank ^ 0x80);
 }
 
-enum { MEM_NO = 0, MEM_WRAM, MEM_ROM, MEM_RDNMI, MEM_GSUSFR, MEM_SA1 };
+enum { MEM_NO = 0, MEM_WRAM, MEM_ROM, MEM_RDNMI, MEM_GSUSFR, MEM_SA1, MEM_HVBJOY };
 
 /* What a read at bank:off reaches. WRAM gives its offset into Snes.ram. ROM is
  * accepted only for the two plain mappings, where it is constant. $4210 is
@@ -85,6 +85,7 @@ static int classify(const Snes *s, uint8_t bank, uint16_t off, uint32_t *ram_off
   if (bank == 0x7e || bank == 0x7f) { *ram_off = ((uint32_t)(bank & 1) << 16) | off; return MEM_WRAM; }
   if (b < 0x40 && off < 0x2000)      { *ram_off = off; return MEM_WRAM; }
   if (b < 0x40 && off == 0x4210)     return MEM_RDNMI;
+  if (b < 0x40 && off == 0x4212)     return MEM_HVBJOY;     /* HVBJOY: see snes_hvbjoy_at */
   if (s->cart && s->cart->sa1) {            /* SA-1: its own map (sa1_snes_read) */
     /* I-RAM, the BW-RAM window and banks $40-$4F: memory the SA-1 shares,
      * which only it or a 65816 write changes. Read through sa1_peek; the span
@@ -195,10 +196,9 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
   uint16_t fwd[IDLE_MAX_LEN];            /* forward branch targets to check */
   int nb = 0, nf = 0;
   bool saw_pc = false, modx = false, mody = false, sep_rep = false;
-  out->nmem = 0; out->nidx = 0; out->rdnmi = false; out->uses_db = false; out->uses_dp = false;
+  out->nmem = 0; out->nidx = 0; out->rdnmi = false; out->hvbjoy = false; out->uses_db = false; out->uses_dp = false;
   out->gsu_poll = false;
   out->gsu_and = 0;
-  out->sa1_pc = 0xffff;
   out->sa1_rd = 0;
   uint16_t gsu_lda_next = 0xffff;                  /* the instruction after a status LDA */
   uint32_t ro;
@@ -273,6 +273,10 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
             if (w != 1) return false;                            /* a 16-bit read takes $4211 too */
             out->rdnmi = true;
           }
+          if (c == MEM_HVBJOY) {
+            if (w != 1) return false;                            /* nor $4213 */
+            out->hvbjoy = true;
+          }
           if (c == MEM_GSUSFR) {
             if (k == 0) {                                        /* one GSU status read a loop */
               if (out->gsu_poll) return false;
@@ -284,7 +288,14 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
               if (op == 0xad || op == 0xaf) gsu_lda_next = (uint16_t)(q + len);   /* LDA abs / long */
             }
           }
-          if (c == MEM_SA1 && out->sa1_pc != q) { out->sa1_pc = q; out->sa1_rd++; }
+          if (c == MEM_SA1) {
+            int r = 0;
+            while (r < (out->sa1_rd & 0x7f) && out->sa1_pc[r] != q) r++;
+            if (r == (out->sa1_rd & 0x7f)) {
+              if (r < IDLE_SA1_READS) { out->sa1_pc[r] = q; out->sa1_rd++; }
+              else out->sa1_rd |= 0x80;                          /* too many to follow */
+            }
+          }
           if (c == MEM_WRAM || c == MEM_SA1) {
             int j;
             for (j = 0; j < out->nmem; j++) if (out->mem_off[j] == off) break;
@@ -358,7 +369,7 @@ bool idle_prepare_reads(Snes *s, IdleSkip *g) {
       uint16_t a = (uint16_t)(ea + k);
       if (a < ea) return false;
       int c = classify(s, mb, a, &off);
-      if (c == MEM_NO || c == MEM_RDNMI || c == MEM_GSUSFR) return false;
+      if (c == MEM_NO || c == MEM_RDNMI || c == MEM_GSUSFR || c == MEM_HVBJOY) return false;
       if (c == MEM_SA1) g->sa1_rd |= 0x80;                       /* which instruction: not known here */
       if (c == MEM_WRAM || c == MEM_SA1) {
         if (n == (int)(sizeof g->pmem_off / sizeof g->pmem_off[0])) return false;

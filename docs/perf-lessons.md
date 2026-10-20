@@ -582,6 +582,17 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   budget. Every change since is checked on the six host recordings, on Mario
   RPG and Kirby's Dream Land 3 with `tools/host_attract_compare.sh` (same state
   every frame, no window heavier), and on gwemu, before a device build.
+- **A second game finds the next limits.** Super Mario RPG's heavy scenes
+  (the scrolling isometric maps) were 65816-bound on loops the skip refused:
+  one reading two or three SA-1 addresses a lap, and `$4212` polls. Per lap
+  the SA-1 now goes to each read's dot in turn (a change seen at read r: the
+  stored lap up to it, then the CPU runs from there). `$4212` is exact over a
+  span: vblank and hblank change only on its boundaries, the auto-joypad bit
+  at a known dot, so the value at the span's first and last dot must equal the
+  proof's. Device: windows over budget 59 -> 54, over 110% 40 -> 22.
+- **More proven loops need more site slots.** With the new loops accepted, 8
+  idle sites evicted each other and five Kirby Super Star windows got heavier
+  on the host (`tools/host_attract_compare.sh` flagged them); 12 sites, none.
 
 ---
 

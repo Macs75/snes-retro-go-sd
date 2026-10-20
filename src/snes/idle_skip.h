@@ -48,6 +48,7 @@
 #define IDLE_MAX_MEM   4
 
 #define IDLE_MAX_STATES 16
+#define IDLE_SA1_READS  3
 
 /* The CPU state at one instruction boundary of the loop: a raw copy of Cpu
  * from `a` to `stopped`. Those 27 bytes are A X Y SP PC DP K DB, every flag
@@ -59,7 +60,7 @@ typedef struct {
   uint8_t  img[IDLE_IMG_LEN + 1];   /* at offset 2: img+14 (the flags) is word-aligned */
 } __attribute__((aligned(4))) IdleState;
 
-#define IDLE_SITES 8
+#define IDLE_SITES 12
 #define IDLE_MAX_IDX 4
 
 typedef struct {
@@ -79,6 +80,10 @@ typedef struct {
   uint8_t  nidx;
   struct { uint8_t bank, reg, w, dpmode; uint16_t base; } idx[IDLE_MAX_IDX];
   bool     rdnmi;         /* reads $4210: idle only while the NMI flag is clear */
+  /* reads $4212 (vblank, hblank, auto-joypad busy): idle only in a span over
+   * which it holds, and holds what the proof read (hvb_val) */
+  bool     hvbjoy;
+  uint8_t  hvb_val;
   /* Super FX: the loop polls the GSU status word ($3030/$3031, one read).
    * It changes only when the GSU runs (line events, span boundaries), so the
    * proof snapshots the bits the polling instruction can observe and laps are
@@ -92,11 +97,11 @@ typedef struct {
    * every slice while it runs; with the head bits unchanged, whole laps from
    * the head are still the same laps (idle_skip_laps). */
   uint16_t gsu_and, gsu_hmask, gsu_hsnap;
-  /* SA-1: the loop's instruction that reads memory the SA-1 shares, and how
-   * many do (0x80 set: an indexed one, address known only at proof time).
-   * With exactly one, laps are skipped while the SA-1 runs too
-   * (idle_sa1_awake_span in main_snes.c). */
-  uint16_t sa1_pc;
+  /* SA-1: the loop's instructions that read memory the SA-1 shares, and how
+   * many (0x80 set: an indexed one, address known only at proof time, or more
+   * than IDLE_SA1_READS). With 1..IDLE_SA1_READS, laps are skipped while the
+   * SA-1 runs too (idle_sa1_awake_span in main_snes.c). */
+  uint16_t sa1_pc[IDLE_SA1_READS];
   uint8_t  sa1_rd;
   bool     code_ram;      /* the loop's code is in WRAM: compared every span    */
   uint8_t  ncode;

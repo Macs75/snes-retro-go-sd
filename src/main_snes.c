@@ -941,6 +941,7 @@ static bool idle_prove(Snes *s, int *dots) {
       }
       for (int i = 0; i < nseen; i++) { g->st[i] = seen[i]; g->ch[i] = seen_ch[i]; }
       g->nst = (uint8_t)nseen;
+      if (g->hvbjoy) g->hvb_val = snes_hvbjoy_at(s, s->hPos);   /* what the lap read (constant in the span) */
       for (int i = 0; i < g->npmem; i++) g->smem[i] = mem[i];
       g->lap = lap;
       g->snap_ok = true;
@@ -1170,6 +1171,44 @@ static int SNES_ITCM_IDLE idle_accum_span(Snes *s, int dots) {
  * its read finding the SA-1 already there. If catching up raised the 65816's
  * IRQ or NMI, the 65816 must not see it before that read: the lap runs here
  * up to and through the read with the lines as they were. */
+/* The CPU from boundary i to boundary j of the stored lap, as idle_skip_laps
+ * steps it (whole opcodes: the read at j is not reached). Returns the dots. */
+#ifndef HOST_BUILD
+__attribute__((section(".sa1ovl.text")))
+#endif
+static uint32_t idle_step_to(Snes *s, const IdleSkip *g, int i, int j) {
+  uint32_t adv = 0;
+  for (int ii = i; ii != j; ) {
+    const int n = ii + 1 == g->nst ? 0 : ii + 1;
+    idle_img_put(s->cpu, &g->st[n]);
+    s->cpu->pc = g->st[n].pc;
+    adv += g->ch[ii];
+    ii = n;
+  }
+  s->hPos = (uint16_t)(s->hPos + adv);
+  s->apuDotsAccum += adv;
+  return adv;
+}
+
+/* Bringing the SA-1 to read j's dot raised the 65816's IRQ or NMI: up to the
+ * read the lap is the stored one, then the read runs with the lines as they
+ * were (the 65816 sees them only after it), then they are back. */
+#ifndef HOST_BUILD
+__attribute__((section(".sa1ovl.text")))
+#endif
+static int idle_sa1_read_held(Snes *s, const IdleSkip *g, int i, int j, int dots, bool irq0, bool nmi0) {
+  Cpu *cpu = s->cpu;
+  const bool irq1 = cpu->irqWanted, nmi1 = cpu->nmiWanted;
+  dots -= (int)idle_step_to(s, g, i, j);
+  cpu->irqWanted = irq0; cpu->nmiWanted = nmi0;
+  apply_irq_match(s);
+  const uint32_t c = run_one_opcode_charge(s);
+  s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
+  while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
+  cpu->irqWanted = irq1; cpu->nmiWanted = nmi1;
+  return dots;
+}
+
 #ifndef HOST_BUILD
 __attribute__((section(".sa1ovl.text")))   /* only an SA-1 cart runs it: in its overlay */
 #endif
@@ -1191,18 +1230,26 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
     if (!idle_prove(s, &dots)) return dots;
     i = 0;                                /* back at the proof's first boundary */
   }
-  if (g->sa1_rd != 1) return dots;
-  uint32_t off = 0;                       /* the read's dot, from this boundary */
-  for (int j = i, n = 0; g->st[j].pc != g->sa1_pc; j = j + 1 == g->nst ? 0 : j + 1) {
-    if (++n > g->nst) return dots;
+  if (g->sa1_rd < 1 || g->sa1_rd > IDLE_SA1_READS) return dots;
+  /* the lap's SA-1 reads from this boundary, in order: their boundaries and
+   * their dots (a read the stable lap branches around reads nothing) */
+  int nrd = 0;
+  uint8_t rj[IDLE_SA1_READS];
+  uint32_t roff[IDLE_SA1_READS];
+  for (int j = i, n = 0, off = 0; n < g->nst; n++) {
+    for (int r = 0; r < g->sa1_rd; r++)
+      if (g->st[j].pc == g->sa1_pc[r]) { rj[nrd] = (uint8_t)j; roff[nrd++] = (uint32_t)off; break; }
     off += g->ch[j];
+    j = j + 1 == g->nst ? 0 : j + 1;
   }
+  if (nrd == 0) return dots;
   Sa1 *sa1 = s->cart->sa1;
   const int L = (int)g->lap;
   /* Polling only the SA-1's messages ($2300/$2301, which only its register
-   * writes change): the SA-1 runs ahead over all the span's laps in one go,
-   * stopping at the write the 65816 would see (sa1_ahead) */
-  bool regs = dots >= 2 * L;
+   * writes change), with one read a lap: the SA-1 runs ahead over all the
+   * span's laps in one go, stopping at the write the 65816 would see
+   * (sa1_ahead) */
+  bool regs = nrd == 1 && dots >= 2 * L;
   for (int j = 0; regs && j < g->npmem; j++) {
     const uint32_t o = g->pmem_off[j];
     if ((o & IDLE_MEM_SA1) && (uint16_t)o != 0x2300 && (uint16_t)o != 0x2301 && (uint16_t)o != 0x230e) regs = false;
@@ -1211,10 +1258,11 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
    * from what they hold now */
   if (regs) regs = idle_mem_eq(s, g->smem);
   while (dots >= L) {
-    const bool irq0 = cpu->irqWanted, nmi0 = cpu->nmiWanted;
     int k = -1;
     if (regs) {
       regs = false;
+      const bool irq0 = cpu->irqWanted, nmi0 = cpu->nmiWanted;
+      const uint32_t off = roff[0];
       const int n = dots / L;                                  /* whole laps */
       const int nr = n + ((int)off < dots - n * L);            /* reads: the last, partial lap's too */
       k = sa1_ahead(sa1, s->vPos, (uint16_t)(s->hPos + off), (uint16_t)L, nr);
@@ -1249,24 +1297,26 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
         s->cpuCyclesLeft = (uint8_t)left;
         return dots;
       }
-      /* else lap k reads the change, the SA-1 already at its read */
-    }
-    if (k < 0) sa1_sync(sa1, s->vPos, (uint16_t)(s->hPos + off));
-    if (cpu->irqWanted != irq0 || cpu->nmiWanted != nmi0) {
-      const bool irq1 = cpu->irqWanted, nmi1 = cpu->nmiWanted;
-      cpu->irqWanted = irq0; cpu->nmiWanted = nmi0;
-      for (;;) {
-        const uint16_t pc = cpu->pc;
-        apply_irq_match(s);
-        const uint32_t c = run_one_opcode_charge(s);
-        s->cpuCyclesLeft = (uint8_t)(s->cpuCyclesLeft + c);
-        while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
-        if (pc == g->sa1_pc || s->cpuCyclesLeft || dots <= 0) break;
+      if (k >= 0) {
+        /* lap k reads the change, the SA-1 already at its read */
+        if (cpu->irqWanted != irq0 || cpu->nmiWanted != nmi0)
+          return idle_sa1_read_held(s, g, i, rj[0], dots, irq0, nmi0);
+        return dots;
       }
-      cpu->irqWanted = irq1; cpu->nmiWanted = nmi1;
-      return dots;
     }
-    if (k >= 0 || !idle_mem_eq(s, g->smem)) return dots;
+    /* lap by lap: the SA-1 to each read's dot in turn, the bytes compared */
+    for (int r = 0; r < nrd; r++) {
+      const bool irq0 = cpu->irqWanted, nmi0 = cpu->nmiWanted;
+      sa1_sync(sa1, s->vPos, (uint16_t)(s->hPos + roff[r]));
+      if (cpu->irqWanted != irq0 || cpu->nmiWanted != nmi0)
+        return idle_sa1_read_held(s, g, i, rj[r], dots, irq0, nmi0);
+      if (!idle_mem_eq(s, g->smem)) {
+        /* read r sees a change: up to it the lap is the stored one (the reads
+         * before it saw the stored bytes, checked above), then the CPU runs
+         * from read r, the SA-1 already at its dot */
+        return dots - idle_step_to(s, g, i, rj[r]);
+      }
+    }
     if (sa1_asleep(sa1)) {                /* asleep now: the ordinary skip */
       const int r = idle_skip_laps(s, dots);
       return r >= 0 ? r : -1 - r;
@@ -1286,12 +1336,18 @@ __attribute__((noinline))
 static int SNES_ITCM_IDLE idle_run_span(Snes *s, int dots) {
   if (s->dma->dmaBusy || s->dma->hdmaTimer > 0) return dots;
   const bool sa1_busy = !idle_sa1_quiet(s);
-  if (sa1_busy && g_idle.sa1_rd != 1) return dots;
+  if (sa1_busy && (uint8_t)(g_idle.sa1_rd - 1) >= IDLE_SA1_READS) return dots;
   if (idle_hirq_in(s, s->hPos, dots)) return dots;
   /* the opcode in flight finishes first: pure arithmetic, as run_dots does */
   while (s->cpuCyclesLeft && dots > 0) idle_consume(s, &dots);
   if (dots <= 0) return dots;
   if (s->vIrqEnabled && s->vPos == s->vTimer) return dots;
+  if (g_idle.hvbjoy) {
+    /* $4212 must hold over the span, and be what the proof read */
+    const uint8_t v = snes_hvbjoy_at(s, s->hPos);
+    if (v != snes_hvbjoy_at(s, (uint16_t)(s->hPos + dots - 1))) return dots;
+    if (g_idle.snap_ok && v != g_idle.hvb_val) return dots;
+  }
 #if SNES_SA1
   if (sa1_busy) return g_idle.kind == IDLE_KIND_RECUR ? idle_sa1_awake_span(s, dots) : dots;
 #endif

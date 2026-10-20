@@ -3,14 +3,15 @@
 # unthrottled and windowless, for N frames: is the machine state the same every
 # frame (SA1_STATELOG, an SA-1 cart: WRAM, I-RAM, BW-RAM, both CPUs), and how
 # much did each run (FRAME_STATS: 65816 / SA-1 instructions run per frame,
-# summed, and per window of W frames).
-#   tools/host_attract_compare.sh <rom.sfc> <frames> <old snes_host> <new snes_host> [W=120]
+# summed, and per window of W frames). REPLAY=1: replay the ROM's recording
+# (same name, .rec) instead of the attract.
+#   [REPLAY=1] tools/host_attract_compare.sh <rom.sfc> <frames> <old snes_host> <new snes_host> [W=120]
 set -e
 ROM=$1; N=$2; OLD=$3; NEW=$4; W=${5:-120}
 T=$(mktemp -d)
 for b in old new; do
   BIN=$OLD; [ $b = new ] && BIN=$NEW
-  ( cd "$(dirname "$ROM")" && SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy SNES_FRAMES=$N \
+  ( cd "$(dirname "$ROM")" && env SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy SNES_FRAMES=$N ${REPLAY:+SNES_REPLAY=1} \
       FRAME_STATS=$T/fs_$b.txt SA1_STATELOG=$T/sl_$b.txt timeout 900 "$BIN" "$(basename "$ROM")" >/dev/null 2>&1 ) || true
 done
 python3 - "$T" "$W" <<'EOF'
