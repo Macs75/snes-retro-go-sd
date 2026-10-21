@@ -721,6 +721,27 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   test together cost less than the lookup alone had: Kirby 0.2 points below
   the build without the search, Mario RPG 0.5 points lighter. Star Fox's
   margin is 20 B.
+- **A wait loop may write: what matters is whether a byte changed.** Dragon
+  Ball Z's SA-1 waits in a command dispatcher that stores the handler's
+  address and pushes X every lap; the proof refused any lap that wrote, so
+  82% of its instructions (~40K a frame, 0 skipped) were that loop. A write
+  of the byte already there changes nothing, so the lap is still a repeat:
+  the C write paths now mark the lap only on a change. The engine's inline
+  I-RAM stores mark every lap, and a compare in each would cost every store
+  (§4.11, the watch); instead its loop-head check returns 5 when the CPU
+  repeated but the lap wrote, C runs one lap with the compare, and a head
+  where that failed is not tried again until the next event (`wfail`), so a
+  loop that really changes memory goes back to C once per event, not per
+  lap. SA-1 instructions -93.7%, the fight 13 -> 50-60 fps.
+- **A template that can only skip from the head gains little when the spans
+  are short.** The same game's 65816 waits for the NMI stepping a random
+  number (`$62 = $62 * 5 + $11` in a JSL'd routine, 58% of its instructions
+  in the fight). An accumulator template for it was exact once it checked
+  the routine's return address (the game calls it from elsewhere too), but
+  saved 7%: the line's events cut spans to 510 and 282 dots, a lap is 378,
+  and a template aligns to the head before it skips whole laps. The generic
+  skip does not lose this way because it stores the proven state at every
+  boundary. Dropped: per-game code for that gain was not worth it.
 
 ---
 

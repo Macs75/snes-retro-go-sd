@@ -213,11 +213,6 @@ sa1_engine_run:
         ldrb r3, [r4, #CPU_K]
         cmp r2, r3
         bne.w .Larm672
-        ldrb r2, [r0, #RUN_DIRTY]
-        ldr r3, [sp, #F_IRAM]
-        ldr r3, [r3, #SA1E_WDIRTY]
-        orrs r2, r2, r3
-        bne.w .Larm672
         ldr r2, [r0, #RUN_EXTEV]
         ldr r3, [r0, #RUN_LAPEV]
         cmp r2, r3
@@ -254,7 +249,17 @@ sa1_engine_run:
         ldrb r3, [r4, #CPU_E]
         cmp r2, r3
         bne.w .Larm672
-        mov.w r0, #3
+        ldrb r2, [r0, #RUN_DIRTY]
+        ldr r3, [sp, #F_IRAM]
+        ldr r3, [r3, #SA1E_WDIRTY]
+        orrs r2, r2, r3
+        it eq
+        moveq.w r0, #3
+        beq.w .Lexit_r1
+        ldrh r2, [r0, #RUN_WFAIL]
+        cmp r2, r1
+        beq.w .Larm672
+        mov.w r0, #5
         b.w .Lexit_r1
 .Larm672:
         strh r1, [r0, #RUN_CANDPC]
@@ -336,11 +341,6 @@ sa1_engine_run:
         ldrb r3, [r4, #CPU_K]
         cmp r2, r3
         bne.w .Larm673
-        ldrb r2, [r0, #RUN_DIRTY]
-        ldr r3, [sp, #F_IRAM]
-        ldr r3, [r3, #SA1E_WDIRTY]
-        orrs r2, r2, r3
-        bne.w .Larm673
         ldr r2, [r0, #RUN_EXTEV]
         ldr r3, [r0, #RUN_LAPEV]
         cmp r2, r3
@@ -377,7 +377,17 @@ sa1_engine_run:
         ldrb r3, [r4, #CPU_E]
         cmp r2, r3
         bne.w .Larm673
-        mov.w r0, #3
+        ldrb r2, [r0, #RUN_DIRTY]
+        ldr r3, [sp, #F_IRAM]
+        ldr r3, [r3, #SA1E_WDIRTY]
+        orrs r2, r2, r3
+        it eq
+        moveq.w r0, #3
+        beq.w .Lexit_r1
+        ldrh r2, [r0, #RUN_WFAIL]
+        cmp r2, r1
+        beq.w .Larm673
+        mov.w r0, #5
         b.w .Lexit_r1
 .Larm673:
         strh r1, [r0, #RUN_CANDPC]

@@ -162,9 +162,12 @@ static uint8_t cpu_read_raw(Cpu* cpu, uint32_t adr) {
 
 static inline void cpu_write(Cpu* cpu, uint32_t adr, uint8_t val) {
   const uint32_t a = adr & 0x40f800;
-  if (a == 0 || a == 0x3000) {        /* I-RAM, as in cpu_read: a write marks the lap */
-    *g_sa1_lapdirty = 1;
-    g_sa1_iram[adr & 0x7ff] = val;
+  if (a == 0 || a == 0x3000) {        /* I-RAM, as in cpu_read: a write that changes a byte marks the lap */
+    uint8_t* p = &g_sa1_iram[adr & 0x7ff];
+    if (*p != val) {
+      *g_sa1_lapdirty = 1;
+      *p = val;
+    }
     return;
   }
   sa1_cpu_write((Sa1*) cpu->mem, adr, val);

@@ -23,5 +23,6 @@
 #define RUN_WDEBT       92
 #define RUN_STOP        96
 #define RUN_WATCH       97
+#define RUN_WFAIL       98
 
 #endif

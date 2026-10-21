@@ -29,9 +29,10 @@ unaligned halfword faults; I-RAM (DTCM) and the code page (ROM) take them.
 
 The wait-loop proof (sa1.c, sa1_loop_head) is done here after every jump back
 of 1-64 bytes in the bank, on this engine's own snapshot (Sa1Run.asnap):
-return 3 when a lap recurred exactly. Returns 0 debt spent, 1 C runs the next
+return 3 when a lap recurred exactly, 5 when it recurred but wrote (C runs one
+lap, sa1.c's sa1_write_proof). Returns 0 debt spent, 1 C runs the next
 instruction (an interrupt, WAI / STP, emulation mode, code outside the map),
-3 proven. Opcodes left to C (BRK, COP, RTI, WAI, STP, XCE, decimal ADC / SBC,
+3 proven, 5 prove in C. Opcodes left to C (BRK, COP, RTI, WAI, STP, XCE, decimal ADC / SBC,
 the memory opcode forms not in ASM_MEM / ASM_FORMS) go through sa1cpu_thumb2_fallback with the
 state flushed.
 
@@ -990,15 +991,20 @@ def headcore(tag):
     arm = L('arm')
     s = ['ldr r0, [sp, #F_RUN]', 'ldrh r2, [r0, #RUN_CANDPC]', 'cmp r2, r1', 'bne.w %s' % arm,
          'ldrb r2, [r0, #RUN_CANDK]', 'ldrb r3, [r4, #CPU_K]', 'cmp r2, r3', 'bne.w %s' % arm,
-         'ldrb r2, [r0, #RUN_DIRTY]', 'ldr r3, [sp, #F_IRAM]', 'ldr r3, [r3, #SA1E_WDIRTY]', 'orrs r2, r2, r3',
-         'bne.w %s' % arm, 'ldr r2, [r0, #RUN_EXTEV]', 'ldr r3, [r0, #RUN_LAPEV]', 'cmp r2, r3', 'bne.w %s' % arm]
+         'ldr r2, [r0, #RUN_EXTEV]', 'ldr r3, [r0, #RUN_LAPEV]', 'cmp r2, r3', 'bne.w %s' % arm]
     for i, r in enumerate(('r7', 'r8', 'r9', 'r10')):
         s += ['ldr r2, [r0, #(RUN_AS + %d)]' % (4 * i), 'cmp r2, %s' % r, 'bne.w %s' % arm]
     s += ['ldr r2, [r0, #(RUN_AS + 16)]', 'ldrh r3, [r4, #CPU_SP]', 'cmp r2, r3', 'bne.w %s' % arm]
     for i, off in enumerate((16, 20, 24)):
         s += ['ldr r2, [r0, #(RUN_AS + %d)]' % (20 + 4 * i), 'ldr r3, [r4, #%d]' % off, 'cmp r2, r3', 'bne.w %s' % arm]
+    # the same CPU at the head: a lap that wrote nothing is proven (3); one that
+    # wrote is run again in C, where a write of the byte already there does not
+    # mark the lap (5), unless that failed at this head since the last event
     s += ['ldrb r2, [r0, #(RUN_AS + 32)]', 'ldrb r3, [r4, #CPU_E]', 'cmp r2, r3', 'bne.w %s' % arm,
-          'mov.w r0, #3', 'b.w .Lexit_r1', arm + ':',
+          'ldrb r2, [r0, #RUN_DIRTY]', 'ldr r3, [sp, #F_IRAM]', 'ldr r3, [r3, #SA1E_WDIRTY]', 'orrs r2, r2, r3',
+          'it eq', 'moveq.w r0, #3', 'beq.w .Lexit_r1',
+          'ldrh r2, [r0, #RUN_WFAIL]', 'cmp r2, r1', 'beq.w %s' % arm,
+          'mov.w r0, #5', 'b.w .Lexit_r1', arm + ':',
           'strh r1, [r0, #RUN_CANDPC]', 'ldrb r3, [r4, #CPU_K]', 'strb r3, [r0, #RUN_CANDK]', 'mov.w r2, #0',
           'strb r2, [r0, #RUN_DIRTY]', 'ldr r3, [sp, #F_IRAM]', 'str r2, [r3, #SA1E_WDIRTY]',
           'ldr r2, [r0, #RUN_EXTEV]', 'str r2, [r0, #RUN_LAPEV]', 'str r11, [sp, #F_LAPST]',

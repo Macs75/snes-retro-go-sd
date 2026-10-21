@@ -77,6 +77,8 @@ typedef struct {
   uint8_t stop;               /* 96  a run-ahead must stop: 1 the engine wrote a watched
                                  I-RAM byte, 2 a change or an interrupt (sa1_ahead) */
   uint8_t watch;              /* 97  a run-ahead is running: the engine's watching tables */
+  uint16_t wfail;             /* 98  a head where a lap that wrote failed sa1_write_proof
+                                 since the last event (0xffff none): the engine stops asking */
 } Sa1Run;
 
 struct Sa1 {
@@ -154,7 +156,7 @@ _Static_assert(offsetof(Sa1Run, debt) == RUN_DEBT && offsetof(Sa1Run, lapCycles)
                offsetof(Sa1Run, candK) == RUN_CANDK && offsetof(Sa1Run, lapDirty) == RUN_DIRTY &&
                offsetof(Sa1Run, ops) == RUN_OPS && offsetof(Sa1Run, asnap) == RUN_AS &&
                offsetof(Sa1Run, wdebt) == RUN_WDEBT && offsetof(Sa1Run, stop) == RUN_STOP &&
-               offsetof(Sa1Run, watch) == RUN_WATCH,
+               offsetof(Sa1Run, watch) == RUN_WATCH && offsetof(Sa1Run, wfail) == RUN_WFAIL,
                "Sa1Run: sa1_engine.S reads these offsets");
 _Static_assert(offsetof(Sa1, rdmap) == 0 && offsetof(Sa1, iram) == SA1E_IRAM &&
                offsetof(Sa1, wdirty) == SA1E_IRAM + SA1E_WDIRTY &&
@@ -190,6 +192,7 @@ static inline void sa1_event(Sa1* s) {
   }
 #endif
   s->run.extEvents++;
+  s->run.wfail = 0xffff;
 }
 #define SA1_SAVE_END   (offsetof(Sa1, run) + sizeof(int32_t))   /* through run.debt */
 
@@ -863,18 +866,29 @@ static inline bool sa1_reg_passive(uint16_t adr) {
          (adr >= 0x2203 && adr <= 0x2208) || (adr >= 0x220c && adr <= 0x220f) || adr == 0x223f;
 }
 
+/* An I-RAM write marks the lap only when it changes the byte: a lap that
+ * stores what is already there changes nothing, and can still be a wait
+ * loop's (sa1_loop_head; Dragon Ball Z's command loop writes its jump target
+ * and pushes X every lap) */
+static inline void sa1_cpu_iram_write(Sa1* s, uint16_t o, uint8_t val) {
+  if (s->iram[o] != val) {
+    s->run.lapDirty = 1;
+    s->iram[o] = val;
+  }
+  if (s->run.watch && s->wmap[o]) sa1_watch_check(s);
+}
+
 void sa1_cpu_write(Sa1* s, uint32_t a, uint8_t val) {
   uint8_t bank = (uint8_t)(a >> 16);
   uint16_t adr = (uint16_t)a;
+  if ((bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) && (adr < 0x0800 || (adr >= 0x3000 && adr < 0x3800))) {
+    sa1_cpu_iram_write(s, adr & 0x7ff, val);
+    return;
+  }
   s->run.lapDirty = 1;
   if (bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) {
     if (adr >= 0x8000) return;
     if (adr >= 0x6000) { sa1_bw_window_write(s, adr, val); return; }
-    if (adr < 0x0800 || (adr >= 0x3000 && adr < 0x3800)) {
-      s->iram[adr & 0x7ff] = val;
-      if (s->run.watch && s->wmap[adr & 0x7ff]) sa1_watch_check(s);
-      return;
-    }
     if (adr >= 0x2200 && adr < 0x2400) {
       sa1_reg_write(s, adr, val);
       if (s->run.watch && !sa1_reg_passive(adr)) sa1_watch_check(s);
@@ -923,6 +937,7 @@ void sa1_reset(Sa1* s) {
   s->run.candPc = 0xffff;
   s->run.candK = 0xff;
   s->run.extEvents++;
+  s->run.wfail = 0xffff;
   sa1_maps(s);
 }
 
@@ -1016,11 +1031,8 @@ uint32_t sa1e_rd24_b0(Sa1* s, uint32_t lo) {
 int sa1e_wr8(Sa1* s, uint32_t adr, uint32_t val) {
   const uint32_t a = adr & 0x40f800;
   if (a == 0 || a == 0x3000) {
-    s->run.lapDirty = 1;
-    s->iram[adr & 0x7ff] = (uint8_t)val;
-    if (!s->run.watch || !s->wmap[adr & 0x7ff]) return 0;
-    sa1_watch_check(s);
-    return s->run.stop;
+    sa1_cpu_iram_write(s, adr & 0x7ff, (uint8_t)val);
+    return s->run.watch && s->wmap[adr & 0x7ff] ? s->run.stop : 0;
   }
   sa1_cpu_write(s, adr, (uint8_t)val);
   return (adr & 0x400000) == 0 && (adr & 0xfe00) == 0x2200 &&
@@ -1035,6 +1047,45 @@ int sa1e_wr16(Sa1* s, uint32_t lo, uint32_t hi, uint32_t val) {
 int sa1e_wr16r(Sa1* s, uint32_t lo, uint32_t hi, uint32_t val) {   /* the high byte first */
   const int r = sa1e_wr8(s, hi, val >> 8);
   return r | sa1e_wr8(s, lo, val);
+}
+#endif
+
+#ifdef SA1_T2
+/* The engine came back to a loop head (5) with the CPU as the lap before left
+ * it, but that lap wrote: its inline I-RAM stores mark every lap. One lap in C,
+ * where a write of the byte already there marks nothing (sa1_cpu_iram_write),
+ * decides at the next jump back: the same lap that changed no byte is a wait
+ * loop's (sa1_loop_head), and the SA-1 sleeps. A lap that changed a byte:
+ * the engine does not ask again at this head until the next event. Stopped
+ * before the lap is done (an interrupt, the debt spent, a run-ahead's write):
+ * the engine goes on and may ask again. */
+static bool sa1_write_proof(Sa1* s) {
+  Cpu* c = s->cpu;
+  const uint16_t head = c->pc;
+  s->run.candPc = 0xffff;
+  sa1_loop_head(s);                   /* arm this head */
+  for (int n = 0; n < 256 && s->run.debt > 0; n++) {
+    if (c->stopped || c->waiting || c->nmiWanted || (c->irqWanted && !c->i)) break;
+    s->run.wdebt = s->run.debt;
+    const uint16_t pc0 = c->pc;
+    const uint8_t k0 = c->k;
+    const int cyc = sa1cpu_runOpcode(c);
+    sa1_ran_opcode(s);
+    SA1_PERF_INC(snes_perf_sa1_ops, 1);
+    s->run.debt -= cyc;
+    s->run.lapCycles += cyc;
+    s->run.lapInstrs++;
+    if (s->run.stop) break;
+    if (c->k != k0 || c->pc >= pc0 || pc0 - c->pc > 64) continue;
+    if (c->pc == head && sa1_loop_head(s)) {
+      SA1_PERF_INC(snes_perf_sa1_handbacks, 1);
+      return true;
+    }
+    s->run.wfail = head;              /* a lap done, and it changed something */
+    break;
+  }
+  s->run.candPc = 0xffff;             /* the engine arms its own snapshot again */
+  return false;
 }
 #endif
 
@@ -1054,6 +1105,10 @@ static void sa1_interpret(Sa1* s) {
     s->run.ops = 0;
 #endif
     if (r == 0 || r == 4) break;     /* 4: a run-ahead's watched write (sa1_ahead) */
+    if (r == 5) {             /* a lap recurred but wrote: prove one in C */
+      if (sa1_write_proof(s)) return;
+      continue;
+    }
     if (r == 3) {             /* the engine proved a wait loop (sa1_loop_head's proof) */
       SA1_PERF_INC(snes_perf_sa1_handbacks, 1);
       if (sa1_skip_on()) {
