@@ -145,15 +145,23 @@
 - **SA-1: a wait loop that rewrites the bytes already there sleeps too.**
   The SA-1 slept only through a loop whose lap wrote nothing; Dragon Ball Z -
   Hyper Dimension's command loop stores its jump target and pushes X every
-  lap, always the same bytes, so it ran ~40,000 instructions a frame. An SA-1
-  write to I-RAM now marks the lap only when it changes the byte; the Thumb-2
-  engine, whose stores mark every lap, hands such a lap to C to be proven
-  once, so its store code is unchanged. Dragon Ball Z on device (replay of a
+  lap, always the same bytes, so it ran ~40,000 instructions a frame. In the C
+  interpreter an SA-1 write to I-RAM now marks the lap only when it changes
+  the byte; the Thumb-2 engine, whose stores mark every lap, hands such a lap
+  to C to be proven once, so its store code is unchanged. Dragon Ball Z on device (replay of a
   gameplay recording, 60 fps): mean speed 95.7% → 100.0%, mean real fps
   43.1 → 59.1, the lowest 12.9 → 49.7 fps, windows under 20 fps 10 → 0, late
   frames 2,624 → 846, 1,127 more frames drawn; the SA-1 runs 93.7% fewer
   instructions on the host, the same state every frame in all eleven
   recordings.
+- **SA-1: each hot function at a fixed I-cache offset.** The window pinned
+  only its start, so when one of its functions grew, every one behind it
+  moved, and Kirby Super Star got 0.6 points heavier with the same work. Each
+  now has a slot of its own, at the offset of the build that measured best,
+  and the link fails if one outgrows it. Kirby Super Star on device (PERF
+  replay): back within 0.1 point of that build, the 65816's share equal,
+  windows over budget 2 → 1; Dragon Ball Z unchanged (its lowest window 49.7
+  → 52.0 fps); state hashes unchanged.
 - **Super FX: Starwing (Europe) runs Star Fox's block code.** Its GSU code
   is byte-identical to Star Fox (USA)'s at all 7,195 bytes the blocks were
   compiled from (`tools/gsu_blk_check.py`), so the European cart now loads

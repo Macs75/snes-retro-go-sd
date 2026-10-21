@@ -866,29 +866,18 @@ static inline bool sa1_reg_passive(uint16_t adr) {
          (adr >= 0x2203 && adr <= 0x2208) || (adr >= 0x220c && adr <= 0x220f) || adr == 0x223f;
 }
 
-/* An I-RAM write marks the lap only when it changes the byte: a lap that
- * stores what is already there changes nothing, and can still be a wait
- * loop's (sa1_loop_head; Dragon Ball Z's command loop writes its jump target
- * and pushes X every lap) */
-static inline void sa1_cpu_iram_write(Sa1* s, uint16_t o, uint8_t val) {
-  if (s->iram[o] != val) {
-    s->run.lapDirty = 1;
-    s->iram[o] = val;
-  }
-  if (s->run.watch && s->wmap[o]) sa1_watch_check(s);
-}
-
 void sa1_cpu_write(Sa1* s, uint32_t a, uint8_t val) {
   uint8_t bank = (uint8_t)(a >> 16);
   uint16_t adr = (uint16_t)a;
-  if ((bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) && (adr < 0x0800 || (adr >= 0x3000 && adr < 0x3800))) {
-    sa1_cpu_iram_write(s, adr & 0x7ff, val);
-    return;
-  }
   s->run.lapDirty = 1;
   if (bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) {
     if (adr >= 0x8000) return;
     if (adr >= 0x6000) { sa1_bw_window_write(s, adr, val); return; }
+    if (adr < 0x0800 || (adr >= 0x3000 && adr < 0x3800)) {
+      s->iram[adr & 0x7ff] = val;
+      if (s->run.watch && s->wmap[adr & 0x7ff]) sa1_watch_check(s);
+      return;
+    }
     if (adr >= 0x2200 && adr < 0x2400) {
       sa1_reg_write(s, adr, val);
       if (s->run.watch && !sa1_reg_passive(adr)) sa1_watch_check(s);
@@ -1031,8 +1020,11 @@ uint32_t sa1e_rd24_b0(Sa1* s, uint32_t lo) {
 int sa1e_wr8(Sa1* s, uint32_t adr, uint32_t val) {
   const uint32_t a = adr & 0x40f800;
   if (a == 0 || a == 0x3000) {
-    sa1_cpu_iram_write(s, adr & 0x7ff, (uint8_t)val);
-    return s->run.watch && s->wmap[adr & 0x7ff] ? s->run.stop : 0;
+    s->run.lapDirty = 1;
+    s->iram[adr & 0x7ff] = (uint8_t)val;
+    if (!s->run.watch || !s->wmap[adr & 0x7ff]) return 0;
+    sa1_watch_check(s);
+    return s->run.stop;
   }
   sa1_cpu_write(s, adr, (uint8_t)val);
   return (adr & 0x400000) == 0 && (adr & 0xfe00) == 0x2200 &&
@@ -1053,7 +1045,7 @@ int sa1e_wr16r(Sa1* s, uint32_t lo, uint32_t hi, uint32_t val) {   /* the high b
 #ifdef SA1_T2
 /* The engine came back to a loop head (5) with the CPU as the lap before left
  * it, but that lap wrote: its inline I-RAM stores mark every lap. One lap in C,
- * where a write of the byte already there marks nothing (sa1_cpu_iram_write),
+ * where a write of the byte already there marks nothing (cpu.c's cpu_write),
  * decides at the next jump back: the same lap that changed no byte is a wait
  * loop's (sa1_loop_head), and the SA-1 sleeps. A lap that changed a byte:
  * the engine does not ask again at this head until the next event. Stopped

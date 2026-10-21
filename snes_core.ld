@@ -284,28 +284,53 @@ SECTIONS
     .sa1_overlay
     {
       __SA1_OVL_START__ = .;
-      /* The hot code at fixed I-cache offsets (the cache way is 8 KB): an
-       * 8 KB-aligned window, the C bus helpers and the span runner in a fixed
-       * order, then the engine at a fixed offset behind them. A change
-       * elsewhere in sa1.c or in the core's bss does not move them: where they
-       * sat measured +-0.5-1 point of Kirby Super Star's frame with the same
-       * work (docs/perf-lessons.md). If the helpers outgrow their slot the
-       * link fails here instead of moving the engine. */
+      /* The hot code at fixed I-cache offsets (the cache way is 8 KB): each
+       * function in a slot at a fixed offset from an 8 KB-aligned point, the
+       * engine at a fixed offset behind them, so a function that grows moves
+       * no other (ld stops if it outgrows its slot). Where they sit is
+       * measured: the same work cost Kirby Super Star 0.5-1 point of the frame
+       * when they moved (docs/perf-lessons.md). The offsets are those of the
+       * build that measured best, but for sa1_interpret, which grew past its
+       * slot, and sa1_ahead, which made room for it. */
       . = . + ((0 - ((__CORE_BSS_END__ + .) & 0x1fff)) & 0x1fff);
       __SA1_HOT_START__ = .;
       *sa1.o(.text.sa1_cpu_write)
+      ASSERT(. <= __SA1_HOT_START__ + 0x1d4, "SNES: sa1_cpu_write outgrew its slot");
+      . = __SA1_HOT_START__ + 0x1d4;
       *sa1.o(.text.sa1e_wr8)
+      ASSERT(. <= __SA1_HOT_START__ + 0x4bc, "SNES: sa1e_wr8 outgrew its slot");
+      . = __SA1_HOT_START__ + 0x4bc;
       *sa1.o(.text.sa1_sync)
+      ASSERT(. <= __SA1_HOT_START__ + 0x55c, "SNES: sa1_sync outgrew its slot");
+      . = __SA1_HOT_START__ + 0x55c;
       *sa1.o(.text.sa1e_rd16)
+      ASSERT(. <= __SA1_HOT_START__ + 0x5f0, "SNES: sa1e_rd16 outgrew its slot");
+      . = __SA1_HOT_START__ + 0x5f0;
       *sa1.o(.text.sa1_reg_read)
+      ASSERT(. <= __SA1_HOT_START__ + 0x7f8, "SNES: sa1_reg_read outgrew its slot");
+      . = __SA1_HOT_START__ + 0x7f8;
       *sa1.o(.text.sa1_reg_write)
+      ASSERT(. <= __SA1_HOT_START__ + 0xf00, "SNES: sa1_reg_write outgrew its slot");
+      . = __SA1_HOT_START__ + 0xf00;
       *sa1.o(.text.sa1_cpu_read)
+      ASSERT(. <= __SA1_HOT_START__ + 0x1208, "SNES: sa1_cpu_read outgrew its slot");
+      . = __SA1_HOT_START__ + 0x1208;
       *sa1.o(.text.sa1e_wr16)
+      ASSERT(. <= __SA1_HOT_START__ + 0x1398, "SNES: sa1e_wr16 outgrew its slot");
+      . = __SA1_HOT_START__ + 0x1398;
       *sa1.o(.text.sa1_snes_read)
-      *sa1.o(.text.sa1_ahead)
+      ASSERT(. <= __SA1_HOT_START__ + 0x16f4, "SNES: sa1_snes_read outgrew its slot");
+      . = __SA1_HOT_START__ + 0x16f4;
       *sa1.o(.text.sa1_interpret)
+      ASSERT(. <= __SA1_HOT_START__ + 0x1e5c, "SNES: sa1_interpret outgrew its slot");
+      . = __SA1_HOT_START__ + 0x1e5c;
       *sa1.o(.text.sa1_peek)
+      ASSERT(. <= __SA1_HOT_START__ + 0x1ffc, "SNES: sa1_peek outgrew its slot");
+      . = __SA1_HOT_START__ + 0x1ffc;
       *(.sa1ovl.text)                   /* main_snes.c's SA-1-only span runner */
+      ASSERT(. <= __SA1_HOT_START__ + 0x29e0, "SNES: the SA-1 span runner outgrew its slot");
+      . = __SA1_HOT_START__ + 0x29e0;
+      *sa1.o(.text.sa1_ahead)
       __SA1_HOT_END__ = .;
       ASSERT(__SA1_HOT_END__ <= __SA1_HOT_START__ + 0x3000,
              "SNES: the SA-1's hot C code outgrew its slot in front of the engine (0x3000)");

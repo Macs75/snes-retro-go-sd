@@ -720,6 +720,23 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   start: an 8 KB alignment must be computed on `__CORE_BSS_END__ + .`;
   `ABSOLUTE(.)` there shifted the later overlays' load addresses (ld warns
   ".gsugame_yoshi lma adjusted").
+- **A window pinned at its start still moves inside: give each function a
+  slot.** The identical-write change grew four functions of the SA-1's hot
+  window (`sa1e_wr8` +60 B, `sa1_interpret` +200 B), the window kept its start
+  and the engine its offset, and everything behind them moved 16-336 B:
+  Kirby Super Star +0.6 points (log 39 -> 40) with the same SA-1
+  instructions. Bisected on the device: log 40 with log 39's engine measured
+  the same as log 40 (log 41), so it was the layout, not the engine's new
+  loop-head path. Each function now has a slot at the offset of log 39, with
+  an `ASSERT` per slot. A first layout kept the 65816's helpers at their
+  offsets but shifted the two hottest SA-1 helpers, `sa1_cpu_write` (5.6% of
+  an SA-1 window's instructions) and `sa1e_wr8`, by 60-76 B: the 65816 came
+  back, the SA-1 got 0.4 points worse. What made them fit was taking the
+  byte compare out of them -- the proof lap runs in C through `cpu.c`'s
+  write, so theirs was never needed -- and then every slot but two holds its
+  log 39 offset: within 0.1 point of log 39 (log 43). A profile ranking of
+  what moved must include what did not move yet: `sa1_cpu_write` was left out
+  of the first ranking because log 40 had not moved it.
 - **When a device cost follows a count, it is work: time the call, not the
   layout.** Kirby Super Star's 65816 was ~2 points heavier with the span
   search than without, in the same windows every run. A 2-frame gwemu
@@ -746,7 +763,8 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   address and pushes X every lap; the proof refused any lap that wrote, so
   82% of its instructions (~40K a frame, 0 skipped) were that loop. A write
   of the byte already there changes nothing, so the lap is still a repeat:
-  the C write paths now mark the lap only on a change. The engine's inline
+  the C interpreter's I-RAM write now marks the lap only on a change. The
+  engine's inline
   I-RAM stores mark every lap, and a compare in each would cost every store
   (§4.11, the watch); instead its loop-head check returns 5 when the CPU
   repeated but the lap wrote, C runs one lap with the compare, and a head

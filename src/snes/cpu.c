@@ -162,7 +162,12 @@ static uint8_t cpu_read_raw(Cpu* cpu, uint32_t adr) {
 
 static inline void cpu_write(Cpu* cpu, uint32_t adr, uint8_t val) {
   const uint32_t a = adr & 0x40f800;
-  if (a == 0 || a == 0x3000) {        /* I-RAM, as in cpu_read: a write that changes a byte marks the lap */
+  /* I-RAM, as in cpu_read. A write marks the lap only when it changes the
+   * byte: a lap that stores what is already there changes nothing and can
+   * still be a wait loop's (sa1.c sa1_loop_head; Dragon Ball Z's command loop
+   * writes its jump target and pushes X every lap). The engine's stores mark
+   * every lap; it hands such a lap here to be proven (sa1_write_proof). */
+  if (a == 0 || a == 0x3000) {
     uint8_t* p = &g_sa1_iram[adr & 0x7ff];
     if (*p != val) {
       *g_sa1_lapdirty = 1;
