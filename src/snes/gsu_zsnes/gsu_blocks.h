@@ -40,6 +40,17 @@ static inline u4 gsu_blk_cart_id(u1 const *const rom, u4 const len)
     return h;
 }
 
+/* The game whose block code a cart takes: its own, or that of a cart whose
+   Super FX code it has byte for byte at every run the blocks were made from
+   (tools/gsu_blk_check.py). gsu_blk_select still checks those bytes. */
+static inline u4 gsu_blk_game_id(u4 const cart_id)
+{
+    switch (cart_id) {
+    case 0xF7A389D0u: return 0x3902A841u;   /* Starwing (Europe): Star Fox (USA) */
+    }
+    return cart_id;
+}
+
 extern struct gsu_blk const *gsu_blk_tab; /* NULL: no blocks for this game */
 extern u4 gsu_blk_mask;                   /* table size - 1 */
 

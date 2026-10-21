@@ -3092,7 +3092,7 @@ static const char *copro_overlay_load(int kind, const uint8_t *rom, uint32_t rom
    * from before using it. None: the interpreter alone. */
   uint32_t game_off = 0, game_size = 0;
   if (kind == SNES_COPRO_GSU) {
-    const uint32_t id = gsu_blk_cart_id(rom, rom_len);
+    const uint32_t id = gsu_blk_game_id(gsu_blk_cart_id(rom, rom_len));
     uint8_t gh[16 + 8];
     for (uint32_t p = first;
          rg_storage_copy_file_range_to_ram(COPRO_OVL_CORE_PATH, gh, p, sizeof gh, NULL) == sizeof gh;

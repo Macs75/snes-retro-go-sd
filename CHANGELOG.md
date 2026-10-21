@@ -154,6 +154,13 @@
   frames 2,624 → 846, 1,127 more frames drawn; the SA-1 runs 93.7% fewer
   instructions on the host, the same state every frame in all eleven
   recordings.
+- **Super FX: Starwing (Europe) runs Star Fox's block code.** Its GSU code
+  is byte-identical to Star Fox (USA)'s at all 7,195 bytes the blocks were
+  compiled from (`tools/gsu_blk_check.py`), so the European cart now loads
+  the same record; the bytes are still checked before the blocks are used.
+  Host: the same state with the blocks on and off over the attract; on the
+  device it boots with them. Starwing - Competition differs there and stays
+  interpreted.
 
 ## [v0.0.8]
 
