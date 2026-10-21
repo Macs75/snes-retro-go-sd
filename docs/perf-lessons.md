@@ -700,6 +700,27 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   start: an 8 KB alignment must be computed on `__CORE_BSS_END__ + .`;
   `ABSOLUTE(.)` there shifted the later overlays' load addresses (ld warns
   ".gsugame_yoshi lma adjusted").
+- **When a device cost follows a count, it is work: time the call, not the
+  layout.** Kirby Super Star's 65816 was ~2 points heavier with the span
+  search than without, in the same windows every run. A 2-frame gwemu
+  profile showed the search running ~3K ARM instructions a frame, so
+  placement was blamed: the four hot RAM functions it had moved, pinned back
+  (no change), then all static data put at the other build's D-cache offsets
+  (no change). The per-window delta matched a count the log already had --
+  `PROF/idle` rejects -- and a DWT counter (`PROF/span`) found ~24K cycles
+  per search, in bursts the 2 profiled frames missed. Of 3,574 searches in a
+  host trace (`tools/span_search_log.py`), 77% were of pcs already rejected:
+  the 64-slot table was one-way, and pcs like `0089a4` and `0089db` (the
+  same loop) shared a slot; 16 sets of 4 halved the searches for the same
+  256 bytes. What was left tracked the spans tested, ~62 cycles each: moving
+  the test into ITCM saved 10 of them, its data into DTCM none. Timing the
+  lookup before it, `idle_line_select`, showed the larger cost, ~224 cycles
+  a span and 3 points of the heaviest window, in the build without the
+  search too: a call through a veneer into RAM code to walk 12 sites. In
+  ITCM, each site's range first (its first 6 bytes, in DTCM), lookup and
+  test together cost less than the lookup alone had: Kirby 0.2 points below
+  the build without the search, Mario RPG 0.5 points lighter. Star Fox's
+  margin is 20 B.
 
 ---
 

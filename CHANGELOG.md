@@ -128,6 +128,20 @@
   (PERF replay): windows over budget 4 → 1, the SA-1's share 0.7 points lower
   on average (its heaviest window 39.3% → 36.5% of the budget), late frames
   1,376 → 1,285; state hashes unchanged.
+- **The SA-1 wait-loop search and the known-site lookup cost less.** The
+  search remembers its rejects in 16 sets of 4 instead of 64 single slots:
+  pcs of one wait loop that hashed to the same slot evicted each other, and
+  77% of Kirby Super Star's searches, ~24K cycles each, were of pcs it had
+  already rejected. On every span outside the active site, the look through
+  the known sites and the search's first test now run in ITCM in one call,
+  checking each site's range first, instead of two calls into RAM code (~290
+  cycles a span, up to ~800 spans a frame). Kirby Super Star on device (PERF
+  replay): the 65816's share 0.7 points lower on average, its heaviest
+  windows 2.4 points lower (39.2% → 36.8% of the budget), late frames
+  1,285 → 1,188, and now below the build without the search. Super Mario RPG
+  (60 fps): the 65816's share 0.5 points lower, 98 more frames drawn, the
+  lowest 24.1 → 24.4 fps. Host: the same state and instruction counts in all
+  ten recordings.
 
 ## [v0.0.8]
 

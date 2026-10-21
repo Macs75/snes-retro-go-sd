@@ -187,7 +187,14 @@ extern uint8_t g_idle_gsu_budget;   /* the same for GSU poll sites, so they neve
                                      * starve the frame's wait loop of its proofs */
 extern uint8_t g_idle_sa1_budget;   /* and for a loop polling the SA-1 while it works,
                                      * entered with other registers at each request */
-extern uint8_t g_idle_span_budget;  /* idle_span_sample's site searches left this frame */
+/* what the span loop reads of the span search on every span outside the known
+ * sites (main_snes.c's idle_span_line): in DTCM, allocated by idle_alloc() */
+typedef struct {
+  uint32_t pc[4];     /* the last spans' pcs, [0] the last */
+  uint8_t  budget;    /* idle_span_search's site searches left this frame */
+} IdleSpan;
+extern IdleSpan *g_idle_span;
+#define g_idle_span_budget (g_idle_span->budget)
 extern uint8_t g_idle_hvb_budget;   /* and the second proofs of $4212 loops (main_snes.c) */
 
 /* once, after snes_init: move the state (sites, second proof) to DTCM (no-op
@@ -218,8 +225,14 @@ bool idle_line_select(Snes *s);   /* true: the pc is in a known site, now the ac
  * site search runs at the pc (not a pc it rejected lately), at most
  * g_idle_span_budget times a frame, and arms only a loop that reads memory the
  * SA-1 shares: the others are the NMI sample's (taking the frame's proofs
- * from the loop it finds cost more than it saved). */
-void idle_span_sample(Snes *s);
+ * from the loop it finds cost more than it saved). The pc history and that
+ * first test are the caller's, on every such span (main_snes.c's
+ * idle_span_line, in ITCM: up to ~800 spans a frame fail it); idle_span_search
+ * does the rest when it passes. */
+void idle_span_search(Snes *s, uint32_t pc24);
+#ifdef SNES_PERF
+extern uint32_t g_span_perf_calls, g_span_perf_searches, g_span_perf_cyc;   /* PROF/span */
+#endif
 /* before proving: resolve the read set (indexed operands with the current
  * X/Y) into pmem_off; false if any of it is not WRAM or ROM */
 bool idle_prepare_reads(Snes *s, IdleSkip *g);

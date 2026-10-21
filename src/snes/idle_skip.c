@@ -3,6 +3,7 @@
  * span runner that replays it lives next to run_dots in main_snes.c, because
  * it has to copy run_dots' arithmetic exactly. */
 #include "idle_skip.h"
+#include "../snes_perf.h"
 #include "cart.h"
 
 #ifdef TARGET_GNW
@@ -10,17 +11,19 @@
 IdleSkip *g_idle_sites;
 IdleSkip *g_idlep;
 IdleProof *g_idle_alt;
+IdleSpan *g_idle_span;
 #else
 static IdleSkip s_sites_static[IDLE_SITES];
 static IdleProof s_alt_static;
 IdleSkip *g_idle_sites = s_sites_static;
 IdleSkip *g_idlep = &s_sites_static[0];
 IdleProof *g_idle_alt = &s_alt_static;
+static IdleSpan s_span_static;
+IdleSpan *g_idle_span = &s_span_static;
 #endif
 IdleStats g_idle_stats;
-uint8_t g_idle_budget, g_idle_gsu_budget, g_idle_sa1_budget, g_idle_span_budget, g_idle_hvb_budget;
+uint8_t g_idle_budget, g_idle_gsu_budget, g_idle_sa1_budget, g_idle_hvb_budget;
 static uint32_t s_frame;
-static uint32_t s_span_pc[4];   /* idle_span_sample: the last spans' pcs, [0] the last */
 
 #ifdef TARGET_GNW
 #include <assert.h>
@@ -29,8 +32,9 @@ static uint32_t s_span_pc[4];   /* idle_span_sample: the last spans' pcs, [0] th
 #endif
 void idle_alloc(void) {
 #ifdef TARGET_GNW
-  /* DTCM: the span runner reads the active site on every span. AHB, then the
-   * RAM_EMU pool, only if DTCM is full. */
+  /* DTCM: the span runner reads the active site on every span, and an SA-1
+   * cart's span loop the span search's history. AHB, then the RAM_EMU pool,
+   * only if DTCM is full. */
   const size_t n = sizeof(IdleSkip) * IDLE_SITES;
   void *p = dtc_malloc(n);
   if (!p || p == (void *)-1) { printf("idle: sites in AHB (DTCM full)\n"); p = ahb_calloc(1, n); }
@@ -42,6 +46,11 @@ void idle_alloc(void) {
   if (!q) q = ram_calloc(1, sizeof(IdleProof));
   assert(q);
   g_idle_alt = (IdleProof *)q;
+  void *r = dtc_malloc(sizeof(IdleSpan));
+  if (!r || r == (void *)-1) { printf("idle: span state in AHB (DTCM full)\n"); r = ahb_calloc(1, sizeof(IdleSpan)); }
+  if (!r) r = ram_calloc(1, sizeof(IdleSpan));
+  assert(r);
+  g_idle_span = (IdleSpan *)r;
 #endif
 }
 
@@ -57,18 +66,29 @@ _Static_assert(offsetof(IdleState, img) == 2, "IdleState: img+14 must be word-al
 /* rejected pcs, so a busy frame's landing spot is not decoded every frame */
 static uint32_t s_reject[4];
 static uint8_t  s_reject_i;
-/* idle_span_sample's own: the pcs its searches rejected (no loop, or one that
- * does not poll the SA-1), by a hash of the pc, each tagged with the 256-frame
- * epoch it was rejected in so that it is tried again in the next one (WRAM
- * code changes); and while it searches, that only such a loop is armed */
-#define SPAN_REJECTS 64
-static uint32_t s_span_reject[SPAN_REJECTS];
+/* idle_span_search's own: the pcs its searches rejected (no loop, or one that
+ * does not poll the SA-1), in 16 sets of 4 by a hash of the pc, the newest in
+ * front, each tagged with the 256-frame epoch it was rejected in so that it is
+ * tried again in the next one (WRAM code changes); and while it searches, that
+ * only such a loop is armed. 4 ways: with one, two pcs of the same wait loop
+ * that hashed to one slot evicted each other: 77% of Kirby Super Star's
+ * searches, ~24K cycles each on the device, were of pcs it had rejected */
+#define SPAN_REJECT_SETS 16
+static uint32_t s_span_reject[SPAN_REJECT_SETS][4];
 static bool     s_span_search;
-static inline uint32_t *span_reject_slot(uint32_t pc24) {
-  return &s_span_reject[(pc24 * 2654435761u) >> 26];
-}
 static inline uint32_t span_reject_key(uint32_t pc24) {
   return pc24 | (s_frame >> 8) << 24;
+}
+static inline uint32_t *span_reject_set(uint32_t pc24) {
+  return s_span_reject[(pc24 * 2654435761u) >> 28];
+}
+static inline bool span_rejected(uint32_t pc24) {
+  const uint32_t *w = span_reject_set(pc24), k = span_reject_key(pc24);
+  return w[0] == k || w[1] == k || w[2] == k || w[3] == k;
+}
+static void span_reject(uint32_t pc24) {
+  uint32_t *w = span_reject_set(pc24);
+  w[3] = w[2]; w[2] = w[1]; w[1] = w[0]; w[0] = span_reject_key(pc24);
 }
 
 static void site_clear(IdleSkip *g) {
@@ -83,11 +103,11 @@ void idle_reset(void) {
   g_idle_alt->owner = NULL;
   g_idle_stats = (IdleStats){0};
   g_idle_budget = g_idle_gsu_budget = g_idle_sa1_budget = g_idle_span_budget = g_idle_hvb_budget = 0;
-  for (int i = 0; i < 4; i++) s_span_pc[i] = 0xffffffffu;
+  for (int i = 0; i < 4; i++) g_idle_span->pc[i] = 0xffffffffu;
   s_frame = 0;
   for (int i = 0; i < 4; i++) s_reject[i] = 0xffffffffu;
   s_reject_i = 0;
-  for (int i = 0; i < SPAN_REJECTS; i++) s_span_reject[i] = 0xffffffffu;
+  for (int i = 0; i < SPAN_REJECT_SETS; i++) for (int j = 0; j < 4; j++) s_span_reject[i][j] = 0xffffffffu;
 }
 
 /* $7e/$7f are WRAM, not a ROM mirror */
@@ -587,19 +607,22 @@ bool idle_line_select(Snes *s) {
   return false;
 }
 
-void idle_span_sample(Snes *s) {
-  const uint32_t pc24 = ((uint32_t)s->cpu->k << 16) | s->cpu->pc, prev = s_span_pc[0];
-  /* a wait loop of a few instructions starts spans at the same pcs again:
-   * this pc is one of the 3 before the last span's, and near the last's (the
-   * same pc as the last is no sign: a DMA stall, an MVN) */
-  const bool again = pc24 == s_span_pc[1] || pc24 == s_span_pc[2] || pc24 == s_span_pc[3];
-  s_span_pc[3] = s_span_pc[2]; s_span_pc[2] = s_span_pc[1]; s_span_pc[1] = prev; s_span_pc[0] = pc24;
-  if (g_idle_span_budget == 0 || !again || pc24 == prev || pc24 - prev + IDLE_MAX_LEN > 2 * IDLE_MAX_LEN) return;
-  if (*span_reject_slot(pc24) == span_reject_key(pc24)) return;
+#ifdef SNES_PERF
+uint32_t g_span_perf_calls, g_span_perf_searches, g_span_perf_cyc;   /* PROF/span */
+#endif
+void idle_span_search(Snes *s, uint32_t pc24) {
+  if (span_rejected(pc24)) return;
   for (int i = 0; i < 4; i++) if (s_reject[i] == pc24) return;
   g_idle_span_budget--;
   s_span_search = true;
+#ifdef SNES_PERF
+  const uint32_t t0 = snes_perf_now();
+#endif
   idle_sample(s);
+#ifdef SNES_PERF
+  g_span_perf_cyc += snes_perf_now() - t0;
+  g_span_perf_searches++;
+#endif
   s_span_search = false;
 }
 
@@ -645,7 +668,7 @@ static void idle_sample(Snes *s) {
     site_clear(&cand);
     if (try_head(s, bank, head, pc, &cand)) {
       if (s_span_search && cand.sa1_rd == 0) {                  /* the NMI sample's to find */
-        *span_reject_slot(pc24) = span_reject_key(pc24);
+        span_reject(pc24);
         return;
       }
       if (slot < 0) {                                            /* an empty slot, else the oldest */
@@ -684,6 +707,6 @@ static void idle_sample(Snes *s) {
 #endif
   IDLE_TRACE("IDLE: frame %lu reject %02x:%04x (no idle loop decoded there)\n", (unsigned long)s_frame, bank, pc);
   g_idle_stats.rejects++;
-  if (s_span_search) *span_reject_slot(pc24) = span_reject_key(pc24);
+  if (s_span_search) span_reject(pc24);
   else s_reject[s_reject_i++ & 3] = pc24;
 }

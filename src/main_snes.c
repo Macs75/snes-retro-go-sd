@@ -450,6 +450,13 @@ static void snes_perf_report(void)
          (unsigned long)(g_idle_stats.sa1_laps / n));
   g_idle_stats.laps = g_idle_stats.ff_dots = g_idle_stats.wai_dots = 0;
   g_idle_stats.cyc = g_idle_stats.calls = g_idle_stats.sa1_laps = 0;
+  {
+    /* the spans the span search looked at, its site samples and their time */
+    printf("PROF/span: calls=%lu searches=%lu search_cycles=%lu per emulated frame, searches=%lu cycles=%lu in the window\n",
+           (unsigned long)(g_span_perf_calls / n), (unsigned long)(g_span_perf_searches / n),
+           (unsigned long)(g_span_perf_cyc / n), (unsigned long)g_span_perf_searches, (unsigned long)g_span_perf_cyc);
+    g_span_perf_calls = g_span_perf_searches = g_span_perf_cyc = 0;
+  }
 #endif
 #if SNES_AUDIO_DIRECT
   printf("PROF/direct: silence=%lu in %lu frames, dropped=%lu queue_min=%lu (samples), spare=%u frames\n",
@@ -1494,6 +1501,39 @@ static int SNES_ITCM_IDLE idle_run_span(Snes *s, int dots) {
 }
 #endif
 
+#if defined(SNES_IDLE_SKIP) && SNES_SA1
+/* A span outside the active site: idle_line_select's look through the known
+ * sites, then, if the pc is in none, idle_span_search's first test
+ * (idle_skip.h). Here, in ITCM, with each site's range checked first (its
+ * first 6 bytes, in DTCM): up to ~800 spans a frame find no site, and as two
+ * calls into RAM code that cost ~290 cycles a span. The active site is not
+ * looked at: the caller runs this only when the pc is outside its range. */
+static void SNES_ITCM_IDLE __attribute__((noinline)) idle_span_line(Snes *s) {
+  const Cpu *cpu = s->cpu;
+  const uint8_t bank = cpu->k;
+  const uint16_t pc = cpu->pc;
+  IdleSkip *g = g_idle_sites;
+  for (int i = 0; i < IDLE_SITES; i++, g++) {
+    if ((uint16_t)(pc - g->head) > g->len || (bank != g->bank && bank != g->bank_alt)) continue;
+    if (g->len == 0 && g->head == 0xffff) continue;   /* an empty slot */
+    if (idle_env_ok(cpu, g) && idle_code_ok(s, g)) { g_idlep = g; return; }
+  }
+  IdleSpan *sp = g_idle_span;
+  uint32_t *h = sp->pc;
+  const uint32_t pc24 = ((uint32_t)s->cpu->k << 16) | s->cpu->pc, prev = h[0];
+  /* a wait loop of a few instructions starts spans at the same pcs again:
+   * this pc is one of the 3 before the last span's, and near the last's (the
+   * same pc as the last is no sign: a DMA stall, an MVN) */
+  const bool again = pc24 == h[1] || pc24 == h[2] || pc24 == h[3];
+  h[3] = h[2]; h[2] = h[1]; h[1] = prev; h[0] = pc24;
+#ifdef SNES_PERF
+  g_span_perf_calls++;
+#endif
+  if (sp->budget != 0 && again && pc24 != prev && pc24 - prev + IDLE_MAX_LEN <= 2 * IDLE_MAX_LEN)
+    idle_span_search(s, pc24);
+}
+#endif
+
 /* The dot loop with the scheduler's state in registers. Per opcode it used to
  * load and store cpuCyclesLeft up to three times, load and store hPos and
  * apuDotsAccum, and reach the DMA flags through s->dma. Now:
@@ -1531,8 +1571,8 @@ static void SNES_ITCM_SCHED run_dots(Snes *s, int dots) {
   /* An SA-1 cart's 65816 waits in more than one loop between two NMIs (for
    * the SA-1's message, for an I-RAM flag): a span outside the active site
    * looks for the pc among the known ones, else may search for a new one */
-  if ((uint16_t)(s->cpu->pc - g_idle.head) > g_idle.len && g_sa1_iram && !idle_line_select(s))
-    idle_span_sample(s);
+  if ((uint16_t)(s->cpu->pc - g_idle.head) > g_idle.len && g_sa1_iram)
+    idle_span_line(s);
 #endif
   /* One test per SPAN: is the CPU in the armed idle loop? */
   if ((uint16_t)(s->cpu->pc - g_idle.head) <= g_idle.len &&
