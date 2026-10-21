@@ -171,7 +171,9 @@ extern bool g_ppu_skip_render;   /* ppu.c: skip compositing on dropped frames */
 static Snes *snes;
 /* input record/replay (further below) */
 static void rec_close(void);
-static bool rec_sram_blocked;
+static void rec_end(void);
+static bool rec_sram_blocked;    /* a record/replay is running: its cartridge RAM is not saved */
+static bool rec_sram_replayed;   /* one ran this session: an .sram written now came after it */
 static uint32_t rec_audio_h = 2166136261u;   /* FNV-1a of every frame's samples since the record/replay start */
 #ifdef HOST_BUILD
 /* host only: a running hash of the rendered picture, every frame. The state
@@ -2575,8 +2577,9 @@ static bool snes_LoadState(const char *pathName) {
   }
   /* Validation passed: now commit. A loaded state is not the recording's
    * machine any more, so stop record/replay here -- only once we know the file
-   * is good, so a bad/failed load never kills an in-progress replay. */
-  rec_close();
+   * is good, so a bad/failed load never kills an in-progress replay. The
+   * state's cartridge RAM is the game's from here: it is saved as usual. */
+  rec_end();
   fseek(f, sizeof(h), SEEK_SET);
   state_file = f; state_bytes = 0;
   state_stream(&state_read);
@@ -2648,6 +2651,49 @@ static void snes_wire_diag_flush(void) {
  * (setup is done, check is skipped). Otherwise keep power-on so a
  * mid-check quit still passes the dump. A file that is only ramSize
  * bytes leaves the power-on RTC. */
+/* <rom>.sram.from, one byte: 'r' when the .sram was written in a session
+ * that had run a record/replay (its cartridge RAM went through one), 'g'
+ * otherwise. sram_backup reads it. */
+static void sram_mark_from(const char *sram, char from)
+{
+  char aux[320];
+  snprintf(aux, sizeof aux, "%s.from", sram);
+  FILE *f = fopen(aux, "wb");
+  if (f) { fputc(from, f); fclose(f); }
+}
+
+/* Before a record/replay clears the cartridge RAM: <rom>.sram.bak = the
+ * .sram, unless that was written after a replay ('r' in its .from), so the
+ * backup is always the last save made outside one -- a replay ends with the
+ * .sram written again, and a replay, a quit and a replay must not leave the
+ * backup holding the first replay's RAM. */
+static void sram_backup(void)
+{
+  if (!snes || !snes->cart || !snes->cart->ram || !snes->cart->ramSize || !ACTIVE_FILE || !ACTIVE_FILE->path[0])
+    return;
+  char *path = odroid_system_get_path(ODROID_PATH_SAVE_SRAM, ACTIVE_FILE->path);
+  if (!path) return;
+  char aux[320];
+  snprintf(aux, sizeof aux, "%s.from", path);
+  FILE *f = fopen(aux, "rb");
+  const int from = f ? fgetc(f) : 'g';
+  if (f) fclose(f);
+  FILE *in = from != 'r' ? fopen(path, "rb") : NULL;
+  if (in) {
+    snprintf(aux, sizeof aux, "%s.bak", path);
+    FILE *out = fopen(aux, "wb");
+    if (out) {
+      uint8_t buf[256];
+      size_t n;
+      while ((n = fread(buf, 1, sizeof buf, in)) > 0) fwrite(buf, 1, n, out);
+      fclose(out);
+      printf("snes: SRAM backed up to %s\n", aux);
+    }
+    fclose(in);
+  }
+  free(path);
+}
+
 static void snes_SramSave(void)
 {
   Cart *cart;
@@ -2655,7 +2701,7 @@ static void snes_SramSave(void)
 
   rec_close();
   if (rec_sram_blocked) {
-    /* a record/replay cleared the cartridge RAM for this session */
+    /* a record/replay running: its cleared cartridge RAM is not the game's */
     printf("snes: SRAM save skipped (record/replay session)\n");
     return;
   }
@@ -2682,6 +2728,7 @@ static void snes_SramSave(void)
         wrote += fwrite(cart->spc7110->rtc_ram, 1, 16, f);
       fclose(f);
       printf("snes: SRAM saved %s (%lu bytes)\n", path, (unsigned long)wrote);
+      sram_mark_from(path, rec_sram_replayed ? 'r' : 'g');
     } else {
       printf("snes: SRAM save failed fopen %s\n", path);
     }
@@ -2752,8 +2799,11 @@ static uint32_t snes_rom_len;
  * either (SNES_REPLAY=1 / pause menu): the same file. Every 120 frames both
  * log "REC/hash", a hash of work RAM, VRAM, CGRAM, OAM, the APU RAM and the
  * CPU registers: two runs of one recording must log the same lines.
- * The cartridge RAM is cleared for the session, so the SRAM save is skipped
- * from the first record/replay until the game is restarted. */
+ * The cartridge RAM is cleared for the session, so it is not saved while one
+ * runs: a quit or a sleep in the middle skips the .sram. When one ends with
+ * the game going on (the replay runs out, it is stopped, a state is loaded),
+ * the cartridge RAM is the game's again and is saved as usual. Started from
+ * the menu, a record/replay first copies the .sram to .sram.bak (sram_backup). */
 #define REC_MAGIC   0x43524e53u   /* "SNRC" */
 #define REC_VERSION 1u
 #define REC_BUF     1024u
@@ -2762,7 +2812,10 @@ enum { REC_OFF = 0, REC_RECORD, REC_REPLAY };
 static int rec_mode;
 static FILE *rec_f;
 static uint32_t rec_frame, rec_rom_hash;
-static uint16_t rec_buf[REC_BUF];
+/* the pads read or written in blocks of REC_BUF: from the AHB heap at the
+ * first record/replay (rec_buf_get), not a static in the core's RAM pool,
+ * which a Super FX game's block code fills */
+static uint16_t *rec_buf;
 static uint32_t rec_n, rec_pos;
 static odroid_dialog_choice_t *rec_opt_record, *rec_opt_replay;   /* their pause-menu entries */
 static void rec_labels(void);
@@ -2806,6 +2859,16 @@ static void rec_close(void)
   rec_labels();
 }
 
+/* A record/replay that ends while the game goes on (the replay ran out, it
+ * was stopped from the menu, a state was loaded): the cartridge RAM is the
+ * game's again and is saved as usual. A quit or a sleep in the middle of one
+ * keeps it unsaved (snes_SramSave closes it with rec_close). */
+static void rec_end(void)
+{
+  rec_close();
+  rec_sram_blocked = false;
+}
+
 /* power-on, cartridge RAM cleared, the spin learner and the bake as after
  * a ROM load: the same machine every time */
 static void rec_power_on(void)
@@ -2822,6 +2885,7 @@ static void rec_power_on(void)
 #endif
   spin_reset();
   rec_sram_blocked = true;
+  rec_sram_replayed = true;
   rec_frame = 0;
   rec_audio_h = 2166136261u;
 #ifdef HOST_BUILD
@@ -2833,10 +2897,19 @@ static void rec_power_on(void)
 #endif
 }
 
+static bool rec_buf_get(void)
+{
+  if (!rec_buf) rec_buf = (uint16_t *)ahb_calloc(REC_BUF, sizeof(uint16_t));
+  if (!rec_buf) rec_buf = (uint16_t *)ram_calloc(REC_BUF, sizeof(uint16_t));
+  if (!rec_buf) printf("REC: no memory for the input buffer\n");
+  return rec_buf != NULL;
+}
+
 static bool rec_start(int mode)
 {
   char path[300];
   rec_close();
+  if (!rec_buf_get()) return false;
   rec_path(path, sizeof path);
   if (!rec_rom_hash) rec_rom_hash = rec_fnv(snes_rom, snes_rom_len, 2166136261u);
   if (mode == REC_RECORD) {
@@ -2881,7 +2954,7 @@ static uint16_t rec_pad(uint16_t live)
       rec_pos = 0;
       if (!rec_n) {
         printf("REC: replay finished at frame %lu, live input from here\n", (unsigned long)rec_frame);
-        rec_close();
+        rec_end();
         return live;
       }
     }
@@ -2911,6 +2984,7 @@ static bool rec_resume(uint32_t frame)
     rec_f = NULL;
     return false;
   }
+  if (!rec_buf_get()) { fclose(rec_f); rec_f = NULL; return false; }
   fseek(rec_f, (long)(sizeof h + (size_t)frame * sizeof(uint16_t)), SEEK_SET);
   rec_mode = REC_REPLAY;
   rec_frame = frame;
@@ -2978,8 +3052,8 @@ static bool rec_record_cb(odroid_dialog_choice_t *option, odroid_dialog_event_t 
 {
   (void)option; (void)repeat;
   if (event == ODROID_DIALOG_ENTER) {
-    if (rec_mode == REC_RECORD) rec_close();
-    else rec_start(REC_RECORD);
+    if (rec_mode == REC_RECORD) rec_end();
+    else { sram_backup(); rec_start(REC_RECORD); }
   }
   rec_labels();
   return event == ODROID_DIALOG_ENTER;
@@ -2989,8 +3063,8 @@ static bool rec_replay_cb(odroid_dialog_choice_t *option, odroid_dialog_event_t 
 {
   (void)option; (void)repeat;
   if (event == ODROID_DIALOG_ENTER) {
-    if (rec_mode == REC_REPLAY) rec_close();
-    else rec_start(REC_REPLAY);
+    if (rec_mode == REC_REPLAY) rec_end();
+    else { sram_backup(); rec_start(REC_REPLAY); }
   }
   rec_labels();
   return event == ODROID_DIALOG_ENTER;

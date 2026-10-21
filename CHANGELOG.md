@@ -183,6 +183,21 @@
   GSU state and Game Pak RAM every frame with the blocks on and off.
   `snes.bin` +94 KB (only the cart's own record is loaded).
 
+### Changed
+
+- **In-game saves work again after a replay or a recording.** A replay or a
+  recording starts from power-on with the cartridge RAM cleared, so the
+  battery save (`.sram`) is not written while one runs; it stayed off until
+  the game was restarted, and a game saved in the meantime (Super Mario RPG
+  after a replay) lost the save at the next launch. Now the save is written
+  again as soon as the replay runs out, is stopped from the menu or a save
+  state is loaded; quitting in the middle of one still leaves the `.sram` as
+  it was. A replay or recording started from the menu first copies the
+  `.sram` to `.sram.bak`, unless that file was itself written after a
+  replay, so the backup is the last save made outside one. The recording's
+  input buffer moved from the core's RAM to the AHB heap, which leaves 1.4 KB
+  free in the core's RAM with Star Fox's block code loaded (was 20 B).
+
 ## [v0.0.8]
 
 ### Added
