@@ -351,6 +351,14 @@ SECTIONS
       . = ALIGN(4);
       __GSUGAME_yoshi_END__ = .;
     }
+    .gsugame_yoshi_eu
+    {
+      __GSUGAME_yoshi_eu_START__ = .;
+      KEEP(*gsu_blocks_yoshi_eu.o(.gsu_game_hdr))
+      *gsu_blocks_yoshi_eu.o(.text* .rodata* .data* .bss* COMMON)
+      . = ALIGN(4);
+      __GSUGAME_yoshi_eu_END__ = .;
+    }
     .gsugame_starfox
     {
       __GSUGAME_starfox_START__ = .;
@@ -362,6 +370,8 @@ SECTIONS
   }
   ASSERT(__GSUGAME_yoshi_END__ <= __RAM_EMU_END__,
          "SNES: Yoshi's Island's GSU blocks do not fit the RAM_EMU pool")
+  ASSERT(__GSUGAME_yoshi_eu_END__ <= __RAM_EMU_END__,
+         "SNES: Yoshi's Island (Europe)'s GSU blocks do not fit the RAM_EMU pool")
   ASSERT(__GSUGAME_starfox_END__ <= __RAM_EMU_END__,
          "SNES: Star Fox's GSU blocks do not fit the RAM_EMU pool")
 

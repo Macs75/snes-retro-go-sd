@@ -68,6 +68,7 @@ $(SNES)/gsu.c \
 $(SNES)/gsu_zsnes/gsu_core.c \
 $(SNES)/gsu_zsnes/gsu_blocks.c \
 $(SNES)/gsu_zsnes/gsu_blocks_yoshi.c \
+$(SNES)/gsu_zsnes/gsu_blocks_yoshi_eu.c \
 $(SNES)/gsu_zsnes/gsu_blocks_starfox.c \
 $(SNES)/sa1.c \
 $(SNES)/sa1_cpu.c \

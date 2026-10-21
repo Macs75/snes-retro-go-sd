@@ -40,8 +40,9 @@ static u4 gsu_blk_hash(u4 const *const runs, u4 const n)
 
 #ifdef HOST_BUILD
 /* the host links every game's blocks */
-extern struct gsu_blk_game const gsu_blk_game_yoshi, gsu_blk_game_starfox;
-static struct gsu_blk_game const *const gsu_blk_games[] = { &gsu_blk_game_yoshi, &gsu_blk_game_starfox };
+extern struct gsu_blk_game const gsu_blk_game_yoshi, gsu_blk_game_yoshi_eu, gsu_blk_game_starfox;
+static struct gsu_blk_game const *const gsu_blk_games[] = { &gsu_blk_game_yoshi, &gsu_blk_game_yoshi_eu,
+                                                            &gsu_blk_game_starfox };
 #else
 /* the device loads one game's overlay, if its cart has one (main_snes.c) */
 extern void const *snes_gsu_game;

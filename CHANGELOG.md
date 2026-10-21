@@ -161,6 +161,19 @@
   Host: the same state with the blocks on and off over the attract; on the
   device it boots with them. Starwing - Competition differs there and stays
   interpreted.
+- **Super FX: Yoshi's Island (Europe) has block code of its own.** The
+  European cart moved part of the GSU code (1 KB further in bank 09) and
+  rewrote some, so the USA blocks never applied to it. Its blocks come from a
+  gameplay recording, the intro, and the USA version's profiles rewritten in
+  its addresses (`tools/gsu_hist_translate.py`: 87-100% of each USA scene is
+  the same code at the same address), so they cover the scenes the USA
+  version was profiled on, the waterfall room among them (95.5% of its GSU
+  instructions in compiled code, the USA cart 94.6%). Device (replay of a
+  gameplay recording, PAL): 50.0 fps in every window after the start-up, the
+  heaviest at 88.7% of the budget, the GSU 4.9% on average. Host:
+  interpreted GSU instructions 159.8M → 8.1M over that recording, the same
+  GSU state and Game Pak RAM every frame with the blocks on and off.
+  `snes.bin` +94 KB (only the cart's own record is loaded).
 
 ## [v0.0.8]
 

@@ -320,6 +320,26 @@ Placement cost two pins: the drawer moved behind `ppu_runLine` (only OPT lines
 run it) and the 4bpp drawer is pinned, because taking the OPT checks out of
 line shrank `PpuDrawBackgrounds` and would have shifted every drawer behind it.
 
+**Other revisions of a game.** A block table is keyed by absolute GSU
+addresses and enabled by one hash of every byte it was compiled from, so a
+revision qualifies only where its code is identical at all of them.
+`tools/gsu_blk_check.py` hashes a ROM against a game's runs and lists those
+that differ. Starwing (Europe) matched Star Fox at all 74 and takes its record
+by an alias of its cart id (`gsu_blk_game_id`). Yoshi's Island (Europe)
+differed in 17 of 65 -- six routines 1 KB further in bank 09, bank 0b
+rewritten -- and needed blocks of its own. Profiling it again would have meant
+recording every scene: `tools/gsu_hist_translate.py` instead rewrites the USA
+profiles in its addresses (8 bytes of code found at the same address, else
+once in the bank, else the line dropped), and the generator takes them with
+the European cart's own profiles. Its code is still compiled from its own ROM
+and checked by its own hash; a profile only says where the hot code is. The
+waterfall room, never recorded on the European cart, came out 95.5% in chains
+from a save state (the USA cart 94.6%). That cart also stops at a language
+select: `tools/make_idle_rec.py --press` puts a START into an otherwise empty
+recording. The price is a second record, 94 KB of `snes.bin`; checking each
+function's bytes on its own would let one record serve both revisions, but
+only the cart's own record is loaded, so it costs SD space only.
+
 ### 4.6 SPC700: batch the opcodes inside the Thumb-2 engine
 
 In Yoshi's Island the SPC700 cost is real driver work, not polling: a host
