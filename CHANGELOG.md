@@ -121,6 +121,13 @@
   20 fps 8 → 0, the lowest 13.5 → 25.2 fps, 1,484 more frames drawn, the
   65816's share 4.7 points and the SA-1's 3.4 points lower; state hashes
   unchanged.
+- **SA-1: its hot code sits at fixed I-cache offsets.** The SA-1's C bus
+  helpers and span runner start an 8 KB-aligned window in its overlay, in a
+  fixed order, and its Thumb-2 engine follows at a fixed offset, so a change
+  elsewhere in the core no longer moves them. Kirby Super Star on device
+  (PERF replay): windows over budget 4 → 1, the SA-1's share 0.7 points lower
+  on average (its heaviest window 39.3% → 36.5% of the budget), late frames
+  1,376 → 1,285; state hashes unchanged.
 
 ## [v0.0.8]
 

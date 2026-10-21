@@ -284,10 +284,36 @@ SECTIONS
     .sa1_overlay
     {
       __SA1_OVL_START__ = .;
+      /* The hot code at fixed I-cache offsets (the cache way is 8 KB): an
+       * 8 KB-aligned window, the C bus helpers and the span runner in a fixed
+       * order, then the engine at a fixed offset behind them. A change
+       * elsewhere in sa1.c or in the core's bss does not move them: where they
+       * sat measured +-0.5-1 point of Kirby Super Star's frame with the same
+       * work (docs/perf-lessons.md). If the helpers outgrow their slot the
+       * link fails here instead of moving the engine. */
+      . = . + ((0 - ((__CORE_BSS_END__ + .) & 0x1fff)) & 0x1fff);
+      __SA1_HOT_START__ = .;
+      *sa1.o(.text.sa1_cpu_write)
+      *sa1.o(.text.sa1e_wr8)
+      *sa1.o(.text.sa1_sync)
+      *sa1.o(.text.sa1e_rd16)
+      *sa1.o(.text.sa1_reg_read)
+      *sa1.o(.text.sa1_reg_write)
+      *sa1.o(.text.sa1_cpu_read)
+      *sa1.o(.text.sa1e_wr16)
+      *sa1.o(.text.sa1_snes_read)
+      *sa1.o(.text.sa1_ahead)
+      *sa1.o(.text.sa1_interpret)
+      *sa1.o(.text.sa1_peek)
+      *(.sa1ovl.text)                   /* main_snes.c's SA-1-only span runner */
+      __SA1_HOT_END__ = .;
+      ASSERT(__SA1_HOT_END__ <= __SA1_HOT_START__ + 0x3000,
+             "SNES: the SA-1's hot C code outgrew its slot in front of the engine (0x3000)");
+      . = __SA1_HOT_START__ + 0x3000;
+      *sa1_engine.o(.text.sa1_engine)
       *sa1.o(.text* .rodata*)
       *sa1_cpu.o(.text* .rodata*)
       *sa1_engine.o(.text* .rodata*)
-      *(.sa1ovl.text)                   /* main_snes.c's SA-1-only span runner */
       . = ALIGN(4);
       __SA1_OVL_END__ = .;
     }

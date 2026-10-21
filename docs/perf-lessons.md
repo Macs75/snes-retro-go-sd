@@ -689,6 +689,17 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   `sa1_watch_changed` ran 7,319 times in 2 frames, once per SA-1 register
   write during a run-ahead. A write to a register that cannot change what is
   watched (the arithmetic unit, the bit reader, the vectors) now skips it.
+- **The SA-1's code moves with everything before it: pin it too (§5.5).**
+  The overlay follows the core's bss, so any edit moved the engine and its C
+  helpers in the I-cache: Kirby Super Star's SA-1 share moved 0.5-1 point
+  with the same work. Placed where the build that measured best had them
+  (`tools/sa1_overlay_pin.py` writes those lines from an ELF), it recovered
+  1.1 points; a compact window -- the helpers 8 KB-aligned in a fixed order,
+  the engine at +12 KB -- 2.8 points in the heaviest window, and fixes them
+  for later builds. Inside an `OVERLAY` member `.` counts from the member's
+  start: an 8 KB alignment must be computed on `__CORE_BSS_END__ + .`;
+  `ABSOLUTE(.)` there shifted the later overlays' load addresses (ld warns
+  ".gsugame_yoshi lma adjusted").
 
 ---
 
