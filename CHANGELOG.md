@@ -12,6 +12,15 @@
   128 KB carts are not attached yet. On device, Kirby Super Star's intro and
   attract run at 96% of real time on average, most scenes at full speed.
 
+- **Controls: "Zelda B" and "Mario B", and "L/R on Start/Select".** Two
+  more choices of the pause menu's Controls turn the face buttons: in Zelda
+  B the device's A and B are the SNES B and Y and its Start and Select the A
+  and X; in Mario B, A and B are B and Y and TIME+A / TIME+B give A and X.
+  The new switch "L/R on Start/Select" (the Zelda unit only) puts L and R on
+  Select and Start in the Zelda profiles, and GAME+A / GAME+B give what those
+  two buttons gave. Settings already saved keep their meaning; recordings
+  store the SNES pad, so they replay the same with any of them.
+
 ### Performance
 
 - **SA-1: proven wait loops are slept through**, and the 65816's idle skip now
