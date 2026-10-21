@@ -3,9 +3,11 @@
 #define SA1_ENGINE_H
 
 /* struct Sa1: the read map at 0, I-RAM at SA1E_IRAM, the engine's I-RAM
- * write mark a word before it (relative to I-RAM) */
+ * write mark a word before it and a run-ahead's watch map of I-RAM after it
+ * (relative to I-RAM) */
 #define SA1E_IRAM       0x2008
 #define SA1E_WDIRTY     (-8)
+#define SA1E_WMAP       0x908
 
 /* Sa1Run */
 #define RUN_DEBT        0
@@ -20,5 +22,6 @@
 #define RUN_AS          56
 #define RUN_WDEBT       92
 #define RUN_STOP        96
+#define RUN_WATCH       97
 
 #endif

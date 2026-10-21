@@ -109,6 +109,18 @@
   Mario RPG on device (PERF replay, 60 fps): windows over budget 29 → 24, over
   110% 6 → 2, the worst 113.1% → 111.2%, late frames 7,452 → 6,777, 582 more
   frames drawn; state hashes unchanged.
+- **SA-1: a run-ahead also covers a wait on I-RAM, and loops with up to three
+  SA-1 reads.** It was taken only by a loop with one read of `$2300`/`$2301`;
+  now the SA-1 also runs ahead while the 65816 polls I-RAM bytes, up to the
+  first write that changes one of them. The engine watches I-RAM only during
+  a run-ahead: it switches to a second set of its handlers, the 75 that store
+  to I-RAM with the check, so the rest of the time runs the same code as
+  before; the C interpreter looks once after each opcode, and a write to a
+  register that cannot change what is watched skips the check. Super Mario
+  RPG on device (PERF replay, 60 fps): windows over budget 24 → 14, under
+  20 fps 8 → 0, the lowest 13.5 → 25.2 fps, 1,484 more frames drawn, the
+  65816's share 4.7 points and the SA-1's 3.4 points lower; state hashes
+  unchanged.
 
 ## [v0.0.8]
 

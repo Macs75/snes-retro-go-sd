@@ -450,9 +450,12 @@ int cpu_thumb2_fallback(Cpu* cpu, uint32_t opcode) {
 
 #if defined(CPU_SA1) && defined(CPU_SA1_T2)
 /* The SA-1's engine (thumb2/sa1_engine.S) finishes here an opcode it leaves
- * to C, on this copy's bus: the same door as above. */
+ * to C, on this copy's bus: the same door as above. A run-ahead looks once at
+ * what the opcode wrote, not at each write: a check inlined in every write of
+ * this interpreter would slow it down outside run-aheads too. */
 int cpu_thumb2_fallback(Cpu* cpu, uint32_t opcode) {
   cpu_doOpcode(cpu, (uint8_t)opcode);
+  sa1_ran_opcode((Sa1*) cpu->mem);
   return cpu->cyclesUsed;
 }
 #endif

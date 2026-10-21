@@ -74,7 +74,9 @@ typedef struct {
    * Cpu.sp, the words at Cpu+16/20/24 and Cpu.e */
   uint32_t asnap[9];
   int32_t wdebt;              /* 92  the debt the instruction now running started with */
-  uint8_t stop;               /* 96  a run-ahead's watched write happened: return */
+  uint8_t stop;               /* 96  a run-ahead must stop: 1 the engine wrote a watched
+                                 I-RAM byte, 2 a change or an interrupt (sa1_ahead) */
+  uint8_t watch;              /* 97  a run-ahead is running: the engine's watching tables */
 } Sa1Run;
 
 struct Sa1 {
@@ -129,9 +131,15 @@ struct Sa1 {
   uint8_t* bwram;
   uint32_t bwramMask;
   uint32_t romPatch;          /* map_sa1's patch: ROM offset + 1, 0 = none */
-  /* sa1_ahead: what the 65816 polls ($2300, $2301) and its interrupt lines
-   * when the run-ahead began */
-  uint8_t watch, w2300, w2301, wirq, wnmi;
+  /* sa1_ahead: what the 65816 polls ($2300, $2301, I-RAM bytes) and its
+   * interrupt lines when the run-ahead began */
+  uint8_t w2300, w2301, wirq, wnmi, nw;
+  uint16_t woff[SA1_WATCH_MAX];
+  uint8_t wval[SA1_WATCH_MAX];
+  /* the I-RAM bytes a run-ahead watches, and the byte before each (a word
+   * written there covers it): non-zero. The engine checks it after an I-RAM
+   * write (SA1E_WMAP); clear outside a run-ahead. Not saved. */
+  uint8_t wmap[0x800];
 };
 
 #define SA1_SAVE_FIRST iram
@@ -145,10 +153,12 @@ _Static_assert(offsetof(Sa1Run, debt) == RUN_DEBT && offsetof(Sa1Run, lapCycles)
                offsetof(Sa1Run, lapEvents) == RUN_LAPEV && offsetof(Sa1Run, candPc) == RUN_CANDPC &&
                offsetof(Sa1Run, candK) == RUN_CANDK && offsetof(Sa1Run, lapDirty) == RUN_DIRTY &&
                offsetof(Sa1Run, ops) == RUN_OPS && offsetof(Sa1Run, asnap) == RUN_AS &&
-               offsetof(Sa1Run, wdebt) == RUN_WDEBT && offsetof(Sa1Run, stop) == RUN_STOP,
+               offsetof(Sa1Run, wdebt) == RUN_WDEBT && offsetof(Sa1Run, stop) == RUN_STOP &&
+               offsetof(Sa1Run, watch) == RUN_WATCH,
                "Sa1Run: sa1_engine.S reads these offsets");
 _Static_assert(offsetof(Sa1, rdmap) == 0 && offsetof(Sa1, iram) == SA1E_IRAM &&
-               offsetof(Sa1, wdirty) == SA1E_IRAM + SA1E_WDIRTY, "Sa1: sa1_engine.S reads these offsets");
+               offsetof(Sa1, wdirty) == SA1E_IRAM + SA1E_WDIRTY &&
+               offsetof(Sa1, wmap) == SA1E_IRAM + SA1E_WMAP, "Sa1: sa1_engine.S reads these offsets");
 _Static_assert(offsetof(Cpu, sp) == 12 && offsetof(Cpu, dp) == 16 && offsetof(Cpu, c) == 20 &&
                offsetof(Cpu, i) == 24 && offsetof(Cpu, e) == 28, "Cpu: sa1_engine.S snapshots these words");
 int sa1_engine_run(Cpu* cpu, Sa1Run* run);
@@ -826,12 +836,31 @@ uint8_t sa1_cpu_read(Sa1* s, uint32_t a) {
   return 0;
 }
 
-/* A run-ahead (sa1_ahead) stops after a register write that changes what the
- * 65816 polls or its interrupt lines */
-static void sa1_watch_check(Sa1* s) {
+/* A run-ahead (sa1_ahead) stops after a write that changes what the 65816
+ * polls or its interrupt lines, or that starts a character conversion (which
+ * writes I-RAM as BW-RAM is read) */
+static bool sa1_watch_changed(Sa1* s) {
   if (sa1_reg_read(s, 0x2300) != s->w2300 || sa1_reg_read(s, 0x2301) != s->w2301 ||
-      s->snes->cpu->irqWanted != s->wirq || s->snes->cpu->nmiWanted != s->wnmi)
-    s->run.stop = 1;
+      s->snes->cpu->irqWanted != s->wirq || s->snes->cpu->nmiWanted != s->wnmi || s->SA1_in_cc1_dma)
+    return true;
+  for (int i = 0; i < s->nw; i++) if (s->iram[s->woff[i]] != s->wval[i]) return true;
+  return false;
+}
+static void sa1_watch_check(Sa1* s) {
+  if (sa1_watch_changed(s)) s->run.stop = 2;
+}
+void sa1_ran_opcode(Sa1* s) {
+  if (s->run.watch) sa1_watch_check(s);
+}
+
+/* A register the engine's state never depends on: a write to it needs no
+ * resync -- the arithmetic unit, the bit reader, the vectors, the bit-map
+ * format (read through C at each access). Nor can it change what a run-ahead
+ * watches ($2300, $2301, the 65816's interrupt lines, I-RAM, a character
+ * conversion starting). */
+static inline bool sa1_reg_passive(uint16_t adr) {
+  return (adr >= 0x2250 && adr <= 0x2254) || (adr >= 0x2258 && adr <= 0x225b) ||
+         (adr >= 0x2203 && adr <= 0x2208) || (adr >= 0x220c && adr <= 0x220f) || adr == 0x223f;
 }
 
 void sa1_cpu_write(Sa1* s, uint32_t a, uint8_t val) {
@@ -841,11 +870,14 @@ void sa1_cpu_write(Sa1* s, uint32_t a, uint8_t val) {
   if (bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) {
     if (adr >= 0x8000) return;
     if (adr >= 0x6000) { sa1_bw_window_write(s, adr, val); return; }
-    if (adr < 0x0800) { s->iram[adr] = val; return; }
-    if (adr >= 0x3000 && adr < 0x3800) { s->iram[adr - 0x3000] = val; return; }
+    if (adr < 0x0800 || (adr >= 0x3000 && adr < 0x3800)) {
+      s->iram[adr & 0x7ff] = val;
+      if (s->run.watch && s->wmap[adr & 0x7ff]) sa1_watch_check(s);
+      return;
+    }
     if (adr >= 0x2200 && adr < 0x2400) {
       sa1_reg_write(s, adr, val);
-      if (s->watch) sa1_watch_check(s);
+      if (s->run.watch && !sa1_reg_passive(adr)) sa1_watch_check(s);
     }
     return;
   }
@@ -981,20 +1013,14 @@ uint32_t sa1e_rd24_b0(Sa1* s, uint32_t lo) {
   return v | (uint32_t)sa1e_read(s, (lo + 2) & 0xffff) << 16;
 }
 
-/* A register the engine's state never depends on: a write to it needs no
- * resync -- the arithmetic unit, the bit reader, the vectors, the bit-map
- * format (read through C at each access) */
-static inline bool sa1_reg_passive(uint16_t adr) {
-  return (adr >= 0x2250 && adr <= 0x2254) || (adr >= 0x2258 && adr <= 0x225b) ||
-         (adr >= 0x2203 && adr <= 0x2208) || (adr >= 0x220c && adr <= 0x220f) || adr == 0x223f;
-}
-
 int sa1e_wr8(Sa1* s, uint32_t adr, uint32_t val) {
   const uint32_t a = adr & 0x40f800;
   if (a == 0 || a == 0x3000) {
     s->run.lapDirty = 1;
     s->iram[adr & 0x7ff] = (uint8_t)val;
-    return 0;
+    if (!s->run.watch || !s->wmap[adr & 0x7ff]) return 0;
+    sa1_watch_check(s);
+    return s->run.stop;
   }
   sa1_cpu_write(s, adr, (uint8_t)val);
   return (adr & 0x400000) == 0 && (adr & 0xfe00) == 0x2200 &&
@@ -1048,16 +1074,17 @@ static void sa1_interpret(Sa1* s) {
       break;
     }
     s->run.wdebt = s->run.debt;
-    if (s->watch && (c->waiting || c->nmiWanted || (c->irqWanted && !c->i))) {
+    if (s->run.watch && (c->waiting || c->nmiWanted || (c->irqWanted && !c->i))) {
       /* a run-ahead stops before an interrupt (taken ahead of the instruction,
        * it would move the instruction's start), as if that instruction wrote
        * what the 65816 polls: the laps up to it are still the same laps */
-      s->run.stop = 1;
+      s->run.stop = 2;
       break;
     }
     const uint16_t pc0 = c->pc;
     const uint8_t k0 = c->k;
     const int cyc = sa1cpu_runOpcode(c);
+    sa1_ran_opcode(s);
     SA1_PERF_INC(snes_perf_sa1_ops, 1);
     s->run.debt -= cyc;
     s->run.lapCycles += cyc;
@@ -1106,40 +1133,66 @@ void sa1_run(Sa1* s, uint32_t masterClocks) {
   }
 }
 
-/* The 65816 polls the SA-1's messages ($2300/$2301) in a proven loop of L
- * dots whose read is at dot h0 of line v (main_snes.c, idle_sa1_awake_span).
- * Lap by lap it would bring the SA-1 to each read; instead the SA-1 runs to
- * the read of lap n-1 in one go, stopping after the first write that changes
- * those registers or the 65816's interrupt lines (and before anything C has
- * to run). The write's instruction started with debt wdebt: a lap's read at h
- * sees it when the clocks credited up to h exceed (credited to the end) -
- * wdebt, exactly as when the SA-1 runs while its debt is positive. Returns
- * how many laps read what they read now (n: all), and when fewer, the SA-1 is
- * put back to the next lap's read -- the clocks past it taken back, what is
- * owed up to it run -- where running the laps one by one would have it.
- * -1: not from here (the SA-1 caught up on another line, or asleep). */
-int sa1_ahead(Sa1* s, uint16_t v, uint16_t h0, uint16_t L, int n) {
-  if (s->lastV != v || s->idle || h0 < s->lastH || n < 1) return -1;
+/* The 65816 polls the SA-1's messages ($2300/$2301) or I-RAM in a proven
+ * loop of L dots, nr reads a lap at dots h0 + off[r] of line v (main_snes.c,
+ * idle_sa1_awake_span), n reads in all. Lap by lap it would bring the SA-1 to
+ * each read; instead the SA-1 runs to the last read in one go, stopping after
+ * the first write that changes what is polled -- those registers, the I-RAM
+ * bytes iram[] (the engine stops at a write to one of them, sa1_watch_changed
+ * says whether it changed one) -- or the 65816's interrupt lines (and before
+ * anything C has to run). The write's instruction started with debt wdebt: a
+ * read at h sees it when the clocks credited up to h exceed (credited to the
+ * end) - wdebt, exactly as when the SA-1 runs while its debt is positive.
+ * Returns how many reads read what they read now (n: all), and when fewer,
+ * the SA-1 is put back to the next read -- the clocks past it taken back,
+ * what is owed up to it run -- where running the laps one by one would have
+ * it. -1: not from here (the SA-1 caught up on another line, is asleep, or
+ * converts characters). */
+int sa1_ahead(Sa1* s, uint16_t v, uint16_t h0, uint16_t L, int n, const uint16_t* off, int nr,
+              const uint16_t* iram, int niram) {
+  if (s->lastV != v || s->idle || h0 + off[0] < s->lastH || n < 1 || s->SA1_in_cc1_dma ||
+      niram > SA1_WATCH_MAX)
+    return -1;
   const uint32_t hb = s->lastH, half = s->halfClock;
 #define SA1_CLK(h) ((int32_t)(((uint32_t)(h) - hb + half) >> 1))
-  const uint16_t hend = (uint16_t)(h0 + (n - 1) * L);
+#define SA1_READ(j) ((uint16_t)(h0 + ((j) / nr) * L + off[(j) % nr]))
+  const uint16_t hend = SA1_READ(n - 1);
   s->w2300 = sa1_reg_read(s, 0x2300);
   s->w2301 = sa1_reg_read(s, 0x2301);
   s->wirq = s->snes->cpu->irqWanted;
   s->wnmi = s->snes->cpu->nmiWanted;
+  s->nw = (uint8_t)niram;
+  for (int i = 0; i < niram; i++) {
+    const uint16_t o = iram[i] & 0x7ff;
+    s->woff[i] = o;
+    s->wval[i] = s->iram[o];
+    s->wmap[o] = s->wmap[(o - 1) & 0x7ff] = 1;
+  }
   s->run.stop = 0;
-  s->watch = 1;
+  s->run.watch = 1;
   sa1_sync(s, v, hend);
-  s->watch = 0;
+  /* the engine stops at any write to a watched byte (stop 1; 2: a change C
+   * saw, or an interrupt to take): one that left it as it was, and no other
+   * change, is no stop */
+  while (s->run.stop == 1 && !sa1_watch_changed(s)) {
+    s->run.stop = 0;
+    if (s->run.debt <= 0 || s->idle) break;
+    SNES_PERF_BEGIN(perf_t);
+    sa1_interpret(s);
+    SNES_PERF_END(snes_perf_gsu, perf_t);
+  }
+  s->run.watch = 0;
+  for (int i = 0; i < niram; i++) s->wmap[s->woff[i]] = s->wmap[(s->woff[i] - 1) & 0x7ff] = 0;
   if (!s->run.stop) return n;
   s->run.stop = 0;
   const int32_t th = SA1_CLK(hend) - s->run.wdebt;
   int k = 0;
-  while (k < n - 1 && SA1_CLK(h0 + k * L) <= th) k++;
-  const uint16_t hk = (uint16_t)(h0 + k * L);
+  while (k < n - 1 && SA1_CLK(SA1_READ(k)) <= th) k++;
+  const uint16_t hk = SA1_READ(k);
   s->run.debt -= SA1_CLK(hend) - SA1_CLK(hk);
   s->lastH = hk;
   s->halfClock = (uint8_t)((hk - hb + half) & 1);
+#undef SA1_READ
 #undef SA1_CLK
   if (s->run.debt > 0 && !s->idle) {
     SNES_PERF_BEGIN(perf_t);

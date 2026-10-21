@@ -679,6 +679,16 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   replay at a time. `tools/host_regress.py` runs each build once per game,
   caches the results by the binary's contents, and runs six at a time: 39 s,
   0.2 s cached.
+- **A watch on every store costs every store: give it its own handlers.** A
+  run-ahead must stop at the SA-1's first write to the I-RAM bytes the 65816
+  polls. A check in the engine's store path ran outside run-aheads too; the
+  generator now emits a second copy of the 75 handlers that store to I-RAM,
+  with the check, and the engine picks the table at entry (`RUN_WATCH`): 246
+  handlers stay the bytes they were. Kirby Super Star still had 24 windows
+  over a point heavier on the device, and it was not the stores: counted on gwemu,
+  `sa1_watch_changed` ran 7,319 times in 2 frames, once per SA-1 register
+  write during a run-ahead. A write to a register that cannot change what is
+  watched (the arithmetic unit, the bit reader, the vectors) now skips it.
 
 ---
 

@@ -16,6 +16,9 @@ page's last 4 bytes, or a jump). N is bit 31 of r10, Z is set when bits 0-30
 are all 0 (sxtb / sxth of a result gives both). C, V, D, I, m, x and the rest
 stay in the Cpu struct, as do SP, DP, DB and K. A handler is written for one
 m/x width: there is a dispatch table per combination (REP, SEP, PLP switch it).
+A run-ahead (sa1_ahead, Sa1Run.watch) runs a second set of tables, whose
+handlers with an inline I-RAM store check the watch map after it (WATCH); the
+other handlers are the same in both sets, and the first set has no check.
 Every handler ends with its own dispatch, charging the opcode's cycles the way
 cpu.c does (cyclesPerOpcode plus the same extras).
 
@@ -128,22 +131,40 @@ def RD24_b0():
     return s + [d + ':'] + cold([m + ':', 'bl sa1e_rd24_s', 'b.w %s' % d])
 
 
+WATCHED = [False]   # generating the run-ahead's copy of a handler
+STORES = [False]    # the handler being generated has an inline I-RAM store
+
+
+def WATCH(d):
+    """After an I-RAM store at r2 + r3, in the run-ahead's copy: a byte it
+    watches (Sa1.wmap, the byte and the one before it, for a word) stops it
+    (sa1e_iram_hit). Nothing in the other copy."""
+    STORES[0] = True
+    if not WATCHED[0]:
+        return [], []
+    w = L('w')
+    return ['add ip, r2, r3', 'ldrb ip, [ip, #SA1E_WMAP]', 'cmp ip, #0', 'bne.w %s' % w], \
+        [w + ':', 'bl sa1e_iram_hit', 'b.w %s' % d]
+
+
 def WR8(kind):
     m, d = L('m'), L('d')
+    wt, wc = WATCH(d)
     s = ['tst r1, #0x400000', 'bne.w %s' % m] if kind == 'l' else []
     s += iram_test(m) + ['ldr r2, [sp, #F_IRAM]', 'ubfx r3, r1, #0, #11', 'strb r0, [r2, r3]',
-                         'str r2, [r2, #SA1E_WDIRTY]']
-    return s + [d + ':'] + cold([m + ':', 'bl sa1e_wr8_%s' % ('l' if kind == 'l' else 's'), 'b.w %s' % d])
+                         'str r2, [r2, #SA1E_WDIRTY]'] + wt
+    return s + [d + ':'] + cold([m + ':', 'bl sa1e_wr8_%s' % ('l' if kind == 'l' else 's'), 'b.w %s' % d] + wc)
 
 
 def WR16(kind, rev):
     m, d = L('m'), L('d')
     s = ['tst r1, #0x400000', 'bne.w %s' % m] if kind == 'l' else []
+    wt, wc = WATCH(d)
     s += iram_test(m) + ['add r2, r1, #1', 'lsls r2, r2, #21', 'beq.w %s' % m,
                          'ldr r2, [sp, #F_IRAM]', 'ubfx r3, r1, #0, #11', 'strh r0, [r2, r3]',
-                         'str r2, [r2, #SA1E_WDIRTY]']
+                         'str r2, [r2, #SA1E_WDIRTY]'] + wt
     stub = 'sa1e_wr16_l%s' % ('r' if rev else '') if kind == 'l' else 'sa1e_wr16_s_%s%s' % (kind, 'r' if rev else '')
-    return s + [d + ':'] + cold([m + ':', 'bl ' + stub, 'b.w %s' % d])
+    return s + [d + ':'] + cold([m + ':', 'bl ' + stub, 'b.w %s' % d] + wc)
 
 
 # --- addressing modes: r1 = the low address; returns (code, kind) -----------
@@ -273,7 +294,7 @@ FB = '.Lfb'
 
 
 def add(op, m, x, lines, name=None):
-    lab = '.Lh%02x_%d%d' % (op, m, x)
+    lab = '.Lh%02x_%d%d%s' % (op, m, x, 'w' if WATCHED[0] else '')
     tails = [t for t in TAIL if t in lines]
     lines = [l for l in lines if l not in TAIL]
     if tails:
@@ -476,10 +497,12 @@ def jumpk(c):
 
 
 def gen():
-    tab = {}
+    """-> the two table sets: {(m, x): 256 labels}, plain and the run-ahead's"""
+    tab, tabw = {}, {}
     for m in (0, 1):
         for x in (0, 1):
             tab[(m, x)] = ['.Lfb'] * 256
+            tabw[(m, x)] = ['.Lfb'] * 256
 
     def put(op, fn, dep, mem=True):
         """dep: which flags the handler's code depends on ('', 'm', 'x', 'mx');
@@ -493,8 +516,15 @@ def gen():
                         for o, fm, fx in ASM_FORMS):
                     continue
                 if key not in made:
-                    made[key] = add(op, key[0], key[1], fn(key[0] if 'm' in dep else 1, key[1] if 'x' in dep else 1))
-                tab[(m, x)][op] = made[key]
+                    args = (key[0] if 'm' in dep else 1, key[1] if 'x' in dep else 1)
+                    STORES[0] = False
+                    lab = labw = add(op, key[0], key[1], fn(*args))
+                    if STORES[0]:
+                        WATCHED[0] = True
+                        labw = add(op, key[0], key[1], fn(*args))
+                        WATCHED[0] = False
+                    made[key] = lab, labw
+                tab[(m, x)][op], tabw[(m, x)][op] = made[key]
 
     names = ['ORA', 'AND', 'EOR', 'ADC', 'STA', 'LDA', 'CMP', 'SBC']
     for i, name in enumerate(names):
@@ -565,8 +595,12 @@ def gen():
     idx(0xbb, ['mov r8, r9'] + setzn8('r8'), ['mov r8, r9'] + setzn16('r8'))            # TYX
     idx(0xba, ['ldrb r8, [r4, #CPU_SP]'] + setzn8('r8'), ['ldrh r8, [r4, #CPU_SP]'] + setzn16('r8'))   # TSX
 
+    # lines: a list, or a function giving it when the code has a store (made
+    # again for the run-ahead's copy, WATCH)
+    mk = lambda lines: lines() if callable(lines) else lines
+
     def imp(op, lines, mem=False):
-        put(op, lambda m, x: lines + NEXT(CYC[op]), '', mem)
+        put(op, lambda m, x: mk(lines) + NEXT(CYC[op]), '', mem)
 
     imp(0x9a, ['strh r8, [r4, #CPU_SP]'])                                    # TXS
     imp(0x1b, ['strh r7, [r4, #CPU_SP]'])                                    # TCS
@@ -582,11 +616,11 @@ def gen():
     imp(0x58, ['mov.w r0, #0', 'strb r0, [r4, #CPU_I]', 'mov.w r5, #0'])  # CLI: an IRQ may be due
 
     # REP / SEP / PLP / PHP: the P byte
-    imp_raw = lambda op, lines, mem=False: put(op, lambda m, x: lines, '', mem)
+    imp_raw = lambda op, lines, mem=False: put(op, lambda m, x: mk(lines), '', mem)
     imp_raw(0xc2, ['ldrb r1, [r6], #1', 'bl .Lgetp', 'bic r0, r0, r1', 'subs r11, r11, #%d' % CYC[0xc2], 'b.w .Lsetp'])
     imp_raw(0xe2, ['ldrb r1, [r6], #1', 'bl .Lgetp', 'orr r0, r0, r1', 'subs r11, r11, #%d' % CYC[0xe2], 'b.w .Lsetp'])
     imp_raw(0x28, pull8() + ['subs r11, r11, #%d' % CYC[0x28], 'b.w .Lsetp'], True)
-    imp_raw(0x08, ['bl .Lgetp', 'ldr lr, [sp, #F_TAB]'] + push8() + NEXT(CYC[0x08]), True)
+    imp_raw(0x08, lambda: ['bl .Lgetp', 'ldr lr, [sp, #F_TAB]'] + push8() + NEXT(CYC[0x08]), True)
 
     # --- stack -------------------------------------------------------------
     put(0x48, lambda m, x: ['mov r0, r7'] + (push8() if m else push16()) + NEXT(CYC[0x48] + (0 if m else 1)), 'm')
@@ -597,14 +631,14 @@ def gen():
     for op, r in ((0xfa, 'r8'), (0x7a, 'r9')):
         put(op, lambda m, x, op=op, r=r: ((pull8() + ['mov %s, r0' % r] + setzn8(r)) if x else
                                           (pull16() + ['mov %s, r0' % r] + setzn16(r))) + NEXT(CYC[op] + (0 if x else 1)), 'x')
-    imp(0x8b, ['ldrb r0, [r4, #CPU_DB]'] + push8(), True)                          # PHB
-    imp(0x4b, ['ldrb r0, [r4, #CPU_K]'] + push8(), True)                           # PHK
-    imp(0x0b, ['ldrh r0, [r4, #CPU_DP]'] + push16(), True)                         # PHD
+    imp(0x8b, lambda: ['ldrb r0, [r4, #CPU_DB]'] + push8(), True)                          # PHB
+    imp(0x4b, lambda: ['ldrb r0, [r4, #CPU_K]'] + push8(), True)                           # PHK
+    imp(0x0b, lambda: ['ldrh r0, [r4, #CPU_DP]'] + push16(), True)                         # PHD
     imp(0xab, pull8() + ['strb r0, [r4, #CPU_DB]'] + setzn8('r0'), True)           # PLB
     imp(0x2b, pull16() + ['strh r0, [r4, #CPU_DP]'] + setzn16('r0'), True)         # PLD
-    imp(0xf4, ['ldrh r0, [r6], #2', 'movw r2, #0xc2ae', 'cmp r0, r2', 'it eq', 'moveq r9, #0'] + push16(), True)   # PEA (cpu.c's y = 0)
-    imp(0xd4, am_dp()[0] + RD16('b0') + push16(), True)                            # PEI
-    imp(0x62, ['ldrh r0, [r6], #2', 'sxth r0, r0'] + pc_after('r2') + ['add r0, r0, r2', 'uxth r0, r0'] + push16(), True)  # PER
+    imp(0xf4, lambda: ['ldrh r0, [r6], #2', 'movw r2, #0xc2ae', 'cmp r0, r2', 'it eq', 'moveq r9, #0'] + push16(), True)   # PEA (cpu.c's y = 0)
+    imp(0xd4, lambda: am_dp()[0] + RD16('b0') + push16(), True)                            # PEI
+    imp(0x62, lambda: ['ldrh r0, [r6], #2', 'sxth r0, r0'] + pc_after('r2') + ['add r0, r0, r2', 'uxth r0, r0'] + push16(), True)  # PER
 
     # --- branches ------------------------------------------------------------
     conds = {0x10: ('cmp r10, #0', 'bmi'), 0x30: ('cmp r10, #0', 'bpl'),
@@ -643,10 +677,10 @@ def gen():
     put(0x60, lambda m, x: save_pc0() + pull16() + ['add r1, r0, #1', 'uxth r1, r1'] + jump16(CYC[0x60]), '')   # RTS
     put(0x6b, lambda m, x: save_pc0() + pull16() + ['add r0, r0, #1', 'uxth r0, r0', 'str r0, [sp, #F_TMP]'] + pull8() +
         ['mov r2, r0', 'ldr r1, [sp, #F_TMP]', 'ldrb r3, [r4, #CPU_K]', 'strb r2, [r4, #CPU_K]'] + jumpk(CYC[0x6b]), '')
-    return tab
+    return tab, tabw
 
 
-TAB = gen()
+TAB, TABW = gen()
 
 HEADER = r'''@ GENERATED by tools/gen_sa1_engine.py -- edit the generator, not this file.
 @
@@ -674,7 +708,8 @@ HEADER = r'''@ GENERATED by tools/gen_sa1_engine.py -- edit the generator, not t
         .equ    F_OPS, 32
         .equ    F_LAPOPS, 36
         .equ    F_TMP, 40
-        .equ    FRAME, 48
+        .equ    F_TABS, 48              @ the table set: sa1e_tab, or + 4096 for a run-ahead
+        .equ    FRAME, 56
 
 #if defined(SNES_PERF) && !defined(SNES_PROFLITE)
 #define SA1E_COUNT 1
@@ -696,6 +731,13 @@ sa1_engine_run:
         add     r3, r2, r3
         str     r3, [sp, #F_IRAM]
         ldr     r11, [r1, #RUN_DEBT]
+        movw    r2, #:lower16:sa1e_tab
+        movt    r2, #:upper16:sa1e_tab
+        ldrb    r3, [r1, #RUN_WATCH]
+        cmp     r3, #0
+        it      ne
+        addne   r2, r2, #4096
+        str     r2, [sp, #F_TABS]
         ldr     r3, [r1, #RUN_LAPCYC]
         add     r3, r3, r11
         str     r3, [sp, #F_LAPST]
@@ -743,8 +785,7 @@ sa1_engine_run:
         ldrb    r2, [r4, #CPU_MF]
         ldrb    r3, [r4, #CPU_XF]
         orr     r2, r3, r2, lsl #1
-        movw    r3, #:lower16:sa1e_tab
-        movt    r3, #:upper16:sa1e_tab
+        ldr     r3, [sp, #F_TABS]
         add     lr, r3, r2, lsl #10
         str     lr, [sp, #F_TAB]
         ldr     r2, [sp, #F_SA1]
@@ -938,8 +979,7 @@ HEADCORE_B
         uxtbne  r8, r8
         uxtbne  r9, r9
         ubfx    r2, r0, #4, #2
-        movw    r3, #:lower16:sa1e_tab
-        movt    r3, #:upper16:sa1e_tab
+        ldr     r3, [sp, #F_TABS]
         add     lr, r3, r2, lsl #10
         str     lr, [sp, #F_TAB]
 ''' + '\n'.join(code(NEXT(0)))
@@ -1033,6 +1073,22 @@ STUBS = r'''
         WSTUB   sa1e_wr16_s_l, sa1e_wr16, "uxth r3, r0; add r2, r1, #1; bic r2, r2, #0xff000000"
         WSTUB   sa1e_wr16_s_lr, sa1e_wr16r, "uxth r3, r0; add r2, r1, #1; bic r2, r2, #0xff000000"
 
+@ An inline I-RAM write hit a byte a run-ahead watches (WATCH): stop after
+@ this instruction (Sa1Run.stop = 1, r5 = 0: the resync returns 4) with the
+@ debt it started with in Sa1Run.wdebt, as the C writes do; sa1_ahead looks
+@ at what changed. r0-r3 kept.
+        .thumb_func
+sa1e_iram_hit:
+        push    {r0, r1, r2, r3, lr}
+        ldr     r0, [sp, #(20 + F_RUN)]
+        str     r11, [r0, #RUN_WDEBT]
+        mov.w   r1, #1
+        strb    r1, [r0, #RUN_STOP]
+        mov.w   r5, #0
+        pop     {r0, r1, r2, r3, ip}
+        ldr     lr, [sp, #F_TAB]
+        bx      ip
+
 @ 24-bit writes: BW-RAM banks $40-$4F straight to the read map's page (the
 @ same bytes sa1_cpu_write writes; no page during a type 1 character
 @ conversion or for BW-RAM under 8 KB) and the lap marked, as the I-RAM
@@ -1088,16 +1144,20 @@ def main():
     s = HEADER.replace('HEADCORE_A', headcore('a')).replace('HEADCORE_B', headcore('b'))
     s += '\n\n' + '\n'.join(taken_tails()) + '\n'
     s += '\n@ --- the handlers ---\n'
-    for lab, lines in bodies:
+    # the run-ahead's copies after all the others: the plain ones stay as close
+    # together as without them (the I-cache)
+    for lab, lines in sorted(bodies, key=lambda b: b[0].endswith('w')):
         s += '\n' + lab + ':\n' + '\n'.join(code(lines)) + '\n'
     s += STUBS
-    s += '\n@ the dispatch tables: m = 0/1, x = 0/1, 256 entries each\n'
+    s += '\n@ the dispatch tables: m = 0/1, x = 0/1, 256 entries each; then the same\n'
+    s += '@ for a run-ahead (sa1e_tab + 4096)\n'
     s += '        .section .rodata.sa1_engine,"a",%progbits\n        .balign 4\n        .global sa1e_tab\nsa1e_tab:\n'
-    for m in (0, 1):
-        for x in (0, 1):
-            s += '@ m=%d x=%d\n' % (m, x)
-            for op in range(256):
-                s += '        .word   %s + 1\n' % TAB[(m, x)][op]
+    for tag, tab in (('', TAB), (' run-ahead', TABW)):
+        for m in (0, 1):
+            for x in (0, 1):
+                s += '@%s m=%d x=%d\n' % (tag, m, x)
+                for op in range(256):
+                    s += '        .word   %s + 1\n' % tab[(m, x)][op]
     s += '        .section .note.GNU-stack,"",%progbits\n'
     open(OUT, 'w').write(s)
     print('wrote %s: %d handlers' % (OUT, len(bodies)))
