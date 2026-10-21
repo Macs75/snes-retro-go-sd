@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """One row per PROFLITE window (make PROFLITE=1 device log): speed (emulated
-over wall time), late frames, audio silence; with a second log, the two side
-by side, paired by window index, and the totals of both.
+over wall time), the frames drawn and what that is per second of real time
+(what the player sees), late frames, audio silence; with a second log, the two
+side by side, paired by window index, and the totals of both. The totals name
+the lowest real fps of any window: a mean speed near 100% can hide 15 fps
+scenes.
 
   proflite_windows.py new.log [old.log]
 """
@@ -12,9 +15,9 @@ import sys
 def windows(path):
     rows, cur = [], None
     for line in open(path, errors='replace'):
-        m = re.search(r'PROFLITE: frames=(\d+) shown=\d+ late=(\d+) of \d+ wall_ms=(\d+)', line)
+        m = re.search(r'PROFLITE: frames=(\d+) shown=(\d+) late=(\d+) of \d+ wall_ms=(\d+)', line)
         if m:
-            cur = {'f': int(m[1]), 'late': int(m[2]), 'wall': int(m[3]), 'sil': 0}
+            cur = {'f': int(m[1]), 'shown': int(m[2]), 'late': int(m[3]), 'wall': int(m[4]), 'sil': 0}
             rows.append(cur)
             continue
         m = re.search(r'PROFLITE: audio silence=(\d+) ms', line)
@@ -27,26 +30,33 @@ def speed(r):
     return 100.0 * r['f'] / 60.0988 * 1000 / r['wall']
 
 
+def fps(r):
+    return r['shown'] * 1000.0 / r['wall']
+
+
 def total(rows):
     f = sum(r['f'] for r in rows)
     w = sum(r['wall'] for r in rows)
     late = sum(r['late'] for r in rows)
+    low = min(range(1, len(rows)), key=lambda i: fps(rows[i])) if len(rows) > 1 else 0
     return ('speed=%.1f%% late=%d/%d (%.0f%%) silence=%d ms (%d ms after the first window), '
-            'windows with silence %d, under 95%% speed %d' %
+            'windows with silence %d, under 95%% speed %d; real fps: mean %.1f, lowest %.1f (window %d), '
+            'windows under 20 fps %d, under 28 fps %d' %
             (100.0 * f / 60.0988 * 1000 / w, late, f, 100.0 * late / f, sum(r['sil'] for r in rows),
              sum(r['sil'] for r in rows[1:]), sum(1 for r in rows[1:] if r['sil']),
-             sum(1 for r in rows if speed(r) < 95)))
+             sum(1 for r in rows if speed(r) < 95), sum(r['shown'] for r in rows) * 1000.0 / w,
+             fps(rows[low]), low + 1, sum(1 for r in rows[1:] if fps(r) < 20), sum(1 for r in rows[1:] if fps(r) < 28)))
 
 
 def main():
     a = windows(sys.argv[1])
     b = windows(sys.argv[2]) if len(sys.argv) > 2 else None
-    print('win  speed%  late silence_ms' + ('  |  old: speed%  late silence_ms' if b else ''))
+    print('win  speed% drawn   fps  late silence_ms' + ('  |  old: speed% drawn   fps  late silence_ms' if b else ''))
     for i, r in enumerate(a):
-        s = '%3d %7.1f %5d %8d' % (i + 1, speed(r), r['late'], r['sil'])
+        s = '%3d %7.1f %5d %5.1f %5d %8d' % (i + 1, speed(r), r['shown'], fps(r), r['late'], r['sil'])
         if b and i < len(b):
             o = b[i]
-            s += '  |  %7.1f %5d %8d' % (speed(o), o['late'], o['sil'])
+            s += '  |  %7.1f %5d %5.1f %5d %8d' % (speed(o), o['shown'], fps(o), o['late'], o['sil'])
         print(s)
     print('new: ' + total(a))
     if b:

@@ -12,13 +12,14 @@ skipped asleep, SA-1 wakes, the cart-path reads of each CPU (PROF/sa1), the
 import argparse, re
 
 PATS = [
-    (r'PROF/frame: emulated=(\d+) shown=\d+ wall_ms=(\d+)', ('nfr', 'wall')),
+    (r'PROF/frame: emulated=(\d+) shown=(\d+) wall_ms=(\d+)', ('nfr', 'shown', 'wall')),
     (r'budget=(\d+) busy=(\d+) heaviest=(\d+)', ('budget', 'busy', 'heavy')),
     (r'PROF/emu: total=(\d+) \[cpu=(\d+) ppu=(\d+) apu=(\d+) dma=(\d+) (?:gsu|sa1)=(\d+)\]',
      ('tot', 'cpu', 'ppu', 'apu', 'dma', 'sa1')),
     (r'PROF/ops: ops=(\d+)', ('ops',)),
     (r'PROF/sa1: ops=(\d+) skipped=(\d+) wakes=(\d+) cart_reads cpu=(\d+) sa1=(\d+)',
      ('s_ops', 's_skip', 'wakes', 'rd_cpu', 'rd_sa1')),
+    (r'PROF/sa1b: slices=(\d+)', ('slices',)),
     (r'PROF/idle: site=\S+ mem=\d+ laps=(\d+)', ('laps',)),
     (r'PROF/pace: late=(\d+)', ('late',)),
 ]
