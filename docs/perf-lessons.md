@@ -1048,7 +1048,7 @@ simplification, or another GCC, does not undo it unknowingly.
 ## 6. Tooling quick reference
 
 ```sh
-# Host regression, two builds over the ten-recording set (tools/host_regress.set):
+# Host regression, two builds over the recording set (tools/host_regress.set):
 # same state (REC/hash, SA-1 every frame), per-window instruction counts; ~40 s
 tools/host_regress.py --old <baseline snes_host> --new snes_host -j 6
 
@@ -1086,6 +1086,9 @@ diagnostic build only). Its per-opcode cost is therefore that of a path normal
 builds don't run: to split the 65816 figure of a normal build, use
 `PERF=1 PERF_CPUB=1` (batch / events / idle / rest, `PROF/cpub`, summed per phase
 by `tools/prof_log_compare.py`). Two PERF logs of an SA-1 replay, window by
-window: `tools/prof_sa1_compare.py`; the PPU's split per drawn frame of a
+window: `tools/prof_sa1_compare.py`; of any replay (the 65816's cycles, the span
+runner's cost a call, frames shown): `tools/prof_pair.py`; which ROMs of a
+collection hold a wait-loop shape the skips do not take on their own:
+`tools/idle_shape_scan.py`; the PPU's split per drawn frame of a
 `PERF_PPU=1` log: `tools/prof_ppu_windows.py`. A change to the Thumb-2 engines or bridges is
 checked with `tools/qemu_vs_host.py` (gwemu against the host, per recording).
