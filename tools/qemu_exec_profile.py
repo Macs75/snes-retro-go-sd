@@ -14,6 +14,10 @@ dispatched (blocks starting at a handler of its table, sa1e_tab), and its ARM
 instructions per SA-1 instruction by engine part (labels from an assembler
 listing of the engine), plus the C bus helpers it calls.
 
+--func NAME[,NAME]: also each function's disassembly, every instruction with
+the times it ran over the profiled frames (from the blocks that cover it) --
+which lines of a function are its cost, and how often its calls are made.
+
 --start must be a frame with a REC/hash line (a multiple of 120). The log is
 large (~100 MB a frame): it goes to --log (default: a temp file, deleted).
 """
@@ -195,6 +199,42 @@ def sa1_report(log, syms):
     print('# runs: engine entries %d, .Lsync %d' % (execs[base], execs[sync]))
 
 
+def func_report(log, syms, names, frames):
+    size, execs = load(log)
+    addr = {n: (a, sz) for a, sz, n in syms}
+    for name in names.split(','):
+        if name not in addr:
+            print('# %s: no such symbol' % name); continue
+        a0, sz = addr[name]
+        lines, src, where = [], [], '?'
+        for l in docker('arm-none-eabi-objdump -d -l --no-show-raw-insn --start-address=%d --stop-address=%d '
+                        'snes_qemu.elf' % (a0, a0 + sz)).splitlines():
+            m = re.match(r'^\s*([0-9a-f]+):\s+(.*)$', l)
+            if m:
+                lines.append((int(m.group(1), 16), m.group(2)))
+                src.append(where)
+            elif re.match(r'^/\S+:\d+', l):
+                where = os.path.basename(l.split()[0])
+        idx = {pc: i for i, (pc, _) in enumerate(lines)}
+        ran = collections.Counter()
+        for pc, k in execs.items():
+            if pc in idx:
+                for j in range(idx[pc], min(len(lines), idx[pc] + size.get(pc, 0))):
+                    ran[j] += k
+        tot = sum(ran.values())
+        print('# %s: %d ARM instructions in %d frames (%.0f a frame); entered %d times' %
+              (name, tot, frames, tot / max(1, frames), execs.get(a0, 0)))
+        by = collections.Counter()
+        for i in range(len(lines)):
+            by[src[i]] += ran[i]
+        print('#   by source line (a frame):')
+        for w, k in by.most_common(25):
+            if k:
+                print('#   %8.0f  %s' % (k / max(1, frames), w))
+        for i, (pc, txt) in enumerate(lines):
+            print('%10s  %08x  %-40s %s' % (ran[i] if ran[i] else '', pc, txt, src[i]))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('dir', nargs='?'); ap.add_argument('rom', nargs='?')
@@ -204,17 +244,20 @@ def main():
     ap.add_argument('--frames', type=int, default=2)
     ap.add_argument('--top', type=int, default=40)
     ap.add_argument('--log')
+    ap.add_argument('--func')
     a = ap.parse_args()
     syms = symbols()
     if a.analyse:
         analyse(a.analyse, syms, a.top)
         if a.sa1: sa1_report(a.analyse, syms)
+        if a.func: func_report(a.analyse, syms, a.func, a.frames)
         return
     log = a.log or tempfile.mktemp(suffix='.qlog')
     try:
         run(a, log)
         analyse(log, syms, a.top)
         if a.sa1: sa1_report(log, syms)
+        if a.func: func_report(log, syms, a.func, a.frames)
     finally:
         if not a.log and os.path.exists(log):
             os.remove(log)
