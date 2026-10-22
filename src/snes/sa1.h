@@ -64,6 +64,9 @@ void sa1_statelog(Sa1* s, unsigned long frame);   /* SA1_STATELOG=file */
  * and a 65816 read of I-RAM / BW-RAM / ROM without any side effect (0 for
  * anything else). */
 bool sa1_asleep(const Sa1* s);
+/* sa1_asleep without the call, for the 65816's span runner: the sleeping
+ * SA-1's hold byte and its type 1 character conversion flag (sa1_link) */
+extern const uint8_t *g_sa1_hold, *g_sa1_cc1;
 /* the 65816 polls $2300/$2301 or I-RAM in a proven loop: the SA-1 runs ahead
  * (sa1.c). nr reads a lap at h0 + off[r], the I-RAM bytes they read in iram[] */
 #define SA1_WATCH_MAX 6

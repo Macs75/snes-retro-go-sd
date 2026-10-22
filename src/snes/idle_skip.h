@@ -114,6 +114,22 @@ typedef struct {
   /* a $4212 loop: the shared second proof (idle_hvb_proof in main_snes.c)
    * holds this site's lap for the other value it reads */
   bool     alt;
+  /* the X and Y halfwords of a stored boundary that the lap depends on: 0 when
+   * no instruction of the loop reads or writes that register, else 0xffff.
+   * Such a register is the caller's (Kirby Super Star enters its BIT/BEQ wait
+   * with other X and Y at each of the SA-1's requests): a stored lap matches
+   * whatever it holds (idle_img_eq) and stepping keeps it (idle_img_put). */
+  uint16_t img_mx, img_my;
+  /* idle_sa1_awake_span's read schedule from boundary sched_i - 1 (0: none
+   * built for this proof; idle_prove and idle_proof_load clear it): the
+   * boundaries of the lap's SA-1 reads in order and their dots from there,
+   * and the I-RAM bytes a run-ahead watches, sched_wok when all its SA-1
+   * reads are $2300/$2301/$230E or I-RAM. Built per call, it was a third of
+   * that function's instructions in Kirby Super Star. */
+  uint8_t  sched_i, sched_nrd, sched_nw, sched_wok;
+  uint8_t  sched_rj[IDLE_SA1_READS];
+  uint16_t sched_roff[IDLE_SA1_READS];
+  uint16_t sched_wiram[6];                         /* SA1_WATCH_MAX (sa1.h) */
   IdleState st[IDLE_MAX_STATES];
   uint8_t  ch[IDLE_MAX_STATES];   /* charge of the opcode at each boundary */
   uint8_t  npmem;
@@ -203,8 +219,13 @@ extern uint8_t g_idle_sa1_budget;   /* and for a loop polling the SA-1 while it 
  * sites (main_snes.c's idle_span_line): in DTCM, allocated by idle_alloc() */
 typedef struct {
   uint32_t pc[4];     /* the last spans' pcs, [0] the last */
+  uint32_t sites[2];  /* a bit for each 32-byte block of code a site covers,
+                       * hashed (idle_site_bit): a span whose block's bit is
+                       * clear is in no site, and is not looked for among them */
   uint8_t  budget;    /* idle_span_search's site searches left this frame */
 } IdleSpan;
+/* the bit of the 32-byte code block holding bank:pc (pc24), 0..63 */
+static inline uint32_t idle_site_bit(uint32_t pc24) { return ((pc24 >> 5) * 0x9e3779b1u) >> 26; }
 extern IdleSpan *g_idle_span;
 #define g_idle_span_budget (g_idle_span->budget)
 extern uint8_t g_idle_hvb_budget;   /* and the second proofs of $4212 loops (main_snes.c) */
@@ -254,12 +275,23 @@ static inline bool idle_env_ok(const Cpu *cpu, const IdleSkip *g) {
   return cpu->e == g->e && cpu->mf == g->mf && cpu->xf == g->xf &&
          (!g->uses_db || cpu->db == g->db) && (!g->uses_dp || cpu->dp == g->dp);
 }
-/* a WRAM-resident loop's code is still the code that was decoded */
+/* a WRAM-resident loop's code is still the code that was decoded. GCC: four
+ * bytes a compare through an aligned(1) type, which the M7 loads with one
+ * unaligned LDR (-munaligned-access, the default for ARMv7-M); as bytes it
+ * was ~13K instructions a frame of Kirby Super Star, whose waits run in WRAM
+ * and are checked at every span. A compiler that splits the access into
+ * bytes again would only make it as slow as the byte loop. */
+typedef uint32_t __attribute__((aligned(1), may_alias)) idle_u32u;
 static inline bool idle_code_ok(const Snes *s, const IdleSkip *g) {
   if (!g->code_ram) return true;
   const uint8_t *ram = s->ram;
   uint32_t base = (g->bank == 0x7e || g->bank == 0x7f) ? ((uint32_t)(g->bank & 1) << 16) | g->head : g->head;
-  for (int i = 0; i < g->ncode; i++) if (ram[(base + i) & 0x1ffff] != g->code[i]) return false;
+  const int n = g->ncode;
+  int i = 0;
+  if (base + (uint32_t)n <= 0x20000)                   /* not wrapping at the end of WRAM */
+    for (; i + 4 <= n; i += 4)
+      if (*(const idle_u32u *)(ram + base + i) != *(const idle_u32u *)(g->code + i)) return false;
+  for (; i < n; i++) if (ram[(base + i) & 0x1ffff] != g->code[i]) return false;
   return true;
 }
 

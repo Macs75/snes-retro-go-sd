@@ -328,6 +328,7 @@ SECTIONS
       ASSERT(. <= __SA1_HOT_START__ + 0x1ffc, "SNES: sa1_peek outgrew its slot");
       . = __SA1_HOT_START__ + 0x1ffc;
       *(.sa1ovl.text)                   /* main_snes.c's SA-1-only span runner */
+      *(.sa1ovl.text.tail)              /* its helpers that must not move it (idle_mem_eq_sa1) */
       ASSERT(. <= __SA1_HOT_START__ + 0x29e0, "SNES: the SA-1 span runner outgrew its slot");
       . = __SA1_HOT_START__ + 0x29e0;
       *sa1.o(.text.sa1_ahead)

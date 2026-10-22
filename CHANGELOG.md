@@ -236,6 +236,25 @@
   Castlevania (60 fps) the 65816 2.30M → 1.86M cycles a frame (-19.4%), every
   frame shown; Batman the 65816 -18%, 6,354 of 6,360 frames shown at 60 fps;
   Kirby Super Star unchanged.
+- **Idle skip: a wait loop is matched whatever X and Y it is entered with,
+  when it never uses them.** Kirby Super Star's 65816 waits in `BIT / BEQ`
+  loops it enters with whatever its last task left in X and Y, so a stored
+  lap rarely matched and was proven again, a lap run in C each time. A site
+  now records whether its loop reads or writes X or Y (index, transfer,
+  compare, `SEP #$10`); one it does not touch is left out of the match and
+  kept when the lap is stepped. The SA-1 span runner's cost a span is lower
+  too: the 12 known sites are looked through only when the span starts in a
+  code block one of them covers (a 64-bit filter), the read schedule and the
+  run-ahead's watch list are built once per proof instead of every span,
+  I-RAM and BW-RAM are read through their pointers rather than a call into
+  the SA-1 overlay per byte, and WRAM loop code is compared four bytes at a
+  time. Host: 65816 instructions Mario RPG -14.2%, Kirby's Dream Land 3
+  -3.4%, Kirby Super Star -1.6% (proof laps not run), the same state in all
+  15 recordings; gwemu: the device code reaches the host's state in six.
+  Device (PERF): Kirby Super Star the 65816 -5.3%, busy -1.3 points, 37
+  windows lighter and none heavier, late frames 1,212 → 1,098; Mario RPG
+  (60 fps) the 65816 -6.1%, 251 more frames drawn, the lowest window 24.3 →
+  28.4 fps, windows over budget 16 → 13.
 
 ### Changed
 

@@ -821,6 +821,30 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   65816 -19% to -28% of its cycles in Parodius, Castlevania and Batman. The
   Dragon Ball Z template above lost to the same arithmetic; its loop calls a
   routine, so it is still not decodable.
+- **A stored lap that also stores what the loop never reads matches less
+  often than it should.** Kirby Super Star's span runner cost ~1,200
+  cycles a call on the device. Counted per instruction on gwemu
+  (`tools/qemu_exec_profile.py --func`, each line with the times it ran):
+  ~15 re-proofs a frame, each a lap in C with `memcpy` and `sa1_peek` calls,
+  and a host trace of them (the CPU against the stored state at the same
+  pc) showed 77% differing only in X or Y -- the loop is `BIT abs / BEQ`,
+  entered with whatever the last task left there. Leaving a register the
+  loop never touches out of the match (and keeping it when stepping) cut
+  proofs 237 → 51 in the profiled frames and Mario RPG's 65816
+  instructions by 14%. The regress set cannot fail on this: of all the
+  loops its recordings arm, two use X and neither is ever entered with
+  another X, so the decoder's list of X/Y users was checked opcode by
+  opcode instead. The same profile showed the rest of the cost was work
+  redone per call: the 12-site scan for spans that start in no site (370 a
+  frame, all of them; a 64-bit filter of the covered code blocks), the
+  read schedule (cached per proof, invalidated by `idle_prove` and
+  `idle_proof_load` -- a stale-cache control diverged in all four SA-1
+  recordings), and a call into the overlay per compared byte. Device:
+  Kirby's 65816 -5.3%, Mario RPG's -6.1%. What is left of the runner is
+  mostly the SA-1's run-aheads, real SA-1 work counted there. Fitting it
+  needed the schedule build out of the SA-1 span-runner slot (cold) and the
+  shared compare in a section of its own behind the runner: in the same
+  section GCC placed it first and the runner moved.
 
 ---
 

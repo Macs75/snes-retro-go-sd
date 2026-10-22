@@ -796,8 +796,9 @@ static void sa1_maps(Sa1* s) {
 }
 
 bool sa1_asleep(const Sa1* s) {
-  return s->idle == 1 && !s->SA1_in_cc1_dma;
+  return s->idle == 1 && !s->SA1_in_cc1_dma;   /* = *g_sa1_hold && !*g_sa1_cc1: hold is idle == 1 */
 }
+const uint8_t *g_sa1_hold, *g_sa1_cc1;
 
 uint8_t sa1_peek(Sa1* s, uint8_t bank, uint16_t adr) {
   uint8_t b = bank & 0x7f;
@@ -922,6 +923,8 @@ void sa1_link(Sa1* s, Snes* snes, uint8_t* rom, uint32_t romSize, uint8_t* bwram
   /* map_sa1: a ROM with this sequence at $B95 gets $B96 zeroed */
   s->romPatch = (romSize > 0xb99 && !memcmp(rom + 0xb95, test, 4)) ? 0xb96 + 1 : 0;
   g_sa1_iram = s->iram;       /* both CPUs' I-RAM fast paths (snes_cpuRead, cpu.c) */
+  g_sa1_hold = &s->hold;      /* sa1_asleep for the span runner (main_snes.c) */
+  g_sa1_cc1 = &s->SA1_in_cc1_dma;
   g_sa1_lapdirty = &s->run.lapDirty;
   g_sa1_vh = &s->lastV;
   sa1_maps(s);

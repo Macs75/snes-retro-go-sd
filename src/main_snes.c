@@ -785,33 +785,49 @@ static inline void idle_state(const Snes *s, IdleState *st) {
  * asserted in idle_skip.c. */
 typedef uint16_t __attribute__((may_alias)) idle_u16;
 typedef uint32_t __attribute__((may_alias)) idle_u32;
-static inline bool idle_img_eq(const uint8_t *p, const uint8_t *q) {
+/* mx, my: the site's img_mx / img_my, the X and Y it depends on */
+static inline bool idle_img_eq(const uint8_t *p, const uint8_t *q, uint32_t mx, uint32_t my) {
   const idle_u16 *ph = (const idle_u16 *)p, *qh = (const idle_u16 *)q;
   const idle_u32 *pw = (const idle_u32 *)(p + 14), *qw = (const idle_u32 *)(q + 14);
-  uint32_t d = (uint32_t)(ph[0] ^ qh[0]) | (uint32_t)(ph[1] ^ qh[1]) | (uint32_t)(ph[2] ^ qh[2]) |
+  uint32_t d = (uint32_t)(ph[0] ^ qh[0]) | ((ph[1] ^ qh[1]) & mx) | ((ph[2] ^ qh[2]) & my) |
                (uint32_t)(ph[3] ^ qh[3]) | (uint32_t)(ph[4] ^ qh[4]) | (uint32_t)(ph[5] ^ qh[5]) |
                (uint32_t)(ph[6] ^ qh[6]);
   d |= (pw[0] ^ qw[0]) | (pw[1] ^ qw[1]) | (pw[2] ^ qw[2]) | (uint32_t)(p[26] ^ q[26]);
   return d == 0;
 }
 /* Put a stored boundary image back into the CPU (the inverse of idle_state),
- * with the same aligned halfword/word accesses as idle_img_eq. */
-static inline void idle_img_put(Cpu *cpu, const IdleState *st) {
+ * with the same aligned halfword/word accesses as idle_img_eq. An X or Y the
+ * lap never touches (the site's img_mx / img_my 0) stays the CPU's. */
+static inline void idle_img_put(Cpu *cpu, const IdleState *st, uint32_t mx, uint32_t my) {
   idle_u16 *dh = (idle_u16 *)&cpu->a;
   const idle_u16 *sh = (const idle_u16 *)st->img;
   idle_u32 *dw = (idle_u32 *)((uint8_t *)&cpu->a + 14);
   const idle_u32 *sw = (const idle_u32 *)(st->img + 14);
-  dh[0] = sh[0]; dh[1] = sh[1]; dh[2] = sh[2]; dh[3] = sh[3]; dh[4] = sh[4]; dh[5] = sh[5]; dh[6] = sh[6];
+  dh[0] = sh[0];
+  dh[1] = (uint16_t)((sh[1] & mx) | (dh[1] & ~mx));
+  dh[2] = (uint16_t)((sh[2] & my) | (dh[2] & ~my));
+  dh[3] = sh[3]; dh[4] = sh[4]; dh[5] = sh[5]; dh[6] = sh[6];
   dw[0] = sw[0]; dw[1] = sw[1]; dw[2] = sw[2];
   ((uint8_t *)&cpu->a)[26] = st->img[26];
 }
 static inline bool idle_state_eq(const IdleState *p, const IdleState *q) {
-  return p->pc == q->pc && idle_img_eq(p->img, q->img);
+  return p->pc == q->pc && idle_img_eq(p->img, q->img, 0xffff, 0xffff);
 }
 /* a byte of the loop's read set: WRAM, or memory the SA-1 shares (IDLE_MEM_SA1) */
 static inline uint8_t idle_peek(const Snes *s, uint32_t off) {
 #if SNES_SA1
-  if (off & IDLE_MEM_SA1) return sa1_peek(s->cart->sa1, (uint8_t)(off >> 16), (uint16_t)off);
+  if (off & IDLE_MEM_SA1) {
+    /* I-RAM and the 65816's BW-RAM window straight from their pointers, as
+     * sa1_peek reads them (the window only from an 8 KB BW-RAM up, where
+     * g_sa1_bwwin is the same block): a call into the SA-1 overlay per byte
+     * was ~1,000 a frame in Kirby Super Star */
+    const uint16_t a = (uint16_t)off;
+    if (!(off & 0x400000)) {                           /* banks $00-$3F, $80-$BF */
+      if ((a & 0xf800) == 0x3000) return g_sa1_iram[a & 0x7ff];
+      if ((a & 0xe000) == 0x6000 && g_sa1_bwmask >= 0x1fff) return g_sa1_bwwin[a & 0x1fff];
+    }
+    return sa1_peek(s->cart->sa1, (uint8_t)(off >> 16), a);
+  }
 #endif
   return s->ram[off];
 }
@@ -825,7 +841,7 @@ static inline bool idle_mem_eq(const Snes *s, const uint8_t *m) {
  * something, which an idle loop never does inside a span. */
 static inline bool idle_sa1_quiet(const Snes *s) {
 #if SNES_SA1
-  return !s->cart->sa1 || sa1_asleep(s->cart->sa1);
+  return !s->cart->sa1 || (*g_sa1_hold && !*g_sa1_cc1);   /* sa1_asleep, without the call */
 #else
   (void)s;
   return true;
@@ -975,6 +991,7 @@ static bool idle_prove(Snes *s, int *dots) {
       for (int i = 0; i < g->npmem; i++) g->smem[i] = mem[i];
       g->lap = lap;
       g->snap_ok = true;
+      g->sched_i = 0;
       return true;
     }
   }
@@ -1052,7 +1069,7 @@ static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
   }
   for (int i = 0; i < g->nst; i++) {
     if (g->st[i].pc != pc) continue;
-    if (!idle_img_eq((const uint8_t *)&cpu->a, g->st[i].img)) return exact ? -1 - dots : dots;
+    if (!idle_img_eq((const uint8_t *)&cpu->a, g->st[i].img, g->img_mx, g->img_my)) return exact ? -1 - dots : dots;
     const int L = (int)g->lap;
     const int k = dots / L;
     uint32_t adv = (uint32_t)(k * L);
@@ -1077,7 +1094,7 @@ static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
     uint32_t left = 0;
     while (dots > 0) {
       const int j = i + 1 == g->nst ? 0 : i + 1;
-      idle_img_put(cpu, &g->st[j]);
+      idle_img_put(cpu, &g->st[j], g->img_mx, g->img_my);
       cpu->pc = g->st[j].pc;
       left = g->ch[i];
       uint32_t step = left < (uint32_t)dots ? left : (uint32_t)dots;
@@ -1342,7 +1359,7 @@ static uint32_t idle_step_to(Snes *s, const IdleSkip *g, int i, int j) {
   uint32_t adv = 0;
   for (int ii = i; ii != j; ) {
     const int n = ii + 1 == g->nst ? 0 : ii + 1;
-    idle_img_put(s->cpu, &g->st[n]);
+    idle_img_put(s->cpu, &g->st[n], g->img_mx, g->img_my);
     s->cpu->pc = g->st[n].pc;
     adv += g->ch[ii];
     ii = n;
@@ -1371,6 +1388,44 @@ static int idle_sa1_read_held(Snes *s, const IdleSkip *g, int i, int j, int dots
   return dots;
 }
 
+/* idle_sa1_awake_span's read schedule from boundary i and its run-ahead's
+ * watch list (IdleSkip.sched_*): once per proof and boundary. GCC: out of
+ * line, cold (for size) and outside the SA-1 overlay's span-runner slot,
+ * which it did not fit in with the runner; nothing here is SA-1 code. */
+static __attribute__((noinline, cold)) void idle_sa1_sched(IdleSkip *g, int i) {
+  /* the lap's SA-1 reads from this boundary, in order: their boundaries and
+   * their dots (a read the stable lap branches around reads nothing) */
+  int nrd = 0;
+  for (int j = i, n = 0, off = 0; n < g->nst; n++) {
+    for (int r = 0; r < g->sa1_rd; r++)
+      if (g->st[j].pc == g->sa1_pc[r]) { g->sched_rj[nrd] = (uint8_t)j; g->sched_roff[nrd++] = (uint16_t)off; break; }
+    off += g->ch[j];
+    j = j + 1 == g->nst ? 0 : j + 1;
+  }
+  g->sched_nrd = (uint8_t)nrd;
+  /* polling only the SA-1's messages ($2300/$2301, which only its register
+   * writes change) and I-RAM (which the SA-1 engine watches for a run-ahead) */
+  int nw = 0;
+  bool wok = true;
+  for (int j = 0; wok && j < g->npmem; j++) {
+    const uint32_t o = g->pmem_off[j];
+    if (!(o & IDLE_MEM_SA1)) continue;
+    const uint16_t a = (uint16_t)o;
+    const uint8_t b = (uint8_t)(o >> 16);
+    if (a == 0x2300 || a == 0x2301 || a == 0x230e) continue;
+    if ((b < 0x40 || (b >= 0x80 && b < 0xc0)) && a >= 0x3000 && a < 0x3800 && nw < SA1_WATCH_MAX)
+      g->sched_wiram[nw++] = (uint16_t)(a - 0x3000);
+    else
+      wok = false;
+  }
+  g->sched_nw = (uint8_t)nw;
+  g->sched_wok = wok;
+  g->sched_i = (uint8_t)(i + 1);
+}
+
+static bool idle_mem_eq_sa1(const Snes *s, const uint8_t *m);   /* see after the runner */
+_Static_assert(SA1_WATCH_MAX == sizeof ((IdleSkip *)0)->sched_wiram / sizeof (uint16_t),
+               "IdleSkip.sched_wiram holds SA1_WATCH_MAX bytes' offsets");
 #ifndef HOST_BUILD
 __attribute__((section(".sa1ovl.text")))   /* only an SA-1 cart runs it: in its overlay */
 #endif
@@ -1384,7 +1439,7 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
   int i = 0;
   if (g->snap_ok)
     for (i = 0; i < g->nst; i++) if (g->st[i].pc == cpu->pc) break;
-  if (!g->snap_ok || i == g->nst || !idle_img_eq((const uint8_t *)&cpu->a, g->st[i].img)) {
+  if (!g->snap_ok || i == g->nst || !idle_img_eq((const uint8_t *)&cpu->a, g->st[i].img, g->img_mx, g->img_my)) {
     /* no lap proven from this state (the loop is entered with other
      * registers at each of the SA-1's requests): prove one, a lap run here */
     if (g_idle_sa1_budget == 0 || !idle_boundary_ok(s)) return dots;
@@ -1393,52 +1448,32 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
     i = 0;                                /* back at the proof's first boundary */
   }
   if (g->sa1_rd < 1 || g->sa1_rd > IDLE_SA1_READS) return dots;
-  /* the lap's SA-1 reads from this boundary, in order: their boundaries and
-   * their dots (a read the stable lap branches around reads nothing) */
-  int nrd = 0;
-  uint8_t rj[IDLE_SA1_READS];
-  uint32_t roff[IDLE_SA1_READS];
-  for (int j = i, n = 0, off = 0; n < g->nst; n++) {
-    for (int r = 0; r < g->sa1_rd; r++)
-      if (g->st[j].pc == g->sa1_pc[r]) { rj[nrd] = (uint8_t)j; roff[nrd++] = (uint32_t)off; break; }
-    off += g->ch[j];
-    j = j + 1 == g->nst ? 0 : j + 1;
-  }
+  if (g->sched_i != i + 1) idle_sa1_sched(g, i);
+
+  const int nrd = g->sched_nrd;
+  const uint8_t *const rj = g->sched_rj;
+  const uint16_t *const roff = g->sched_roff;
   if (nrd == 0) return dots;
   Sa1 *sa1 = s->cart->sa1;
   const int L = (int)g->lap;
-  /* Polling only the SA-1's messages ($2300/$2301, which only its register
-   * writes change) and I-RAM (which the SA-1 engine watches for a run-ahead):
-   * the SA-1 runs ahead over all the span's laps in one go, stopping at the
-   * write the 65816 would see (sa1_ahead) */
-  bool regs = dots >= 2 * L;
-  uint16_t wiram[SA1_WATCH_MAX];
-  int nw = 0;
-  for (int j = 0; regs && j < g->npmem; j++) {
-    const uint32_t o = g->pmem_off[j];
-    if (!(o & IDLE_MEM_SA1)) continue;
-    const uint16_t a = (uint16_t)o;
-    const uint8_t b = (uint8_t)(o >> 16);
-    if (a == 0x2300 || a == 0x2301 || a == 0x230e) continue;
-    if ((b < 0x40 || (b >= 0x80 && b < 0xc0)) && a >= 0x3000 && a < 0x3800 && nw < SA1_WATCH_MAX)
-      wiram[nw++] = (uint16_t)(a - 0x3000);
-    else
-      regs = false;
-  }
+  /* Polling only the SA-1's messages and I-RAM (sched_wok): the SA-1 runs
+   * ahead over all the span's laps in one go, stopping at the write the 65816
+   * would see (sa1_ahead) */
+  bool regs = dots >= 2 * L && g->sched_wok;
+  const uint16_t *const wiram = g->sched_wiram;
+  const int nw = g->sched_nw;
   /* and reading what the proof read, still: the run-ahead stops at a change
    * from what they hold now */
-  if (regs) regs = idle_mem_eq(s, g->smem);
+  if (regs) regs = idle_mem_eq_sa1(s, g->smem);
   while (dots >= L) {
     int k = -1;
     if (regs) {
       regs = false;
       const bool irq0 = cpu->irqWanted, nmi0 = cpu->nmiWanted;
-      uint16_t off[IDLE_SA1_READS];
-      for (int r = 0; r < nrd; r++) off[r] = (uint16_t)roff[r];
       const int n = dots / L;                                  /* whole laps */
       int nr = n * nrd;                                        /* reads: the last, partial lap's too */
       for (int r = 0; r < nrd; r++) nr += (int)roff[r] < dots - n * L;
-      const int j = sa1_ahead(sa1, s->vPos, s->hPos, (uint16_t)L, nr, off, nrd, wiram, nw);
+      const int j = sa1_ahead(sa1, s->vPos, s->hPos, (uint16_t)L, nr, roff, nrd, wiram, nw);
       k = j < 0 ? -1 : j == nr ? nr : j / nrd;                 /* laps whose reads all read the same */
       const int whole = k > n ? n : k;
       if (whole > 0) {
@@ -1457,7 +1492,7 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
         uint32_t left = 0, adv = 0;
         for (int ii = i; dots > 0; ) {
           const int j = ii + 1 == g->nst ? 0 : ii + 1;
-          idle_img_put(cpu, &g->st[j]);
+          idle_img_put(cpu, &g->st[j], g->img_mx, g->img_my);
           cpu->pc = g->st[j].pc;
           left = g->ch[ii];
           const uint32_t step = left < (uint32_t)dots ? left : (uint32_t)dots;
@@ -1486,14 +1521,14 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
       sa1_sync(sa1, s->vPos, (uint16_t)(s->hPos + roff[r]));
       if (cpu->irqWanted != irq0 || cpu->nmiWanted != nmi0)
         return idle_sa1_read_held(s, g, i, rj[r], dots, irq0, nmi0);
-      if (!idle_mem_eq(s, g->smem)) {
+      if (!idle_mem_eq_sa1(s, g->smem)) {
         /* read r sees a change: up to it the lap is the stored one (the reads
          * before it saw the stored bytes, checked above), then the CPU runs
          * from read r, the SA-1 already at its dot */
         return dots - idle_step_to(s, g, i, rj[r]);
       }
     }
-    if (sa1_asleep(sa1)) {                /* asleep now: the ordinary skip */
+    if (*g_sa1_hold && !*g_sa1_cc1) {     /* asleep now (sa1_asleep): the ordinary skip */
       const int r = idle_skip_laps(s, dots);
       return r >= 0 ? r : -1 - r;
     }
@@ -1506,6 +1541,18 @@ static int idle_sa1_awake_span(Snes *s, int dots) {
   }
   return dots;
 }
+
+/* idle_mem_eq for idle_sa1_awake_span, which compares the lap's reads twice.
+ * GCC: one out-of-line copy in the overlay's span-runner slot instead of two
+ * inlined (each with idle_peek's I-RAM / BW-RAM paths), which did not fit
+ * the slot; a call a compare is still less than the call per byte to
+ * sa1_peek it replaced. In a section of its own, which snes_core.ld puts
+ * behind the runner: in .sa1ovl.text GCC placed it first, and every
+ * function behind it moved in the I-cache. */
+#ifndef HOST_BUILD
+__attribute__((section(".sa1ovl.text.tail")))
+#endif
+static __attribute__((noinline)) bool idle_mem_eq_sa1(const Snes *s, const uint8_t *m) { return idle_mem_eq(s, m); }
 #endif
 
 /* A $4212 loop's span that starts where no stored state matches, its other
@@ -1527,7 +1574,7 @@ static int idle_resume_span(Snes *s, int dots) {
     uint32_t c;
     if ((uint16_t)(cpu->pc - g->head) > g->len || !idle_step(s, &dots, &c)) return dots;
     for (int i = 0; i < g->nst; i++) {
-      if (g->st[i].pc != cpu->pc || !idle_img_eq((const uint8_t *)&cpu->a, g->st[i].img)) continue;
+      if (g->st[i].pc != cpu->pc || !idle_img_eq((const uint8_t *)&cpu->a, g->st[i].img, g->img_mx, g->img_my)) continue;
       const int r = idle_skip_laps(s, dots);
       return r >= 0 ? r : idle_prove_span(s, -1 - r);
     }
@@ -1564,7 +1611,10 @@ static int idle_resume_span(Snes *s, int dots) {
 _Static_assert(sizeof(IdleState) == 32, "IDLE_PROOF_MOVE copies an IdleState as 8 words");
 #define IDLE_NO_MEMCPY __attribute__((noinline, optimize("no-tree-loop-distribute-patterns", "no-tree-vectorize")))
 static IDLE_NO_MEMCPY void SNES_ITCM_IDLE idle_proof_save(const IdleSkip *g, IdleProof *p) { IDLE_PROOF_MOVE(p, g); }
-static IDLE_NO_MEMCPY void SNES_ITCM_IDLE idle_proof_load(IdleSkip *g, const IdleProof *p) { IDLE_PROOF_MOVE(g, p); }
+static IDLE_NO_MEMCPY void SNES_ITCM_IDLE idle_proof_load(IdleSkip *g, const IdleProof *p) {
+  IDLE_PROOF_MOVE(g, p);
+  g->sched_i = 0;                                  /* another lap: its read schedule is built again */
+}
 static IDLE_NO_MEMCPY void SNES_ITCM_IDLE idle_proof_copy(IdleProof *d, const IdleProof *p) { IDLE_PROOF_MOVE(d, p); }
 
 /* No second proof for v yet: prove one, from the proof's budget, the stored
@@ -1658,15 +1708,21 @@ static void SNES_ITCM_IDLE __attribute__((noinline)) idle_span_line(Snes *s) {
   const Cpu *cpu = s->cpu;
   const uint8_t bank = cpu->k;
   const uint16_t pc = cpu->pc;
-  IdleSkip *g = g_idle_sites;
-  for (int i = 0; i < IDLE_SITES; i++, g++) {
-    if ((uint16_t)(pc - g->head) > g->len || (bank != g->bank && bank != g->bank_alt)) continue;
-    if (g->len == 0 && g->head == 0xffff) continue;   /* an empty slot */
-    if (idle_env_ok(cpu, g) && idle_code_ok(s, g)) { g_idlep = g; return; }
-  }
   IdleSpan *sp = g_idle_span;
+  const uint32_t pc24 = ((uint32_t)bank << 16) | pc;
+  /* Kirby Super Star's 65816 starts ~370 spans a frame in no site at all: the
+   * block's bit (idle_sites_note) saves the look through the 12 */
+  const uint32_t bit = idle_site_bit(pc24);
+  if (sp->sites[bit >> 5] >> (bit & 31) & 1) {
+    IdleSkip *g = g_idle_sites;
+    for (int i = 0; i < IDLE_SITES; i++, g++) {
+      if ((uint16_t)(pc - g->head) > g->len || (bank != g->bank && bank != g->bank_alt)) continue;
+      if (g->len == 0 && g->head == 0xffff) continue;   /* an empty slot */
+      if (idle_env_ok(cpu, g) && idle_code_ok(s, g)) { g_idlep = g; return; }
+    }
+  }
   uint32_t *h = sp->pc;
-  const uint32_t pc24 = ((uint32_t)s->cpu->k << 16) | s->cpu->pc, prev = h[0];
+  const uint32_t prev = h[0];
   /* a wait loop of a few instructions starts spans at the same pcs again:
    * this pc is one of the 3 before the last span's, and near the last's (the
    * same pc as the last is no sign: a DMA stall, an MVN) */

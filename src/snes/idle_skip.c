@@ -96,10 +96,31 @@ static void site_clear(IdleSkip *g) {
   *g = (IdleSkip){0};
   g->head = 0xffff;
   g->len = 0;
+  g->img_mx = g->img_my = 0xffff;                  /* X and Y compared unless try_head knows better */
+}
+
+/* After a site is armed: the code blocks the sites cover (IdleSpan.sites),
+ * in both banks a site's code is seen at. A dropped site's bits stay until
+ * the next arming: a bit set for nothing only costs the look. */
+static void idle_sites_note(void) {
+  uint32_t m[2] = { 0, 0 };
+  for (int i = 0; i < IDLE_SITES; i++) {
+    const IdleSkip *g = &g_idle_sites[i];
+    if (g->len == 0 && g->head == 0xffff) continue;
+    const uint8_t banks[2] = { g->bank, g->bank_alt };
+    for (int b = 0; b < 2; b++)
+      for (uint32_t blk = g->head >> 5; blk <= (uint32_t)(g->head + g->len) >> 5; blk++) {
+        const uint32_t bit = idle_site_bit((uint32_t)banks[b] << 16 | blk << 5);
+        m[bit >> 5] |= 1u << (bit & 31);
+      }
+  }
+  g_idle_span->sites[0] = m[0];
+  g_idle_span->sites[1] = m[1];
 }
 
 void idle_reset(void) {
   for (int i = 0; i < IDLE_SITES; i++) site_clear(&g_idle_sites[i]);
+  g_idle_span->sites[0] = g_idle_span->sites[1] = 0;
   g_idlep = &g_idle_sites[0];
   g_idle_alt->owner = NULL;
   g_idle_stats = (IdleStats){0};
@@ -242,6 +263,7 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
   uint16_t fwd[IDLE_MAX_LEN];            /* forward branch targets to check */
   int nb = 0, nf = 0;
   bool saw_pc = false, modx = false, mody = false, sep_rep = false;
+  bool usex = false, usey = false;                 /* any instruction reads or writes X / Y */
   out->nmem = 0; out->nidx = 0; out->rdnmi = false; out->hvbjoy = false; out->uses_db = false; out->uses_dp = false;
   out->gsu_poll = false;
   out->gsu_and = 0;
@@ -273,6 +295,8 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
       default: return false;
     }
     modx |= in.modx; mody |= in.mody;
+    usex |= in.modx || in.ix == IX_X || op == 0x8a || op == 0x9b || op == 0xe0 || op == 0xe4 || op == 0xec;
+    usey |= in.mody || in.ix == IX_Y || op == 0x98 || op == 0xbb || op == 0xc0 || op == 0xc4 || op == 0xcc;
     if (q == gsu_lda_next && op == 0x29) {            /* AND #imm right after the status LDA */
       uint16_t imm = code_at(s, bank, (uint16_t)(q + 1));
       if (w == 2) imm |= (uint16_t)(code_at(s, bank, (uint16_t)(q + 2)) << 8);
@@ -285,6 +309,7 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
       if (v & ~0x30) return false;                             /* only M and X */
       if (op == 0xe2) { if (v & 0x20) m8 = true;  if (v & 0x10) x8 = true; }
       else            { if (v & 0x20) m8 = false; if (v & 0x10) x8 = false; }
+      if (v & 0x10) usex = usey = true;                        /* SEP #$10 clears their high bytes */
       sep_rep = true;
     }
     /* the memory operand */
@@ -380,6 +405,8 @@ static bool try_head(Snes *s, uint8_t bank, uint16_t head, uint16_t pc, IdleSkip
         out->e = cpu->e; out->mf = cpu->mf; out->xf = cpu->xf;
         out->db = cpu->db; out->dp = cpu->dp;
         out->code_ram = s_code_ram;
+        out->img_mx = usex ? 0xffff : 0;
+        out->img_my = usey ? 0xffff : 0;
         out->ncode = (uint8_t)(out->len + 1);
         for (int i = 0; i < out->ncode; i++) out->code[i] = code_at(s, bank, (uint16_t)(head + i));
         return true;
@@ -715,12 +742,14 @@ static __attribute__((cold)) void idle_sample(Snes *s) {
         }
       }
       cand.used = s_frame;
-      IDLE_TRACE("IDLE: frame %lu rearm %02x:%04x+%u gsu_poll=%d code_ram=%d in slot %d env e%d m%d x%d db%02x(%d) dp%04x(%d)\n",
+      IDLE_TRACE("IDLE: frame %lu rearm %02x:%04x+%u gsu_poll=%d code_ram=%d in slot %d env e%d m%d x%d db%02x(%d) dp%04x(%d) uses X%d Y%d\n",
                  (unsigned long)s_frame, bank, cand.head, cand.len, cand.gsu_poll, cand.code_ram, slot,
-                 cand.e, cand.mf, cand.xf, cand.db, cand.uses_db, cand.dp, cand.uses_dp);
+                 cand.e, cand.mf, cand.xf, cand.db, cand.uses_db, cand.dp, cand.uses_dp,
+                 cand.img_mx != 0, cand.img_my != 0);
       g_idle_sites[slot] = cand;
       g_idlep = &g_idle_sites[slot];
       g_idle_stats.rearms++;
+      idle_sites_note();
       return;
     }
   }
@@ -738,6 +767,7 @@ static __attribute__((cold)) void idle_sample(Snes *s) {
     g_idle_sites[slot] = cand;
     g_idlep = &g_idle_sites[slot];
     g_idle_stats.rearms++;
+    idle_sites_note();
     return;
   }
 #endif
