@@ -808,6 +808,19 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   same instructions; the SA-1 then re-slept within two laps of each wake.
   gwemu reproduces a device-only count exactly in ~50 s: run it before
   guessing.
+- **Short spans make the alignment the cost: step the partial laps too.**
+  With the SA-1 asleep, Parodius's 65816 accumulator loop was 43% of its
+  instructions in gameplay, half its laps run for real: `run_dots` ends a
+  span at dots 0, 512, 1024 and 1362, a lap is 204, and every span stepped
+  to the head through `idle_step` (the C interpreter, ~100 cycles an opcode)
+  before skipping whole laps, then left the partial lap to the engine --
+  ~940 cycles a call, 733 calls a frame. A decoded loop's instructions are
+  known, so the measuring lap keeps each opcode's charge and
+  `idle_accum_native` steps a span from wherever it starts to wherever it
+  ends, as `idle_skip_laps` steps a stored lap: 468 cycles a call, the
+  65816 -19% to -28% of its cycles in Parodius, Castlevania and Batman. The
+  Dragon Ball Z template above lost to the same arithmetic; its loop calls a
+  routine, so it is still not decodable.
 
 ---
 
@@ -1005,6 +1018,30 @@ code in its own unit (`gsu_blocks.c`); the interpreter then compiled exactly as
 before (an `nm -S` diff of the linked ELF: 3 symbols changed, all intended).
 Diff **linked** symbol sizes, not `.o` sizes — `--gc-sections` drops what is
 unreferenced.
+
+### 5.10 A byte store aliases everything; `-O3` unrolls what is cold
+
+Two codegen lessons from the accumulator runner (`idle_accum_native`):
+
+- **State written through `uint8_t *` must live in locals.** The first
+  version wrote A, D and the flags to `Cpu` at each stepped opcode and the
+  sum to `s->ram[]`: a `uint8_t` store may alias any object, so GCC reloaded
+  `s->ram` and the fields after every one, and spilled. The CPU in locals,
+  stored once at the end, the dots taken computed from the span instead of
+  summed, and N/Z as one value (0x10000 = untouched) gave a loop of ~20
+  instructions an opcode. Check the loop's disassembly after any edit: the
+  result is the same either way, only the code differs.
+- **`cold` is the size lever for once-a-frame code.** The core builds at
+  `-O3`, which unrolled the decoder's 20-candidate and 39-byte loops: the
+  RAM_EMU pool, which must still hold Star Fox's GSU block record behind the
+  code, was 620 B short. `__attribute__((cold))` on the decode half
+  (`accum_decode`, `idle_accum_match`, `idle_sample`) and the measuring lap
+  optimises them for size: 1.4 KB left. Not a speed setting: they run at
+  most once a frame.
+
+Code shaped like this says so in a `GCC:` comment: what it protects (a slot,
+an inlining, the pool) and when it would no longer be needed, so a later
+simplification, or another GCC, does not undo it unknowingly.
 
 ---
 

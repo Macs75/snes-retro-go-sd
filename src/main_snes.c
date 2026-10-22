@@ -1095,6 +1095,145 @@ static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
 }
 
 #if SNES_IDLE_ACCUM
+/* A decoded accumulator (acc_n, idle_skip.h) in a span: all of it native. Its
+ * instructions are known (idle_skip.c accum_decode) and so is each one's
+ * charge (ch[], idle_accum_measure), so the span is stepped from wherever in
+ * the lap it starts, the way idle_skip_laps steps a stored lap: an opcode
+ * takes effect when it starts and is then consumed, the last one the span
+ * does not reach left in cpuCyclesLeft. Whole laps from the head are only the
+ * add (x += y + carry, cpu_adc's 16-bit binary path). Inside the span nothing
+ * else runs that could see the order: no interrupt, H-IRQ or DMA (checked
+ * here and in idle_run_span), the SA-1 runs at none of the loop's reads (it
+ * reads WRAM only), and while [f] == 0 the BNE is not taken. */
+static inline uint16_t idle_wram16(const Snes *s, uint16_t a) {
+  return (uint16_t)(s->ram[a] | s->ram[a + 1] << 8);
+}
+
+static int SNES_ITCM_IDLE idle_accum_native(Snes *s, int dots) {
+  Cpu *cpu = s->cpu;
+  IdleSkip *g = &g_idle;
+  if (cpu->e || cpu->mf || cpu->d || cpu->nmiWanted || (cpu->irqWanted && !cpu->i) || cpu->stopped ||
+      cpu->waiting || (cpu->k != g->bank && cpu->k != g->bank_alt))
+    return dots;
+  if (g->acc_pre_w && idle_wram16(s, (uint16_t)g->acc_pre_off)) return dots;   /* the BNE is taken */
+  unsigned i = g->acc_at[(uint16_t)(cpu->pc - g->head)];
+  if (i >= g->acc_n) return dots;                    /* not an instruction's start */
+  /* the operands are DP's at the decode: after the in-loop TCD it is 0 */
+  if (cpu->dp != g->dp && !(g->acc_op[0] == IDLE_ACC_LDA0 && i <= 1)) return dots;
+  /* GCC: the CPU in locals, stored once at the end, where writing cpu->a and
+   * the flags at each opcode would be the plain way. A store through ram[]
+   * (uint8_t) may alias anything to the compiler, so that way every field was
+   * stored and s->ram and the fields reloaded after each opcode. For the same
+   * reason of register pressure, adv (the dots taken, = dots0 - dots) and
+   * left (set only where the span ends) are not kept per opcode, and N/Z are
+   * one value (nzv, 0x10000 = untouched). This is about the code GCC makes,
+   * not about the result: check the step loop's disassembly before
+   * simplifying, and again with another GCC. */
+  uint8_t *const ram = s->ram;
+  const unsigned n = g->acc_n;
+  const uint32_t x = g->acc_dest, y = g->acc_add, f = (uint16_t)g->acc_pre_off;
+  uint32_t a = cpu->a, c = cpu->c, v = cpu->v, dp = cpu->dp;
+  uint32_t nzv = 0x10000;                            /* the value N and Z are of; 0x10000: as they were */
+  uint32_t left = 0, laps = 0;
+  const int dots0 = dots;
+#define IDLE_RD16(p) ((uint32_t)ram[p] | (uint32_t)ram[(p) + 1] << 8)
+  for (int whole = 0;; whole = 1) {
+    /* opcode by opcode: to the head first, then what is left after the laps */
+    while (whole || i != 0) {
+      switch (g->acc_op[i]) {
+        case IDLE_ACC_LDA0: a = 0; nzv = 0; break;
+        case IDLE_ACC_TCD:  dp = a; nzv = a; break;
+        case IDLE_ACC_LDAF: a = IDLE_RD16(f); nzv = a; break;
+        case IDLE_ACC_LDAX: a = IDLE_RD16(x); nzv = a; break;
+        case IDLE_ACC_ADC: {                         /* cpu_adc, 16-bit binary */
+          const uint32_t m = IDLE_RD16(y), r = a + m + c;
+          v = (~(a ^ m) & (m ^ r) & 0x8000u) != 0;
+          c = r >> 16;
+          a = r & 0xffffu;
+          nzv = a;
+          break;
+        }
+        case IDLE_ACC_STA:  ram[x] = (uint8_t)a; ram[x + 1] = (uint8_t)(a >> 8); break;
+        default: break;                              /* BNE not taken, BRA */
+      }
+      const int ch = g->ch[i];
+      i = i + 1 == n ? 0 : i + 1;
+      if (ch >= dots) {                              /* the span ends in this opcode */
+        left = (uint32_t)(ch - dots);
+        dots = 0;
+        break;
+      }
+      dots -= ch;
+    }
+    if (whole || dots == 0) break;
+    const int L = (int)g->lap;
+    if (dots >= L) {                                 /* at the head, nothing left over */
+      const int k = dots / L;
+      const uint32_t m = IDLE_RD16(y);
+      uint32_t r = IDLE_RD16(x);                     /* each lap: LDA x / ADC y / STA x */
+      for (int j = 0; j < k; j++) {
+        const uint32_t t = r + m + c;
+        v = (~(r ^ m) & (m ^ t) & 0x8000u) != 0;
+        c = t >> 16;
+        r = t & 0xffffu;
+      }
+      ram[x] = (uint8_t)r;
+      ram[x + 1] = (uint8_t)(r >> 8);
+      a = r; nzv = r;
+      dots -= k * L;
+      laps = (uint32_t)k;
+      if (dots == 0) break;
+    }
+  }
+#undef IDLE_RD16
+  const uint32_t adv = (uint32_t)(dots0 - dots);   /* the span's dots: left is the next span's */
+  cpu->a = (uint16_t)a;
+  cpu->c = c != 0;
+  cpu->v = v != 0;
+  cpu->dp = (uint16_t)dp;
+  if (nzv <= 0xffffu) { cpu->z = nzv == 0; cpu->n = (nzv & 0x8000u) != 0; }
+  cpu->pc = (uint16_t)(g->head + g->acc_off[i]);
+  s->hPos = (uint16_t)(s->hPos + adv);
+  s->apuDotsAccum += adv;
+  s->cpuCyclesLeft = (uint8_t)left;
+  g_idle_stats.laps += laps;
+  g_idle_stats.ff_dots += adv;
+  return dots;
+}
+
+/* A decoded accumulator's first span: its lap run for real from the head,
+ * each opcode's charge kept (ch[]), then the rest of the span native. Once
+ * per site, so not in ITCM. GCC: cold only to have it optimised for size:
+ * at the core's -O3 its loop was unrolled, and the RAM_EMU pool has to hold
+ * Star Fox's GSU block record behind the code (snes_core.ld ASSERT). Not about
+ * speed: with room in the pool it could be plain. */
+__attribute__((noinline, cold))
+static int idle_accum_measure(Snes *s, int dots) {
+  Cpu *cpu = s->cpu;
+  IdleSkip *g = &g_idle;
+  if (g->acc_pre_w && idle_wram16(s, (uint16_t)g->acc_pre_off)) return dots;
+  uint32_t L = 0;
+  int j = -1;                                        /* -1: on the way to the head */
+  for (int cap = 2 * 8; cap > 0; cap--) {
+    if (cpu->e || cpu->mf || cpu->d || !idle_boundary_ok(s)) return dots;
+    if (cpu->pc == g->head) {
+      if (j == (int)g->acc_n) break;                 /* the lap is done */
+      if (j > 0) return dots;
+      j = 0;
+    }
+    if (j >= 0 && cpu->pc != (uint16_t)(g->head + g->acc_off[j])) return dots;
+    uint32_t c;
+    if (!idle_step(s, &dots, &c)) return dots;
+    if (j >= 0) { g->ch[j++] = (uint8_t)c; L += c; }
+  }
+  if (j != (int)g->acc_n) return dots;
+  g->lap = L;
+  g->snap_ok = true;
+  return idle_accum_native(s, dots);
+}
+#endif
+
+#if SNES_IDLE_ACCUM
 /* The accumulator skip (idle_skip.h, kind == IDLE_KIND_ACCUM). The loop is
  *   LDA #0 / TCD / LDA x / ADC y / STA x / BRA
  * spinning x += y (16-bit WRAM) until the NMI; the recurrence path rejects it
@@ -1106,9 +1245,11 @@ static int SNES_ITCM_IDLE idle_skip_laps(Snes *s, int dots) {
  * with the same hPos/apuDotsAccum accounting idle_skip_laps uses. Any boundary
  * not modelled (DMA, a pending interrupt, running out of span, decimal mode)
  * returns the remaining dots and run_dots runs the span as usual. */
+static int idle_accum_measure(Snes *s, int dots);
 static int SNES_ITCM_IDLE idle_accum_span(Snes *s, int dots) {
   Cpu *cpu = s->cpu;
   IdleSkip *g = &g_idle;
+  if (g->acc_n) return g->snap_ok ? idle_accum_native(s, dots) : idle_accum_measure(s, dots);
   if (cpu->e || cpu->mf || cpu->d) return dots;      /* native laps assume 16-bit binary */
   if (!idle_code_ok(s, g)) { g->head = 0xffff; g->len = 0; g->snap_ok = false; return dots; }
   if (!idle_boundary_ok(s)) return dots;
@@ -1473,7 +1614,10 @@ static int SNES_ITCM_IDLE idle_run_span(Snes *s, int dots) {
    * the SA-1 cannot reach WRAM or the 65816's registers, and it runs only at
    * the contacts, which such a loop makes none of, and at the events that
    * bound a span -- so inside the span it runs nothing either way. */
-  const bool sa1_busy = !idle_sa1_quiet(s) && g_idle.sa1_rd != 0;
+  /* the site's field first: sa1_asleep is a call through a veneer into the
+   * SA-1 overlay, made on every span before, though most sites read no SA-1
+   * memory and need no answer */
+  const bool sa1_busy = g_idle.sa1_rd != 0 && !idle_sa1_quiet(s);
   if (sa1_busy && (uint8_t)(g_idle.sa1_rd - 1) >= IDLE_SA1_READS) return dots;
   if (idle_hirq_in(s, s->hPos, dots)) return dots;
   /* the opcode in flight finishes first: pure arithmetic, as run_dots does */

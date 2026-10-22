@@ -141,9 +141,21 @@ typedef struct {
   uint32_t acc_pre_off;
   uint16_t acc_pre_val;
   uint8_t  acc_pre_w;
+  /* a decoded accumulator (idle_skip.c accum_decode): its instructions in lap
+   * order from the head (IDLE_ACC_*), where each starts (pc - head), and the
+   * instruction starting at each pc - head (0xff: none). Their charges are
+   * ch[], measured on its first lap, so a span can start and end anywhere in
+   * the lap natively (idle_accum_native). acc_n 0: a template's loop, whose
+   * per-lap call is skipped only in whole laps from the head. */
+  uint8_t  acc_n;
+  uint8_t  acc_op[8];
+  uint8_t  acc_off[8];
+  uint8_t  acc_at[16];
 } IdleSkip;
 
 enum { IDLE_KIND_RECUR = 0, IDLE_KIND_ACCUM = 1 };
+enum { IDLE_ACC_LDA0, IDLE_ACC_TCD, IDLE_ACC_LDAF, IDLE_ACC_BNE, IDLE_ACC_LDAX, IDLE_ACC_ADC, IDLE_ACC_STA,
+       IDLE_ACC_BRA };
 
 /* The second proof of a $4212 loop, for the other value it reads, kept for
  * one site at a time (owner, whose alt is set): see idle_hvb_proof in

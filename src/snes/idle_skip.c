@@ -55,6 +55,7 @@ void idle_alloc(void) {
 }
 
 #include <stddef.h>
+#include <string.h>
 _Static_assert(offsetof(Cpu, stopped) + 1 - offsetof(Cpu, a) == IDLE_IMG_LEN,
                "Cpu's a..stopped are no longer contiguous: IdleState's image is wrong");
 /* the span runner compares the image as 7 halfwords (a..db), 3 words and a
@@ -431,15 +432,16 @@ static bool site_has(const IdleSkip *g, uint8_t bank, uint16_t pc) {
 }
 
 #if SNES_IDLE_ACCUM
-/* Accumulator templates. An accumulator wait loop spins x += y in WRAM until
- * the NMI; the generic decoder rejects it on the STA. Each template is matched
- * by bank + head + the exact loop bytes (the guard), so it can only ever fire
- * on the one ROM that contains that code -- a different game, revision or hack
- * will not have these bytes at this address. acc_dest/acc_add are the WRAM byte
- * offsets the loop reads/writes, w the width in bytes. The offsets assume
- * DP == dp: most loops hold an in-loop TCD that forces DP = 0, but a loop that
- * does not (its DP is ambient) is only safe while DP is what the offsets were
- * taken at, so the skip is gated on cpu->dp == dp and re-checked every frame. */
+/* Accumulator wait loops spin x += y in WRAM until the NMI; the recurrence
+ * decoder rejects them on the STA. The shape Konami's games share is decoded
+ * from the loop's own ROM bytes (accum_decode); the ones whose lap calls a
+ * subroutine are templates, matched by bank + head + the exact loop bytes (the
+ * guard), because what makes that call idle is per routine (the precondition).
+ * acc_dest/acc_add are the WRAM byte offsets the loop reads/writes, w the width
+ * in bytes. The offsets assume DP == dp: most loops hold an in-loop TCD that
+ * forces DP = 0, but a loop that does not (its DP is ambient) is only safe
+ * while DP is what the offsets were taken at, so the skip is gated on
+ * cpu->dp == dp and re-checked every frame. */
 typedef struct {
   uint8_t  bank;
   uint16_t head;
@@ -455,12 +457,6 @@ typedef struct {
 } AccumTemplate;
 
 static const AccumTemplate s_accum_tpl[] = {
-  /* Castlevania - Vampire's Kiss (E) / Dracula X. 80:80c4:
-   *   A9 00 00 LDA #$0000 / 5B TCD / A5 46 LDA $46 / 65 42 ADC $42 /
-   *   85 46 STA $46 / 80 F4 BRA $80C4.  16-bit M (REP #$20 before), DP=0. */
-  { 0x80, 0x80c4, 12, 0x46, 0x42, 2, 0, 0, 0, 0, 12,
-    { 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x46, 0x65, 0x42, 0x85, 0x46, 0x80, 0xf4 } },
-
   /* Teenage Mutant Ninja Turtles IV: Turtles in Time. 00:8154, a 16-byte loop
    * whose body calls a per-lap subroutine before the accumulator:
    *   22 .. 9d 00 JSL $009dXX / A9 00 00 LDA #$0000 / 5B TCD / A5 94 LDA $94 /
@@ -479,36 +475,6 @@ static const AccumTemplate s_accum_tpl[] = {
   { 0x00, 0x8154, 16, 0x94, 0x3a, 2, 0, 0x001e2c, 0, 2, 16,   /* JPN bdba1b55 */
     { 0x22, 0x0b, 0x9d, 0x00, 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x94, 0x65, 0x3a, 0x85, 0x94, 0x80, 0xf0 } },
 
-  /* The Adventures of Batman & Robin (USA, crc b3ef81f5). 80:80ed, an 8-byte
-   * bare accumulator with no setup in the loop:
-   *   A5 88 LDA $88 / 65 3A ADC $3A / 85 88 STA $88 / 80 F8 BRA $80ED.
-   * 16-bit M (traced mf=0), binary, native. Unlike Dracula/TMNT there is no
-   * in-loop TCD, so DP is ambient 0 here, not forced: the dp=0 gate keeps the
-   * skip to the context the $88/$3a offsets were taken at. No precondition. */
-  { 0x80, 0x80ed, 8, 0x88, 0x3a, 2, 0, 0, 0, 0, 8,
-    { 0xa5, 0x88, 0x65, 0x3a, 0x85, 0x88, 0x80, 0xf8 } },
-
-  /* International Superstar Soccer Deluxe (USA crc 0a20e602, EUR crc cba724ba --
-   * byte-identical here). 80:80d4, the Dracula-shape accumulator with an in-loop
-   * TCD that forces DP=0:
-   *   A9 00 00 LDA #$0000 / 5B TCD / A5 78 LDA $78 / 65 3A ADC $3A /
-   *   85 78 STA $78 / 80 F4 BRA $80D4.  16-bit M, native, DP=0.
-   * The guard runs 4 bytes past the BRA (C2 30 48 DA) because plain ISS (non-
-   * Deluxe) has the same 12 loop bytes at a different head ($80ef); head plus
-   * these bytes pin this to ISS Deluxe. */
-  { 0x80, 0x80d4, 12, 0x78, 0x3a, 2, 0, 0, 0, 0, 16,
-    { 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x78, 0x65, 0x3a, 0x85, 0x78, 0x80, 0xf4, 0xc2, 0x30, 0x48, 0xda } },
-
-  /* International Superstar Soccer (USA crc 49627238, EUR crc 6cd568a9 --
-   * byte-identical here). 80:80ef, the same Dracula-shape accumulator as ISS
-   * Deluxe but at a different head:
-   *   A9 00 00 LDA #$0000 / 5B TCD / A5 78 LDA $78 / 65 3A ADC $3A /
-   *   85 78 STA $78 / 80 F4 BRA $80EF.  DP=0 from the in-loop TCD.
-   * The 16-byte guard is identical to ISS Deluxe's (same loop + trailing bytes);
-   * the head ($80ef vs Deluxe's $80d4) is what tells the two games apart. */
-  { 0x80, 0x80ef, 12, 0x78, 0x3a, 2, 0, 0, 0, 0, 16,
-    { 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x78, 0x65, 0x3a, 0x85, 0x78, 0x80, 0xf4, 0xc2, 0x30, 0x48, 0xda } },
-
   /* The Legend of the Mystical Ninja (USA, crc 82479d6a). 00:80b4, the same
    * JSL+accumulator shape as TMNT IV:
    *   22 27 9d 00 JSL $009d27 / A9 00 00 LDA #$0000 / 5B TCD / A5 94 LDA $94 /
@@ -526,7 +492,90 @@ static const AccumTemplate s_accum_tpl[] = {
     { 0x22, 0x3e, 0x9d, 0x00, 0xa9, 0x00, 0x00, 0x5b, 0xa5, 0x94, 0x65, 0x3a, 0x85, 0x94, 0x80, 0xf0 } },
 };
 
-bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
+/* the site, once a template or the decoder found the loop */
+static void accum_site(const Cpu *cpu, uint8_t bank, uint16_t head, uint8_t len, uint16_t dest, uint16_t add,
+                       uint16_t dp, uint32_t pre_off, uint16_t pre_val, uint8_t pre_w, IdleSkip *out) {
+  site_clear(out);
+  out->kind    = IDLE_KIND_ACCUM;
+  out->head    = head;
+  out->len     = len;
+  out->bank    = bank;
+  out->bank_alt = mirror_bank(bank);
+  out->e = cpu->e; out->mf = cpu->mf; out->xf = cpu->xf;
+  out->uses_db = false; out->uses_dp = true; out->dp = dp;  /* re-check DP each frame */
+  out->acc_dest = dest;
+  out->acc_add  = add;
+  out->acc_w    = 2;
+  out->acc_pre_off = pre_off;
+  out->acc_pre_val = pre_val;
+  out->acc_pre_w   = pre_w;
+  out->snap_ok  = false;
+}
+
+/* The loop the interrupted pc is in, decoded from its ROM bytes, at a head
+ * up to 19 bytes back:
+ *   [A9 00 00 5B]  LDA #$0000 / TCD     forces DP = 0
+ *   [A5 f D0 06]   LDA f / BNE +6       to the BRA: no add while [f] != 0
+ *   A5 x 65 y 85 x LDA x / ADC y / STA x
+ *   80 rr          BRA head
+ * in 16-bit binary native mode (checked here and before each skip). The flag
+ * test becomes the precondition [f] == 0, the 16-bit LDA's: while it holds the
+ * lap is the pure accumulator, otherwise the span runs as usual. Without the
+ * TCD the offsets are DP's at the decode, and the site holds only at that DP.
+ * Dracula X, ISS / ISS Deluxe, Batman & Robin and Konami's other games (the
+ * Parodius, Power Pro Yakyuu and Goemon series, Pop'n TwinBee, Tokimeki
+ * Memorial; tools/idle_shape_scan.py) hold this loop. */
+/* GCC: cold here and on idle_accum_match and idle_sample (the decode half,
+ * at most once a frame) only to have them optimised for size: at the core's
+ * -O3 their loops were unrolled, and the RAM_EMU pool has to hold Star Fox's
+ * GSU block record behind the code (snes_core.ld ASSERT; 1.4 KB left with
+ * this). Not about speed: with room in the pool they could be plain. */
+static __attribute__((noinline, cold)) bool accum_decode(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
+  const Cpu *cpu = s->cpu;
+  int16_t w[39];                                     /* ROM bytes pc-19..pc+19, -1 elsewhere */
+  for (int k = 0; k < 39; k++) {
+    uint32_t ro;
+    const uint16_t a = (uint16_t)(pc - 19 + k);
+    w[k] = classify(s, bank, a, &ro) == MEM_ROM ? cart_read(s->cart, bank, a) : -1;
+  }
+  for (int back = 0; back < 20; back++) {
+    const uint16_t head = (uint16_t)(pc - back);
+    const int16_t *b = &w[19 - back];
+    int i = 0;
+    const bool tcd = b[0] == 0xa9 && b[1] == 0x00 && b[2] == 0x00 && b[3] == 0x5b;
+    if (tcd) i = 4;
+    const bool flag = b[i] == 0xa5 && b[i + 2] == 0xd0 && b[i + 3] == 0x06;
+    const int f = b[i + 1];
+    if (flag) i += 4;
+    if (b[i] != 0xa5 || b[i + 2] != 0x65 || b[i + 4] != 0x85 || b[i + 5] != b[i + 1] || b[i + 6] != 0x80) continue;
+    const int len = i + 8;
+    if ((int8_t)b[i + 7] != -len || back >= len) continue;      /* BRA head, pc inside the loop */
+    if (b[i + 1] < 0 || b[i + 3] < 0 || f < 0) continue;       /* operands in ROM too */
+    if (cpu->e || cpu->mf || cpu->d) return false;
+    const uint16_t dp = tcd ? 0 : cpu->dp;
+    if (cpu->dp != dp) return false;                             /* before the TCD on its first lap */
+    const uint16_t x = (uint16_t)(dp + b[i + 1]), y = (uint16_t)(dp + b[i + 3]), fo = (uint16_t)(dp + f);
+    if (x >= 0x1fff || y >= 0x1fff || (flag && fo >= 0x1fff)) return false;   /* low WRAM, both bytes */
+    /* the STA changes only x: y and f are the same all span */
+    if ((uint16_t)(x - y + 1) <= 2 || (flag && (uint16_t)(x - fo + 1) <= 2)) return false;
+    accum_site(cpu, bank, head, (uint8_t)len, x, y, dp, flag ? fo : 0, 0, flag ? 2 : 0, out);
+    static const uint8_t ops[] = { IDLE_ACC_LDA0, IDLE_ACC_TCD, IDLE_ACC_LDAF, IDLE_ACC_BNE,
+                                   IDLE_ACC_LDAX, IDLE_ACC_ADC, IDLE_ACC_STA, IDLE_ACC_BRA };
+    static const uint8_t size[] = { 3, 1, 2, 2, 2, 2, 2, 2 };
+    memset(out->acc_at, 0xff, sizeof out->acc_at);
+    for (int k = tcd ? 0 : 2, off = 0; k < 8; k++) {
+      if (k == 2 && !flag) k = 4;
+      out->acc_op[out->acc_n] = ops[k];
+      out->acc_off[out->acc_n] = (uint8_t)off;
+      out->acc_at[off] = out->acc_n++;
+      off += size[k];
+    }
+    return true;
+  }
+  return false;
+}
+
+__attribute__((cold)) bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
   for (unsigned t = 0; t < sizeof s_accum_tpl / sizeof s_accum_tpl[0]; t++) {
     const AccumTemplate *tp = &s_accum_tpl[t];
     if (bank != tp->bank && bank != mirror_bank(tp->bank)) continue;
@@ -543,24 +592,11 @@ bool idle_accum_match(Snes *s, uint8_t bank, uint16_t pc, IdleSkip *out) {
     Cpu *cpu = s->cpu;
     if (cpu->e || cpu->mf || cpu->d) continue;
     if (cpu->dp != tp->dp) continue;                             /* offsets assume this DP */
-    site_clear(out);
-    out->kind    = IDLE_KIND_ACCUM;
-    out->head    = tp->head;
-    out->len     = tp->len;
-    out->bank    = tp->bank;
-    out->bank_alt = mirror_bank(tp->bank);
-    out->e = cpu->e; out->mf = cpu->mf; out->xf = cpu->xf;
-    out->uses_db = false; out->uses_dp = true; out->dp = tp->dp;  /* re-check DP each frame */
-    out->acc_dest = tp->acc_dest;
-    out->acc_add  = tp->acc_add;
-    out->acc_w    = tp->acc_w;
-    out->acc_pre_off = tp->pre_off;
-    out->acc_pre_val = tp->pre_val;
-    out->acc_pre_w   = tp->pre_w;
-    out->snap_ok  = false;
+    accum_site(cpu, tp->bank, tp->head, tp->len, tp->acc_dest, tp->acc_add, tp->dp,
+               tp->pre_off, tp->pre_val, tp->pre_w, out);
     return true;
   }
-  return false;
+  return accum_decode(s, bank, pc, out);
 }
 #endif
 
@@ -636,7 +672,7 @@ static long idle_trace_n = -2;
 #define IDLE_TRACE(...) do { } while (0)
 #endif
 
-static void idle_sample(Snes *s) {
+static __attribute__((cold)) void idle_sample(Snes *s) {
   Cpu *cpu = s->cpu;
   if (cpu->stopped) return;
   const uint8_t bank = cpu->k;

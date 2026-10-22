@@ -215,6 +215,27 @@
   Super Mario RPG, both Kirbys and Dragon Ball Z run the same counts, and
   every replay the same hashes. Device (gameplay, PERF, 60 fps): the SA-1's
   share 36% → 6%, frames shown 48% → 82%, the lowest window 15 → 34 fps.
+- **Idle skip: Konami's vsync loop is read from the ROM, and a span in it is
+  native from end to end.** The accumulator loop `[LDA #0 / TCD] [LDA f /
+  BNE] LDA x / ADC y / STA x / BRA` (x += y every lap until the NMI) had
+  templates for four games; it is now decoded from the loop's own bytes, so
+  the 40 ROMs of the collection that hold it are skipped (Parodius, Gokujou
+  Parodius, Parodius Da!, Pop'n TwinBee, the Power Pro Yakyuu and Goemon
+  series, Tokimeki Memorial, Animaniacs, Tiny Toon, Dracula X, ISS; listed by
+  `tools/idle_shape_scan.py`), its flag test as a condition (`[f] == 0`). The
+  JSL loops (TMNT IV, Mystical Ninja) keep their templates. The line's events
+  cut spans to ~2.5 laps, and each span went to the loop head in the C
+  interpreter before skipping and left its last, partial lap to the engine:
+  now each opcode's charge is measured on the site's first lap and the whole
+  span is stepped natively, the partial laps included. A span also no longer
+  calls into the SA-1 overlay to ask whether the SA-1 sleeps when its loop
+  reads no SA-1 memory. Host: 65816 instructions Parodius gameplay -49%,
+  intro -70%, Castlevania -22%, Batman -20%, the same state in all 15
+  recordings. Device (PERF): Parodius gameplay 82% → 96% of frames shown, the
+  lowest window 34 → 46 fps, the span runner 955 → 468 cycles a call;
+  Castlevania (60 fps) the 65816 2.30M → 1.86M cycles a frame (-19.4%), every
+  frame shown; Batman the 65816 -18%, 6,354 of 6,360 frames shown at 60 fps;
+  Kirby Super Star unchanged.
 
 ### Changed
 
