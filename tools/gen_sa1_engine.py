@@ -992,8 +992,12 @@ def headcore(tag):
     s = ['ldr r0, [sp, #F_RUN]', 'ldrh r2, [r0, #RUN_CANDPC]', 'cmp r2, r1', 'bne.w %s' % arm,
          'ldrb r2, [r0, #RUN_CANDK]', 'ldrb r3, [r4, #CPU_K]', 'cmp r2, r3', 'bne.w %s' % arm,
          'ldr r2, [r0, #RUN_EXTEV]', 'ldr r3, [r0, #RUN_LAPEV]', 'cmp r2, r3', 'bne.w %s' % arm]
-    for i, r in enumerate(('r7', 'r8', 'r9', 'r10')):
+    nz, nzok = L('nz'), L('nzok')
+    for i, r in enumerate(('r7', 'r8', 'r9')):
         s += ['ldr r2, [r0, #(RUN_AS + %d)]' % (4 * i), 'cmp r2, %s' % r, 'bne.w %s' % arm]
+    # N/Z: r10 holds the last result, so the same flags can come from another
+    # value (a lap that counts: INC / BRA): told apart off the path (nz)
+    s += ['ldr r2, [r0, #(RUN_AS + 12)]', 'cmp r2, r10', 'bne.w %s' % nz, nzok + ':']
     s += ['ldr r2, [r0, #(RUN_AS + 16)]', 'ldrh r3, [r4, #CPU_SP]', 'cmp r2, r3', 'bne.w %s' % arm]
     for i, off in enumerate((16, 20, 24)):
         s += ['ldr r2, [r0, #(RUN_AS + %d)]' % (20 + 4 * i), 'ldr r3, [r4, #%d]' % off, 'cmp r2, r3', 'bne.w %s' % arm]
@@ -1004,7 +1008,11 @@ def headcore(tag):
           'ldrb r2, [r0, #RUN_DIRTY]', 'ldr r3, [sp, #F_IRAM]', 'ldr r3, [r3, #SA1E_WDIRTY]', 'orrs r2, r2, r3',
           'it eq', 'moveq.w r0, #3', 'beq.w .Lexit_r1',
           'ldrh r2, [r0, #RUN_WFAIL]', 'cmp r2, r1', 'beq.w %s' % arm,
-          'mov.w r0, #5', 'b.w .Lexit_r1', arm + ':',
+          'mov.w r0, #5', 'b.w .Lexit_r1',
+          # r2 = the head's r10: the same N (bit 31) and the same Z (bits 0-30 all 0)?
+          nz + ':', 'eors r3, r2, r10', 'bmi.w %s' % arm, 'lsls r2, r2, #1', 'it ne', 'movne.w r2, #1',
+          'lsls r3, r10, #1', 'it ne', 'movne.w r3, #1', 'cmp r2, r3', 'beq.w %s' % nzok,
+          arm + ':',
           'strh r1, [r0, #RUN_CANDPC]', 'ldrb r3, [r4, #CPU_K]', 'strb r3, [r0, #RUN_CANDK]', 'mov.w r2, #0',
           'strb r2, [r0, #RUN_DIRTY]', 'ldr r3, [sp, #F_IRAM]', 'str r2, [r3, #SA1E_WDIRTY]',
           'ldr r2, [r0, #RUN_EXTEV]', 'str r2, [r0, #RUN_LAPEV]', 'str r11, [sp, #F_LAPST]',

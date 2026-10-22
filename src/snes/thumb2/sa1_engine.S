@@ -228,7 +228,8 @@ sa1_engine_run:
         bne.w .Larm672
         ldr r2, [r0, #(RUN_AS + 12)]
         cmp r2, r10
-        bne.w .Larm672
+        bne.w .Lnz673
+.Lnzok674:
         ldr r2, [r0, #(RUN_AS + 16)]
         ldrh r3, [r4, #CPU_SP]
         cmp r2, r3
@@ -261,6 +262,17 @@ sa1_engine_run:
         beq.w .Larm672
         mov.w r0, #5
         b.w .Lexit_r1
+.Lnz673:
+        eors r3, r2, r10
+        bmi.w .Larm672
+        lsls r2, r2, #1
+        it ne
+        movne.w r2, #1
+        lsls r3, r10, #1
+        it ne
+        movne.w r3, #1
+        cmp r2, r3
+        beq.w .Lnzok674
 .Larm672:
         strh r1, [r0, #RUN_CANDPC]
         ldrb r3, [r4, #CPU_K]
@@ -336,47 +348,48 @@ sa1_engine_run:
         ldr r0, [sp, #F_RUN]
         ldrh r2, [r0, #RUN_CANDPC]
         cmp r2, r1
-        bne.w .Larm673
+        bne.w .Larm675
         ldrb r2, [r0, #RUN_CANDK]
         ldrb r3, [r4, #CPU_K]
         cmp r2, r3
-        bne.w .Larm673
+        bne.w .Larm675
         ldr r2, [r0, #RUN_EXTEV]
         ldr r3, [r0, #RUN_LAPEV]
         cmp r2, r3
-        bne.w .Larm673
+        bne.w .Larm675
         ldr r2, [r0, #(RUN_AS + 0)]
         cmp r2, r7
-        bne.w .Larm673
+        bne.w .Larm675
         ldr r2, [r0, #(RUN_AS + 4)]
         cmp r2, r8
-        bne.w .Larm673
+        bne.w .Larm675
         ldr r2, [r0, #(RUN_AS + 8)]
         cmp r2, r9
-        bne.w .Larm673
+        bne.w .Larm675
         ldr r2, [r0, #(RUN_AS + 12)]
         cmp r2, r10
-        bne.w .Larm673
+        bne.w .Lnz676
+.Lnzok677:
         ldr r2, [r0, #(RUN_AS + 16)]
         ldrh r3, [r4, #CPU_SP]
         cmp r2, r3
-        bne.w .Larm673
+        bne.w .Larm675
         ldr r2, [r0, #(RUN_AS + 20)]
         ldr r3, [r4, #16]
         cmp r2, r3
-        bne.w .Larm673
+        bne.w .Larm675
         ldr r2, [r0, #(RUN_AS + 24)]
         ldr r3, [r4, #20]
         cmp r2, r3
-        bne.w .Larm673
+        bne.w .Larm675
         ldr r2, [r0, #(RUN_AS + 28)]
         ldr r3, [r4, #24]
         cmp r2, r3
-        bne.w .Larm673
+        bne.w .Larm675
         ldrb r2, [r0, #(RUN_AS + 32)]
         ldrb r3, [r4, #CPU_E]
         cmp r2, r3
-        bne.w .Larm673
+        bne.w .Larm675
         ldrb r2, [r0, #RUN_DIRTY]
         ldr r3, [sp, #F_IRAM]
         ldr r3, [r3, #SA1E_WDIRTY]
@@ -386,10 +399,21 @@ sa1_engine_run:
         beq.w .Lexit_r1
         ldrh r2, [r0, #RUN_WFAIL]
         cmp r2, r1
-        beq.w .Larm673
+        beq.w .Larm675
         mov.w r0, #5
         b.w .Lexit_r1
-.Larm673:
+.Lnz676:
+        eors r3, r2, r10
+        bmi.w .Larm675
+        lsls r2, r2, #1
+        it ne
+        movne.w r2, #1
+        lsls r3, r10, #1
+        it ne
+        movne.w r3, #1
+        cmp r2, r3
+        beq.w .Lnzok677
+.Larm675:
         strh r1, [r0, #RUN_CANDPC]
         ldrb r3, [r4, #CPU_K]
         strb r3, [r0, #RUN_CANDK]

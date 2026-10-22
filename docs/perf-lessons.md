@@ -797,6 +797,17 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   clear and `sa1_interpret` does the fold -- and putting the wake in
   `sa1_wake` took it out of line, which reallocated the registers of the
   whole of `sa1_snes_read`. Both are commented in place (`GCC:`).
+- **The engine's N/Z is a value, not two flags: compare what the CPU can
+  see.** On the device Parodius's gameplay still ran ~24K SA-1 instructions
+  a frame where the host ran ~1.7K. The host never runs the engine; gwemu
+  does, and its PROF/sa1 counters equalled the device log window for window,
+  so the cause was in the engine, not in timing. Its loop-head snapshot
+  compares r10, which holds the last result (N = bit 31, Z = bits 0-30
+  zero): two laps of a counter never matched, though N and Z did. Comparing
+  the flags only on the raw mismatch keeps the path every head takes the
+  same instructions; the SA-1 then re-slept within two laps of each wake.
+  gwemu reproduces a device-only count exactly in ~50 s: run it before
+  guessing.
 
 ---
 

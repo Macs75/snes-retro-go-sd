@@ -204,6 +204,17 @@
   same state every frame in every recording. Device (intro, PERF, 60 fps,
   together with the accumulator decoding below): frames shown 25% → 88%, the
   SA-1's share 68% → 12%.
+- **SA-1 engine: N and Z compared as flags at a loop head.** The Thumb-2
+  engine keeps N/Z as the last result, so after an `INC` the value differed
+  every lap and the engine never handed a counting lap to the proof:
+  Parodius's counter slept only when C proved it by chance, ~1,600 SA-1
+  instructions after each of ~16 wakes a frame in gameplay. The raw compare
+  stays on the path every head takes; only when it fails are N and Z
+  compared. gwemu (the device engine, a gameplay recording): the SA-1's
+  instructions in the heavy windows ~24K → ~1.6K a frame, as on the host;
+  Super Mario RPG, both Kirbys and Dragon Ball Z run the same counts, and
+  every replay the same hashes. Device (gameplay, PERF, 60 fps): the SA-1's
+  share 36% → 6%, frames shown 48% → 82%, the lowest window 15 → 34 fps.
 
 ### Changed
 
