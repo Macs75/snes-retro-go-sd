@@ -780,6 +780,23 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   and a template aligns to the head before it skips whole laps. The generic
   skip does not lose this way because it stores the proven state at every
   boundary. Dropped: per-game code for that gain was not worth it.
+- **A wait loop that counts can sleep: keep the count, not the laps.**
+  Parodius's SA-1 spins on `INC $602E / BRA` (68% of the device frame): every
+  lap writes, so no proof takes it. Nothing reads the counter but the 65816
+  and DMA, and both catch the SA-1 up first (the contacts), so a sleeping
+  counter is exact if it is right at every catch-up: there the whole laps the
+  debt pays for are added (`sa1_ctr_step`), and the lap in flight shows its
+  +1 when the debt is positive (the SA-1 has made the INC). On waking, the
+  counter goes back to its value at that lap's head with N/Z of the INC
+  before, and the lap is interpreted. The 65816's idle skip reads SA-1 memory
+  without a catch-up, so `sa1_asleep` says no while it counts. Two
+  negative controls (no fold; a wake one too high) diverged at frame 115.
+  Fitting it cost more than writing it: `sa1_run` is inlined into
+  `sa1_sync`, whose slot was full -- an `idle != 1` test (cmp + branch, 4 B)
+  did not fit where `!idle` (cbz, 2 B) did, so a counter sleeps with `hold`
+  clear and `sa1_interpret` does the fold -- and putting the wake in
+  `sa1_wake` took it out of line, which reallocated the registers of the
+  whole of `sa1_snes_read`. Both are commented in place (`GCC:`).
 
 ---
 

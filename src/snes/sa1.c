@@ -122,7 +122,14 @@ struct Sa1 {
   /* the run state: debt is saved (the last saved field), the rest is the
    * wait-loop skip, which re-proves (sa1_interpret) */
   Sa1Run run;
-  uint8_t idle;               /* asleep at a proven wait loop's head */
+  uint8_t idle;               /* asleep at a proven wait loop's head: 1, or 2 in a
+                                 lap counter (sa1_ctr_sleep) */
+  uint8_t hold;               /* idle 1: sa1_run runs nothing. GCC: a byte of its
+                                 own only so that sa1_run's test is a cbz (2
+                                 bytes; idle != 1 is a cmp and a branch, 4):
+                                 sa1_run is inlined into sa1_sync, which must fit
+                                 its fixed I-cache slot (snes_core.ld). With a
+                                 bigger slot, testing idle != 1 would do. */
   int32_t idleLap;            /* the proven lap */
   uint32_t idleInstrs;
   Snes* snes;
@@ -142,6 +149,12 @@ struct Sa1 {
    * written there covers it): non-zero. The engine checks it after an I-RAM
    * write (SA1E_WMAP); clear outside a run-ahead. Not saved. */
   uint8_t wmap[0x800];
+  /* asleep in a lap counter (sa1_ctr_sleep): the counter's bytes (hi NULL
+   * when 8-bit) and its value at the head, before the lap in flight. Not
+   * saved: a save wakes the SA-1 first. */
+  uint8_t* ctrLo;
+  uint8_t* ctrHi;
+  uint16_t ctrV0;
 };
 
 #define SA1_SAVE_FIRST iram
@@ -783,7 +796,7 @@ static void sa1_maps(Sa1* s) {
 }
 
 bool sa1_asleep(const Sa1* s) {
-  return s->idle && !s->SA1_in_cc1_dma;
+  return s->idle == 1 && !s->SA1_in_cc1_dma;
 }
 
 uint8_t sa1_peek(Sa1* s, uint8_t bank, uint16_t adr) {
@@ -923,6 +936,8 @@ void sa1_reset(Sa1* s) {
   sa1cpu_reset(s->cpu);
   s->cpu->sp = 0x01ff;
   s->idle = 0;
+  s->hold = 0;
+  s->ctrLo = NULL;
   s->run.candPc = 0xffff;
   s->run.candK = 0xff;
   s->run.extEvents++;
@@ -974,13 +989,19 @@ static int sa1_skip_on(void) {
 /* After an instruction that went back 1..64 bytes in the same bank, at pc:
  * the loop-head bookkeeping (the proof described above). Returns true when
  * the loop is proven and the SA-1 now sleeps. */
+static bool sa1_ctr_sleep(Sa1* s);
+static bool sa1_ctr_step(Sa1* s);
 static bool sa1_loop_head(Sa1* s) {
   Cpu* c = s->cpu;
-  if (c->pc == s->run.candPc && c->k == s->run.candK && !s->run.lapDirty && !s->wdirty &&
-      s->run.lapEvents == s->run.extEvents && !memcmp(s->run.snap, &c->a, SA1_CPU_SNAP) && sa1_skip_on()) {
-    s->idle = 1;
+  const bool clean = !s->run.lapDirty && !s->wdirty;
+  if (c->pc == s->run.candPc && c->k == s->run.candK && (clean || s->run.lapInstrs == 2) &&
+      s->run.lapEvents == s->run.extEvents && !memcmp(s->run.snap, &c->a, SA1_CPU_SNAP) && sa1_skip_on() &&
+      (clean || sa1_ctr_sleep(s))) {
+    s->idle = clean ? 1 : 2;
+    s->hold = clean;
     s->idleLap = s->run.lapCycles;
     s->idleInstrs = s->run.lapInstrs;
+    if (!clean) sa1_ctr_step(s);  /* no whole lap owed, ever (sa1_ctr_step) */
     return true;
   }
   s->run.candPc = c->pc;
@@ -992,6 +1013,60 @@ static bool sa1_loop_head(Sa1* s) {
   s->run.lapCycles = 0;
   s->run.lapInstrs = 0;
   return false;
+}
+
+/* The byte the SA-1 writes at a when that is plain memory -- I-RAM, BW-RAM
+ * through the $6000 window (not the bit map) or banks $40-$4F -- else NULL */
+static uint8_t* sa1_mem_byte(Sa1* s, uint32_t a) {
+  const uint8_t bank = (uint8_t)(a >> 16);
+  const uint16_t adr = (uint16_t)a;
+  if (bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) {
+    if (adr < 0x0800 || (adr >= 0x3000 && adr < 0x3800)) return &s->iram[adr & 0x7ff];
+    if (adr >= 0x6000 && adr < 0x8000 && !(s->BWUsed2 & 0x80) && s->bwramMask) {
+      unsigned sh, mask;
+      return &s->bwram[sa1_bw_window_index(s, adr, &sh, &mask)];
+    }
+    return NULL;
+  }
+  if (bank >= 0x40 && bank < 0x50 && s->bwramMask)
+    return &s->bwram[(((uint32_t)(bank & 0x0f) << 16) | adr) & s->bwramMask];
+  return NULL;
+}
+
+/* A lap counter: a wait loop that adds one to a counter each lap, INC abs /
+ * BRA or INC dp / BRA (Parodius's SA-1 counts in BW-RAM until an interrupt).
+ * sa1_loop_head cannot prove it, its lap writes; but each lap is the one
+ * before plus that one, so the SA-1 sleeps there too (idle 2). The counter
+ * is its value at the head (ctrV0) and the laps the debt has paid for since:
+ * sa1_ctr_step adds them at each catch-up, which comes before anything the
+ * 65816 or a DMA reads of the SA-1's memory (a contact, sa1.h), and puts the
+ * counter back at the head when the SA-1 wakes. The 65816's idle skip reads that memory
+ * without a catch-up, so for it the SA-1 is not asleep (sa1_asleep). Called
+ * at the head, the CPU as the lap before left it, after two instructions
+ * that wrote: these two, from ROM. */
+static __attribute__((noinline)) bool sa1_ctr_sleep(Sa1* s) {
+  Cpu* c = s->cpu;
+  if (c->e) return false;
+  const uint8_t* page = s->rdmap[(((uint32_t)c->k << 16 | c->pc) >> 13) & 0x7ff];
+  if (!page || page < s->rom || page >= s->rom + s->romSize || (c->pc & 0x1fff) > 0x1ffb) return false;
+  const uint8_t* b = page + (c->pc & 0x1fff);
+  uint32_t lo, hi;
+  if (b[0] == 0xee && b[3] == 0x80 && b[4] == 0xfb) {            /* INC abs / BRA */
+    lo = (uint32_t)c->db << 16 | b[1] | (uint32_t)b[2] << 8;
+    hi = (lo + 1) & 0xffffff;
+  } else if (b[0] == 0xe6 && b[2] == 0x80 && b[3] == 0xfc) {     /* INC dp / BRA */
+    lo = (uint16_t)(c->dp + b[1]);
+    hi = (uint16_t)(lo + 1);
+  } else {
+    return false;
+  }
+  uint8_t* pl = sa1_mem_byte(s, lo);
+  uint8_t* ph = c->mf ? NULL : sa1_mem_byte(s, hi);
+  if (!pl || (!c->mf && !ph)) return false;
+  s->ctrLo = pl;
+  s->ctrHi = ph;
+  s->ctrV0 = (uint16_t)(*pl | (ph ? *ph << 8 : 0));
+  return true;
 }
 
 #ifdef SA1_T2
@@ -1081,8 +1156,10 @@ static bool sa1_write_proof(Sa1* s) {
 }
 #endif
 
+static bool sa1_ctr_step(Sa1* s);
 static void sa1_interpret(Sa1* s) {
   Cpu* c = s->cpu;
+  if (s->ctrLo && sa1_ctr_step(s)) return;   /* asleep in a lap counter */
   SA1_PERF_INC(snes_perf_sa1_slices, 1);
   while (s->run.debt > 0) {
 #ifdef SA1_T2
@@ -1105,6 +1182,7 @@ static void sa1_interpret(Sa1* s) {
       SA1_PERF_INC(snes_perf_sa1_handbacks, 1);
       if (sa1_skip_on()) {
         s->idle = 1;
+        s->hold = 1;
         s->idleLap = s->run.lapCycles;
         s->idleInstrs = s->run.lapInstrs;
         return;
@@ -1150,6 +1228,7 @@ static void sa1_interpret(Sa1* s) {
 static void sa1_wake(Sa1* s) {
   SNES_PERF_BEGIN(perf_t);
   s->idle = 0;
+  s->hold = 0;
   SA1_PERF_INC(snes_perf_sa1_wakes, 1);
   if (s->run.debt > 0 && s->idleLap > 0) {
     const int32_t laps = (s->run.debt - 1) / s->idleLap;
@@ -1164,6 +1243,44 @@ static void sa1_wake(Sa1* s) {
   SNES_PERF_END(snes_perf_gsu, perf_t);
 }
 
+/* GCC: noinline, and the counter's wake here rather than in sa1_wake, where
+ * it belongs: sa1_wake stays small enough (one store more: hold) for GCC to
+ * keep inlining it into sa1_snes_read and the other sa1_event callers. With
+ * the wake in it, it went out of line and sa1_snes_read -- hot, in a fixed
+ * I-cache slot -- was compiled with a different register allocation, which
+ * the device would have to measure again. If sa1_wake is out of line anyway
+ * (another GCC, a change to it), the wake can move back into it.
+ * A lap counter at a catch-up (sa1_interpret). Asleep: the whole laps the
+ * debt pays for, done (each adds one), leaving the lap in flight, whose one
+ * the counter shows too: with its debt positive the SA-1 has made the INC.
+ * So when it wakes (sa1_wake), no whole lap is left: it is back at the head
+ * of the lap in flight, the counter as that lap found it, and N and Z as the
+ * INC before left them; it runs on from there (false). */
+static __attribute__((noinline)) bool sa1_ctr_step(Sa1* s) {
+  if (!s->idle) {
+    const uint16_t v = s->ctrV0;
+    *s->ctrLo = (uint8_t)v;
+    if (s->ctrHi) *s->ctrHi = (uint8_t)(v >> 8);
+    s->cpu->z = s->ctrHi ? v == 0 : (uint8_t)v == 0;
+    s->cpu->n = s->ctrHi ? (v & 0x8000) != 0 : (v & 0x80) != 0;
+    s->ctrLo = NULL;
+    return false;
+  }
+  if (s->run.debt > s->idleLap) {
+    const int32_t laps = (s->run.debt - 1) / s->idleLap;
+    s->run.debt -= laps * s->idleLap;
+    s->ctrV0 = (uint16_t)(s->ctrV0 + laps);
+#ifdef HOST_BUILD
+    sa1_fs_skip += (uint32_t)laps * s->idleInstrs;
+#endif
+    SA1_PERF_INC(snes_perf_sa1_skip, (uint32_t)laps * s->idleInstrs);
+  }
+  const uint16_t v = (uint16_t)(s->ctrV0 + (s->run.debt > 0));
+  *s->ctrLo = (uint8_t)v;
+  if (s->ctrHi) *s->ctrHi = (uint8_t)(v >> 8);
+  return true;
+}
+
 /* Held in reset or wait ($2200 bits 5/6), or in WAI with nothing pending, the
  * slice is dropped. */
 void sa1_run(Sa1* s, uint32_t masterClocks) {
@@ -1173,7 +1290,7 @@ void sa1_run(Sa1* s, uint32_t masterClocks) {
   masterClocks += s->halfClock;
   s->halfClock = masterClocks & 1;
   s->run.debt += (int32_t)(masterClocks >> 1);
-  if (!s->idle) {
+  if (!s->hold) {                 /* idle 2: a lap counter, which sa1_interpret folds */
     SNES_PERF_BEGIN(perf_t);
     sa1_interpret(s);
     SNES_PERF_END(snes_perf_gsu, perf_t);

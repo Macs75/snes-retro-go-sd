@@ -191,6 +191,19 @@
   interpreted GSU instructions 159.8M → 8.1M over that recording, the same
   GSU state and Game Pak RAM every frame with the blocks on and off.
   `snes.bin` +94 KB (only the cart's own record is loaded).
+- **SA-1: a wait loop that counts its laps sleeps too.** Jikkyou Oshaberi
+  Parodius's SA-1 does nothing in its intro but `INC $602E / BRA`, a BW-RAM
+  counter one up a lap: the sleep proof refused the lap because it wrote, so
+  the SA-1 ran 32,500 instructions a frame, 68% of the device's frame. A loop
+  of exactly `INC abs` or `INC dp` and a branch back now sleeps like any other
+  wait. At each catch-up the laps paid for are added to the counter (the
+  65816 and DMA catch the SA-1 up before they read what it shares), and on
+  waking the counter and N/Z are put back where the lap in flight starts. For
+  the 65816's idle skip the SA-1 is not asleep then: it reads shared memory
+  without a catch-up. Host: the intro's SA-1 instructions 128.7M → 0.54M, the
+  same state every frame in every recording. Device (intro, PERF, 60 fps,
+  together with the accumulator decoding below): frames shown 25% → 88%, the
+  SA-1's share 68% → 12%.
 
 ### Changed
 
