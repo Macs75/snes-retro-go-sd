@@ -867,6 +867,20 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   65816's bus for every game -- the line catch-up went out of line
   (`snes_sa1_line`) and `snes_core.ld` now pins the bus functions at their
   measured offset (+0x1D8), so ld fails instead of shifting them.
+- **Cost per instruction far above the engine's says: count the wakes.**
+  After that, Parodius's late windows still had the SA-1 at ~233 cycles an
+  instruction, 4 instructions a slice (Kirby, Mario RPG: ~75 and ~22), and
+  209 wakes a frame -- ~6K cycles for ~26 instructions each. A host count
+  of each wake's cause (a throwaway counter in a scratch copy) found ~90%
+  were 65816 writes to BW-RAM while the SA-1 sat in its counter, none to
+  the counter. A loop proven as `INC / BRA` from ROM sees nothing else,
+  so such a write is no event at all (`sa1_ctr_blind`): device wakes 112
+  → 11 a frame, the SA-1 -61%, the worst window 56 → 85 fps. The control
+  that must fail (no write an event in any state) diverges in Kirby Super
+  Star at frame 120; the counter-byte test itself is never exercised by
+  the recordings (the 65816 never writes the counter). GCC inlines
+  `sa1_event` with `sa1_wake` at each call (~180 B): the write path keeps
+  a single call so the overlay behind it moves 228 B, not 484.
 
 ---
 

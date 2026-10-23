@@ -268,6 +268,18 @@
   shown 7,877 → 8,177 of 8,640, the late stage (windows 59-71) 1,144 →
   1,253 of 1,560, the lowest window 51 → 56 fps, no window fewer; the
   replay's state hashes equal the host's.
+- **SA-1: a 65816 write the counting SA-1 cannot see no longer wakes it.**
+  The lap counter reads nothing but its counter, and only an interrupt (a
+  register write) ends it, yet every 65816 write to I-RAM or BW-RAM woke
+  it: in Parodius's later stages ~250 BW-RAM writes a frame, each followed
+  by a few laps run and a new proof before it slept again. A write to any
+  other byte than the counter's now just stores. Host: the SA-1's
+  instructions over the long Parodius recording 15.35M → 9.40M, the same
+  state every frame in all 16 recordings. Device (Parodius long gameplay
+  recording, PERF, 60 fps): SA-1 wakes 112 → 11 a frame, the SA-1 -61%
+  (5.7% of the budget; 7.5% in windows 59-71), frames shown 8,177 → 8,511
+  of 8,640, windows 59-71 1,291 → 1,478 of 1,560, the lowest window 56 →
+  85 fps, no window fewer; state hashes equal the host's.
 
 ### Changed
 

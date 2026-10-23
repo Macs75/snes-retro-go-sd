@@ -691,14 +691,29 @@ uint8_t sa1_snes_read(Sa1* s, uint8_t bank, uint16_t adr) {
   return s->snes->openBus;
 }
 
+/* A 65816 write to I-RAM or BW-RAM at t while the SA-1 sits in a lap counter
+ * (sa1_time_owed, snes.h): its loop reads nothing but the counter (INC / BRA
+ * from ROM, sa1_ctr_sleep), so a write to any other byte changes nothing it
+ * sees, and only a register write (an interrupt) ends the loop. Such a write
+ * is no event: the SA-1 is neither caught up nor woken, its time stays owed.
+ * Parodius's 65816 writes BW-RAM ~250 times a frame in its later stages, and
+ * each woke the counter for a few laps before it slept again. */
+static inline bool sa1_ctr_blind(const Sa1* s, const uint8_t* t) {
+  return sa1_time_owed(s->snes) && t != s->ctrLo && t != s->ctrHi;
+}
+
 void sa1_snes_write(Sa1* s, uint8_t bank, uint16_t adr, uint8_t val) {
-  sa1_event(s);
-  if (bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) {
+  const bool sys = bank < 0x40 || (bank >= 0x80 && bank < 0xc0);
+  uint8_t* t = sys && adr >= 0x6000 && adr < 0x8000
+      ? &s->bwram[(((uint32_t)(s->SNSBMAP & 0x1f) << 13) | (adr & 0x1fff)) & s->bwramMask] : NULL;
+  /* GCC: one call of sa1_event for both paths, not an early return for the
+   * window: GCC inlines sa1_event with sa1_wake at each call, and two grew
+   * this function by 360 B, moving the SA-1's C CPU behind it. If sa1_event
+   * stops being inlined, the early return costs nothing again. */
+  if (!t || !sa1_ctr_blind(s, t)) sa1_event(s);
+  if (t) { *t = val; return; }
+  if (sys) {
     if (adr >= 0x8000) return;
-    if (adr >= 0x6000) {
-      s->bwram[(((uint32_t)(s->SNSBMAP & 0x1f) << 13) | (adr & 0x1fff)) & s->bwramMask] = val;
-      return;
-    }
     if (adr >= 0x3000 && adr < 0x3800) { s->iram[adr - 0x3000] = val; return; }
     if (adr >= 0x2200 && adr < 0x2400) sa1_reg_write(s, adr, val);
     return;
@@ -816,8 +831,9 @@ uint8_t sa1_peek(Sa1* s, uint8_t bank, uint16_t adr) {
 }
 
 void sa1_iram_write(Sa1* s, uint32_t adr, uint8_t val) {
-  sa1_event(s);
-  s->iram[adr & 0x7ff] = val;
+  uint8_t* t = &s->iram[adr & 0x7ff];
+  if (!sa1_ctr_blind(s, t)) sa1_event(s);
+  *t = val;
 }
 
 /* --- the SA-1 CPU's view --------------------------------------------------- */
