@@ -280,6 +280,18 @@
   (5.7% of the budget; 7.5% in windows 59-71), frames shown 8,177 → 8,511
   of 8,640, windows 59-71 1,291 → 1,478 of 1,560, the lowest window 56 →
   85 fps, no window fewer; state hashes equal the host's.
+- **The 65816 engine's batch loop does less per instruction.** It repeated
+  for every 65816 instruction checks that change at most once per batch: the
+  H-IRQ match, the ROM-load-time dispatch flag, five interrupt and power
+  flags read one by one, and a fetch that zeroed then counted its memory op
+  and loaded the ROM page twice. The first two are now tested at batch entry
+  (the span cut before the H-IRQ dot), the flags with one word and one byte,
+  the fetch is the batch's own: 73 → 48 ARM instructions of bookkeeping per
+  65816 instruction (gwemu). gwemu reaches the host's state in all 16
+  recordings. Device (Parodius long gameplay recording, PERF, 60 fps): the
+  65816 -22 cycles an instruction in every window (-7.6%), frames shown
+  8,631 → 8,686 of 8,760, the lowest window 85 → 98 fps, no window heavier;
+  state hashes equal. Every game runs this loop.
 
 ### Changed
 

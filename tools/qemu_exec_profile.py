@@ -206,6 +206,8 @@ def func_report(log, syms, names, frames):
         if name not in addr:
             print('# %s: no such symbol' % name); continue
         a0, sz = addr[name]
+        if not sz:                  # assembly: no size, it ends at the next symbol
+            sz = min((a for a, _, _ in syms if a > a0), default=a0 + 0x10000) - a0
         lines, src, where = [], [], '?'
         for l in docker('arm-none-eabi-objdump -d -l --no-show-raw-insn --start-address=%d --stop-address=%d '
                         'snes_qemu.elf' % (a0, a0 + sz)).splitlines():

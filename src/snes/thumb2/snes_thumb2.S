@@ -8910,7 +8910,8 @@ snes_thumb2_run:
         .type   snes_thumb2_batch,%function
         .thumb_func
 snes_thumb2_batch:
-        push    {r1, r4, r5, r6, r7, r8, r9, r10, r11, lr}   @ 40 bytes, 8-aligned; b at [sp]
+        push    {r1, r4, r5, r6, r7, r8, r9, r10, r11, lr}   @ 40 bytes; b at [sp, #8] below
+        sub     sp, sp, #8              @ [sp] = the dots cut off the span (8-aligned for C)
         mov     r4, r0
         ldr     r8, [r1, #0]            @ dots
         ldr     r10, [r1, #4]           @ apuDotsAccum
@@ -8918,43 +8919,57 @@ snes_thumb2_batch:
         ldr     r7, [r1, #12]           @ Snes*
         ldr     r11, [r7, #SNES_DMA]    @ Dma*
         movs    r5, #3                  @ return contract: batch
-.Lb_top:
-        strh    r9, [r7, #SNES_HPOS]
-        str     r10, [r7, #SNES_APUDOTS]
-        @ apply_irq_match: needs H-IRQ on, the V test passing if V-IRQ is on,
-        @ and hPos == hTimer*4; then inIrq = irqWanted = true
+        @ rc dispatch is set when a ROM loads, never inside a span: once here
+        movw    r2, #:lower16:g_rc_active
+        movt    r2, #:upper16:g_rc_active
+        ldrb    r2, [r2]
+        movs    r1, #0
+        str     r1, [sp]
+        cmp     r2, #0
+        bne     .Lb_exit_noop
+        @ apply_irq_match, for the first opcode: needs H-IRQ on, the V test
+        @ passing if V-IRQ is on, and hPos == hTimer*4; then inIrq = irqWanted
+        @ = true. No later opcode of the batch can start on that dot: the span
+        @ is cut just before it (C runs the opcode that reaches it, and matches
+        @ there), and a write that moves it or turns H-IRQ on ($4207/$4208,
+        @ $4200) sets hclip, which ends the batch. dots_to_next_event already
+        @ ends a span on that dot, so the cut is normally 0.
         ldrb    r0, [r7, #SNES_HIRQEN]
-        ldrb    r1, [r7, #SNES_VIRQEN]
         cbz     r0, .Lb_noirq           @ no H-IRQ: nothing to match (V alone returns too)
+        ldrh    r2, [r7, #SNES_HTIMER]
+        lsl     r2, r2, #2              @ the H-IRQ dot
+        subs    r3, r2, r9              @ how far ahead of hPos
+        ble     .Lb_nocut               @ here (the match below) or behind: no cut
+        cmp     r3, r8
+        bge     .Lb_nocut               @ at or past the span's end
+        sub     r1, r8, r3
+        str     r1, [sp]                @ the cut, given back at the exit
+        mov     r8, r3
+.Lb_nocut:
+        ldrb    r1, [r7, #SNES_VIRQEN]
         cbz     r1, .Lb_hmatch
-        ldrh    r2, [r7, #SNES_VPOS]
+        ldrh    r0, [r7, #SNES_VPOS]
         ldrh    r3, [r7, #SNES_VTIMER]
-        cmp     r2, r3
+        cmp     r0, r3
         bne     .Lb_noirq
 .Lb_hmatch:
-        ldrh    r2, [r7, #SNES_HTIMER]
-        cmp     r9, r2, lsl #2
+        cmp     r9, r2
         bne     .Lb_noirq
         movs    r2, #1
         strb    r2, [r7, #SNES_INIRQ]
         strb    r2, [r4, #CPU_IRQWANTED]
 .Lb_noirq:
-        @ the entry checks of snes_thumb2_run
-        ldrb    r1, [r4, #CPU_STOPPED]
-        ldrb    r2, [r4, #CPU_WAITING]
-        orrs    r1, r1, r2
-        ldrb    r2, [r4, #CPU_NMIWANTED]
-        orrs    r1, r1, r2
-        ldrb    r2, [r4, #CPU_IRQWANTED]
-        ldrb    r3, [r4, #CPU_I]
-        bics    r2, r2, r3              @ irqWanted && !i
-        orrs    r1, r1, r2
-        bne     .Lb_exit_noop
-        movw    r2, #:lower16:g_rc_active
-        movt    r2, #:upper16:g_rc_active
-        ldrb    r2, [r2]
-        cmp     r2, #0
-        bne     .Lb_exit_noop
+.Lb_top:
+        strh    r9, [r7, #SNES_HPOS]
+        str     r10, [r7, #SNES_APUDOTS]
+        @ the entry checks of snes_thumb2_run (STP, WAI, NMI, a takeable IRQ):
+        @ irqWanted, nmiWanted, waiting are bytes 1-3 of the word at CPU_E,
+        @ stopped the byte after it; all clear is the common case
+        ldr     r1, [r4, #CPU_E]
+        ldrb    r2, [r4, #CPU_STOPPED]
+        orrs    r2, r2, r1, lsr #8
+        bne     .Lb_checks
+.Lb_go:
 #ifdef SNES_PERF
         movw    r0, #:lower16:snes_perf_ops     @ PROF/ops: one more 65816 opcode
         movt    r0, #:upper16:snes_perf_ops
@@ -8962,22 +8977,50 @@ snes_thumb2_batch:
         adds    r1, r1, #1
         str     r1, [r0]
 #endif
-        movs    r0, #0
-        strb    r0, [r7, #SNES_CPUMEMOPS]   @ cpuMemOps = 0
-        mov     r0, r7                  @ fetch, exactly as snes_thumb2_run
+        @ fetch, as snes_thumb2_run (ROM_FETCH_FAST with cpuMemOps = 0 then ++):
+        @ a hit on the cached ROM page sets cpuMemOps to 1, a miss zeroes it
+        @ and reads through snes_cpuRead, which counts it
         ldrb    r1, [r4, #CPU_K]
         ldrh    r2, [r4, #CPU_PC]
-        lsl     r1, r1, #16
-        orr     r1, r1, r2
+        orr     r1, r2, r1, lsl #16
         adds    r3, r2, #1
         strh    r3, [r4, #CPU_PC]       @ uint16_t wrap matches cpu->pc++
-        ROM_FETCH_FAST
-        uxtb    r6, r0
+#ifdef SNES_T2_NO_ROMCACHE
+        b       .Lb_fmiss               @ measurement arm: never serve inline
+#endif
+        ldr     r3, [r7, #SNES_ROMPAGEBASE]
+        ldr     r12, [r7, #SNES_ROMPAGETAG]
+        cbz     r3, .Lb_fmiss           @ no cache installed
+        eor     r2, r1, r12
+        lsrs    r2, r2, #13             @ Z iff addr and tag share bits 13+
+        bne     .Lb_fmiss
+        movs    r2, #1
+        strb    r2, [r7, #SNES_CPUMEMOPS]   @ cpuMemOps = 1: this fetch
+        ubfx    r2, r1, #0, #13
+        ldrb    r6, [r3, r2]            @ the opcode, from the cached ROM page
+.Lb_fetched:
         movw    r2, #:lower16:snes_cycles_per_opcode
         movt    r2, #:upper16:snes_cycles_per_opcode
         ldrb    r3, [r2, r6]
         strb    r3, [r4, #CPU_CYCLESUSED]
         b       .Ldispatch
+.Lb_fmiss:
+        movs    r0, #0
+        strb    r0, [r7, #SNES_CPUMEMOPS]   @ cpuMemOps = 0
+        mov     r0, r7
+        bl      snes_cpuRead
+        uxtb    r6, r0
+        b       .Lb_fetched
+.Lb_checks:                             @ one of them set: the exact test
+        ldrb    r2, [r4, #CPU_IRQWANTED]
+        ldrb    r3, [r4, #CPU_I]
+        bics    r2, r2, r3              @ irqWanted && !i
+        lsrs    r1, r1, #16             @ nmiWanted, waiting
+        orrs    r1, r1, r2
+        ldrb    r2, [r4, #CPU_STOPPED]
+        orrs    r1, r1, r2
+        beq     .Lb_go                  @ only a masked IRQ pending
+        b       .Lb_exit_noop
 
 .Lb_after:                              @ every handler of a batch opcode ends here
         ldrb    r0, [r4, #CPU_CYCLESUSED]
@@ -9003,10 +9046,13 @@ snes_thumb2_batch:
 .Lb_exit_noop:
         mov     r0, #-1
 .Lb_out:
-        ldr     r1, [sp]
+        ldr     r2, [sp]                @ the cut back into the span
+        add     r8, r8, r2
+        ldr     r1, [sp, #8]
         str     r8, [r1, #0]
         str     r10, [r1, #4]
         strh    r9, [r1, #8]
+        add     sp, sp, #8
         pop     {r1, r4, r5, r6, r7, r8, r9, r10, r11, pc}
 
 @ The C finish of an opcode the engine does not handle (run and batch).

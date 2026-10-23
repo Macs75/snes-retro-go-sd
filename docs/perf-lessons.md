@@ -882,6 +882,37 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   `sa1_event` with `sa1_wake` at each call (~180 B): the write path keeps
   a single call so the overlay behind it moves 228 B, not 484.
 
+
+### 4.12 The 65816 batch: per-opcode bookkeeping cost more than the opcodes
+
+`PERF_CPUB` put the engine batch at ~190 cycles per 65816 instruction in
+Parodius (Star Fox's logs: 179), far above what a native engine's handlers
+cost. gwemu counted it per instruction (`tools/qemu_exec_profile.py --func
+snes_thumb2_batch`, two frames of window 69): ~73 ARM instructions of the
+batch's own loop per 65816 instruction, against ~36 in the handlers. The loop
+repeated, every opcode, work that changes at most once per batch: the H-IRQ
+match (5-8 loads), five flag bytes plus `g_rc_active`, a memory-op count
+zeroed and then incremented, the ROM page pointer loaded twice.
+
+- `g_rc_active` (set when a ROM loads) and the H-IRQ match are tested once
+  at batch entry. No later opcode of a batch can start on the H-IRQ dot: the
+  span is cut just before it (and the cut given back at exit), and a write
+  that moves it or turns it on sets `hclip`, which ends the batch. In practice
+  the in-batch match never fires (0 in the profile): `snes_handle_pos_stuff`
+  raises the IRQ at its event dot first. It is kept for exactness, so a
+  control that removes it stays identical -- not a proof of anything.
+- `irqWanted`, `nmiWanted` and `waiting` are bytes 1-3 of the aligned word at
+  `CPU_E`, `stopped` the next byte: one word, one byte, one branch; the exact
+  test (`irqWanted && !i`) only when one is set.
+- The fetch is the batch's own: a hit stores a memory-op count of 1.
+
+73 → 48 ARM instructions per opcode on gwemu. gwemu reaches the host's state
+in all 16 recordings; a build storing 0 on a hit diverges at the first
+checkpoint. Device (Parodius long gameplay recording, PERF, 60 fps, logs 3 →
+4): the 65816 -22 cycles per instruction in every window (-7.6%, 1.4-5.3% of
+the budget), frames shown 8,631 → 8,686 of 8,760, the lowest window 85 → 98
+fps; no window heavier; hashes equal. Generic: every game runs this loop.
+
 ---
 
 ## 5. Cross-cutting lessons
