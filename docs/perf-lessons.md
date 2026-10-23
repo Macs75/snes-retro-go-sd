@@ -913,6 +913,32 @@ checkpoint. Device (Parodius long gameplay recording, PERF, 60 fps, logs 3 →
 the budget), frames shown 8,631 → 8,686 of 8,760, the lowest window 85 → 98
 fps; no window heavier; hashes equal. Generic: every game runs this loop.
 
+
+### 4.13 PPU: a line without a sub-screen needs no blend loop
+
+Census first, change second. A host count over the 16 recordings of what
+the blend loops see (scratch copy, not kept): pixels per loop, why each
+bypasses the blend (its main layer has no maths, or the sub-screen is empty
+there), and how many sit on lines whose sub-screen was never built
+(`PpuLineReadsSubscreen` false, or nothing on the sub-screen). On such a
+line `ClearBackdrop` left the sub-screen all index 0, so every pixel
+bypasses, and every path -- both blend LUT loops and the generic one --
+reads `mathFixed565[...][main & 0x7ff]` for a bypassing pixel: the direct
+loop the `!addSubscreen` lines use gives the same pixels. Star Fox and
+Starwing: 100% of their colour-math pixels; FF3 57%, Yoshi's Island (EU)
+40%; Parodius, Kirby, Batman, Castlevania 0%. A build sending every line
+there changes Parodius's pictures from frame 600 (`replay_ab.py`: REC/pic;
+`host_regress.py` compares only machine state, blind to the picture).
+
+The condition is one test per colour-window region, but GCC 15 then shared
+the table address with the blend paths and rebuilt it inside the direct
+loop: 8 instructions a pixel instead of 7, in a loop every fixed-colour line
+of every game runs. An empty `asm` on the pointer keeps it at 7. Found by
+diffing `ppu_runLine`'s loop bodies (registers normalised) before and after:
+541 of 1,780 lines differed, but only that loop and the generic one (subtract
+and clip modes) mattered. Device (Star Fox mission, 30 fps): the PPU -3.9%
+per drawn frame, 91 of 104 windows lighter, the rest within +0.5%.
+
 ---
 
 ## 5. Cross-cutting lessons

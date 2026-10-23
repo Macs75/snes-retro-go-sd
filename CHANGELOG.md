@@ -292,6 +292,18 @@
   65816 -22 cycles an instruction in every window (-7.6%), frames shown
   8,631 → 8,686 of 8,760, the lowest window 85 → 98 fps, no window heavier;
   state hashes equal. Every game runs this loop.
+- **PPU: a colour-math line without a sub-screen takes the direct loop.**
+  When nothing on a line reads the sub-screen it is not built, and every
+  pixel then bypasses the blend -- yet the compositor still ran the
+  per-pixel blend loops, testing each pixel's layer and sub-screen. Those
+  lines now take the one-lookup loop the lines without add-subscreen
+  already used: the same table entry every bypassing pixel reads, so the
+  same pixels. Star Fox's and Starwing's colour-math lines are all of this
+  kind, Final Fantasy III's 57%, Yoshi's Island (Europe)'s 40%. Host: state
+  and pictures identical in all 16 recordings. Device (Star Fox mission,
+  PERF, 30 fps): the PPU -3.9% per drawn frame, lighter in 91 of 104
+  windows (up to -14%), late frames 6,621 → 6,279, windows over 90% of the
+  budget 52 → 42; hashes equal.
 
 ### Changed
 

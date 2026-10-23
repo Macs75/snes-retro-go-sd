@@ -4213,9 +4213,19 @@ PPU_SPLIT_NOINLINE static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
        * word and clip state.  Its low 12 bits are already laid out exactly as
        * mathFixed565[layer][index]. One lookup replaces math-enable branches
        * and the per-pixel fixed/subscreen test. Layer 6 (OBJ palettes exempt
-       * from color math) falls back to the already-built plain palette. */
-      if (!ppu->addSubscreen) {
+       * from color math) falls back to the already-built plain palette.
+       * A line whose sub-screen was not built is the same case: ClearBackdrop
+       * left it all backdrop (index 0), so every pixel bypasses the blend and
+       * every path below would read this same entry. Star Fox's and
+       * Starwing's colour-math lines are all of this kind, FF3's 57%. */
+      if (!ppu->addSubscreen || !rendered_subscreen) {
         const uint16_t *direct = &ppu->mathFixed565[clip_color_mask != 0][0][0];
+        /* GCC: the empty asm makes direct one register before the loop. With
+         * the !rendered_subscreen arm, GCC 15 shared its address with the
+         * blend paths' math_fixed and rebuilt it in the loop from ppu and the
+         * row offset: 8 instructions a pixel instead of 7, in a loop every
+         * fixed-colour line runs. Drop it if the loop is 7 without it. */
+        __asm__("" : "+r"(direct));
         const PpuZbufType *src = ppu->bgBuffers[0].data;
         uint32 i = left;
         /* One masked load. Rows 6/7 exist precisely so the old `layer < 6`
