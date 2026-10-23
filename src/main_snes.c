@@ -2072,8 +2072,9 @@ static void SNES_ITCM_SCHED run_frame_events(Snes *s) {
     if (s->hPos == 0 && s->vPos == 0) break;
 #if SNES_SA1 && SNES_SA1_CONTACT
     /* contact sync: also at every event, so an IRQ the SA-1 raises reaches
-     * the 65816 within a span even when it touches nothing shared */
-    if (s->cart->sa1) sa1_sync(s->cart->sa1, s->vPos, s->hPos);
+     * the 65816 within a span even when it touches nothing shared (not while
+     * it sits in a lap counter, which raises none: sa1_time_owed) */
+    if (s->cart->sa1 && !sa1_time_owed(s)) sa1_sync(s->cart->sa1, s->vPos, s->hPos);
 #endif
     run_dots(s, dots_to_next_event(s));
   }

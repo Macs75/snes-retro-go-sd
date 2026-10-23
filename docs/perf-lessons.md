@@ -845,6 +845,28 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   needed the schedule build out of the SA-1 span-runner slot (cold) and the
   shared compare in a section of its own behind the runner: in the same
   section GCC placed it first and the runner moved.
+- **A catch-up nothing observes: leave the time owed, not as debt.** In
+  Parodius's later stages the SA-1 spends most of the frame in its lap
+  counter, yet the run loop's event sync, the line catch-ups and every
+  65816 read of I-RAM/BW-RAM still called `sa1_sync`: ~1,700 a frame at
+  ~130 cycles each (fitted from two device windows), ~3% of the budget.
+  The counter raises no IRQ and changes nothing but its own bytes, so
+  only a read of those bytes (or a register, a DMA, a wake) needs the
+  SA-1 current. The first version accrued the skipped clocks as debt and
+  moved `lastV`/`lastH`: the BW-RAM hash diverged at frame 117 of the
+  state log, because a later contact at the same dot then saw zero clocks,
+  folded nothing, and the wake wrote back a stale counter. Leaving
+  `lastV`/`lastH` alone (`sa1_time_owed`, bounded to 128 lines so a gap
+  never wraps the frame) makes the next real catch-up pay the whole gap,
+  exactly as before. Device: the SA-1 -16%, the 65816 -3.3%, 300 more
+  frames shown over 8,640, no window worse. Two codegen traps on the way:
+  GCC 15 inlined all of `sa1_sync` (~260 B) into thin wrappers even
+  through an `alias` and `optimize("no-inline")`, so the test is inline in
+  the callers through exported pointers; and the test grew
+  `snes_handle_pos_stuff`, which opens the BUS window, by 64 B, moving the
+  65816's bus for every game -- the line catch-up went out of line
+  (`snes_sa1_line`) and `snes_core.ld` now pins the bus functions at their
+  measured offset (+0x1D8), so ld fails instead of shifting them.
 
 ---
 

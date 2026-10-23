@@ -255,6 +255,19 @@
   windows lighter and none heavier, late frames 1,212 → 1,098; Mario RPG
   (60 fps) the 65816 -6.1%, 251 more frames drawn, the lowest window 24.3 →
   28.4 fps, windows over budget 16 → 13.
+- **SA-1: a counting SA-1 is not caught up where nothing reads the count.**
+  While the SA-1 sits in a lap counter, the 65816's run loop still caught it
+  up at every event and every line, and at every 65816 read of I-RAM or
+  BW-RAM: ~1,700 catch-ups a frame in Parodius's later stages, each folding
+  laps nobody read. Now the time stays owed (up to 128 lines) until a
+  catch-up that can see it: a read of the counter's own bytes, a register,
+  a DMA, a write that wakes it. It is then paid in one go, with the same
+  clocks and laps. Host: catch-ups while it counts ~1,700 → 84-143 a frame,
+  the same state every frame in all 16 recordings. Device (Parodius long
+  gameplay recording, PERF, 60 fps): the SA-1 -16%, the 65816 -3.3%, frames
+  shown 7,877 → 8,177 of 8,640, the late stage (windows 59-71) 1,144 →
+  1,253 of 1,560, the lowest window 51 → 56 fps, no window fewer; the
+  replay's state hashes equal the host's.
 
 ### Changed
 

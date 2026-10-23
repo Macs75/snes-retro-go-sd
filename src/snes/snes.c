@@ -48,6 +48,8 @@ const uint16_t *g_sa1_vh;
 const uint8_t *g_sa1_bwwin;   /* the 65816's $6000-$7FFF BW-RAM block */
 const uint8_t *g_sa1_bwlin;   /* BW-RAM for banks $40-$4F, NULL during CC1 */
 uint32_t g_sa1_bwmask;        /* (bank & $0F) << 16 | address, wrapped to BW-RAM */
+const uint8_t *g_sa1_idle;    /* its wait-loop state, Sa1.idle (sa1_time_owed) */
+uint8_t *const *g_sa1_ctr;    /* its lap counter's bytes, Sa1.ctrLo / ctrHi */
 /* the write map: the WRAM pages only, exactly snes_cpuWrite's fast paths */
 uint8_t *g_snes_wrmap[0x800];
 
@@ -181,6 +183,8 @@ Snes* snes_init(uint8_t *ram) {
   g_sa1_iram = NULL;          /* until an SA-1 cart links it (sa1_link) */
   g_sa1_vh = NULL;
   g_sa1_bwwin = g_sa1_bwlin = NULL;
+  g_sa1_idle = NULL;
+  g_sa1_ctr = NULL;
 #if SNES_PAGEMAP
   snes_build_pagemap(snes);
 #endif
@@ -302,6 +306,16 @@ void snes_reset(Snes* snes, bool hard) {
   snes_set_region(snes, snes->pal);
 }
 
+/* An SA-1 cart's catch-up at the start of a line, unless it can stay owed
+ * (sa1_time_owed). GCC: out of line so that snes_handle_pos_stuff keeps its
+ * size: it opens the BUS window (snes_core.ld), and the inlined test grew it
+ * by 64 bytes, which moved snes_read, snes_write and the rest of the 65816's
+ * bus in the I-cache for every game. Inline again only if that window gets
+ * the room. */
+static __attribute__((noinline)) void snes_sa1_line(Snes *snes) {
+  if (!sa1_time_owed(snes)) sa1_sync(snes->cart->sa1, snes->vPos, snes->hPos);
+}
+
 void snes_handle_pos_stuff(Snes *snes) {
   // handle positional stuff
   // TODO: better timing? (especially Hpos)
@@ -354,7 +368,7 @@ void snes_handle_pos_stuff(Snes *snes) {
     if (snes->cart && snes->cart->gsu)
       gsu_runLine(snes->cart->gsu);    /* one scanline's GSU slice */
     if (snes->cart && snes->cart->sa1)
-      sa1_sync(snes->cart->sa1, snes->vPos, snes->hPos);  /* catch up to this line */
+      snes_sa1_line(snes);             /* catch up to this line */
   } else if (snes->hPos == 512) {
     // render the line halfway of the screen for better compatibility
     if (!snes->inVblank && !snes->disableRender) {
@@ -466,7 +480,7 @@ void snes_run_line(Snes *snes) {
   if (snes->cart && snes->cart->gsu)
     gsu_runLine(snes->cart->gsu);      /* one scanline's GSU slice */
   if (snes->cart && snes->cart->sa1)
-    sa1_sync(snes->cart->sa1, snes->vPos, snes->hPos);    /* catch up to this line */
+    snes_sa1_line(snes);               /* catch up to this line */
 
   /* The V-timer matches on every dot of its line; setting the flag once is the
    * same thing to everyone who reads it. */
@@ -1038,7 +1052,9 @@ uint8_t snes_cpuRead(Snes* snes, uint32_t adr) {
       else if ((adr & 0x40e000) == 0x006000) p = g_sa1_bwwin + (adr & 0x1fff);
       else if ((adr & 0xf00000) == 0x400000 && g_sa1_bwlin) p = g_sa1_bwlin + (adr & g_sa1_bwmask);
       if (p) {
-        if (g_sa1_vh[0] != snes->vPos || g_sa1_vh[1] != snes->hPos)
+        /* in a lap counter only a read of the counter needs it (sa1_time_owed) */
+        if ((g_sa1_vh[0] != snes->vPos || g_sa1_vh[1] != snes->hPos) &&
+            (!sa1_time_owed(snes) || p == g_sa1_ctr[0] || p == g_sa1_ctr[1]))
           sa1_sync(snes->cart->sa1, snes->vPos, snes->hPos);
         return *p;
       }

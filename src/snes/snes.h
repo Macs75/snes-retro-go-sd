@@ -148,6 +148,24 @@ extern const uint16_t *g_sa1_vh;     /* the SA-1's last catch-up: line, dot */
 extern const uint8_t *g_sa1_bwwin;   /* SA-1 cart: the 65816's BW-RAM window block */
 extern const uint8_t *g_sa1_bwlin;   /* SA-1 cart: BW-RAM banks $40-$4F, NULL in CC1 */
 extern uint32_t g_sa1_bwmask;
+extern const uint8_t *g_sa1_idle;    /* SA-1 cart: asleep in a wait loop 1, a lap counter 2 */
+extern uint8_t *const *g_sa1_ctr;    /* SA-1 cart: that counter's bytes (lo, hi or NULL) */
+/* A catch-up of the SA-1 that nothing observes -- the 65816's run loop at an
+ * event, the line catch-ups -- can be left for later while it sits in a lap
+ * counter (sa1.c's sa1_ctr_sleep): there it changes nothing but the counter
+ * and raises nothing. The time stays owed in lastV / lastH, not in its debt,
+ * so the next sa1_sync runs it all in one go, with the same clocks and laps
+ * as in steps; and every contact that can see the counter makes one: a 65816
+ * read of its bytes (snes_cpuRead), a register or DMA read, sa1_event before
+ * a wake. Up to 128 lines, so sa1_sync's line count never wraps a frame.
+ * Synced at each event instead, Parodius spent ~1,100 catch-ups a frame
+ * folding laps no one read. */
+static inline bool sa1_time_owed(const Snes *snes) {
+  if (*g_sa1_idle != 2) return false;
+  int lines = (int)snes->vPos - g_sa1_vh[0];
+  if (lines < 0) lines += snes->pal ? 312 : 262;
+  return lines < 128;
+}
 #endif
 void snes_cpuWrite(Snes* snes, uint32_t adr, uint8_t val);
 // debugging

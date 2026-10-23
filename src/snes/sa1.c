@@ -927,6 +927,8 @@ void sa1_link(Sa1* s, Snes* snes, uint8_t* rom, uint32_t romSize, uint8_t* bwram
   g_sa1_cc1 = &s->SA1_in_cc1_dma;
   g_sa1_lapdirty = &s->run.lapDirty;
   g_sa1_vh = &s->lastV;
+  g_sa1_idle = &s->idle;      /* sa1_time_owed (snes.h) */
+  g_sa1_ctr = &s->ctrLo;
   sa1_maps(s);
 }
 

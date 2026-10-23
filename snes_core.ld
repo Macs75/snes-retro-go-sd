@@ -120,7 +120,11 @@ SECTIONS
 
     . = __APU_HOT_START__ + 0x149C0;
     __BUS_HOT_START__ = .;
-    *(.text.snes_handle_pos_stuff .text.snes_read .text.snes_write .text.snes_readBBus .text.snes_writeBBus)
+    *(.text.snes_handle_pos_stuff)
+    /* the bus functions at the offset they measured at, not behind however
+     * big snes_handle_pos_stuff is (ld stops if it grows past them) */
+    . = __BUS_HOT_START__ + 0x1D8;
+    *(.text.snes_read .text.snes_write .text.snes_readBBus .text.snes_writeBBus)
     . = ALIGN(32);
     *(.text.cart_read .text.cart_write .text.input_read)
     . = ALIGN(32);
