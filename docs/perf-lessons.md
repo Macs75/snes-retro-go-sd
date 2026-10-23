@@ -881,6 +881,27 @@ sleeps (log 2) gained ~1 point: the windows where it sleeps were already cheap.
   the recordings (the 65816 never writes the counter). GCC inlines
   `sa1_event` with `sa1_wake` at each call (~180 B): the write path keeps
   a single call so the overlay behind it moves 228 B, not 484.
+- **A run-ahead over BW-RAM polls: exact, and not worth it.** Parodius's
+  late-stage 65816 waits on a BW-RAM byte (`$6024` through the `$6000`
+  window) while the SA-1 works, so its 216 laps a frame were synced one by
+  one. Watching BW-RAM in the run-ahead (the engine's run-ahead table set
+  sending its other writes to C wrappers that compare the polled bytes)
+  was exact -- host, gwemu, and two negative controls diverging at frame
+  1560 -- and cut window 69's SA-1 slices 735 → 547. But the device saved
+  at most 0.3-0.6% of that window's budget and nothing over the recording:
+  the slices left were cheap, most of the SA-1's time is real work. A
+  census of the six SA-1 recordings and a minute of attract in each of 33
+  SA-1 titles found no other game waiting on BW-RAM. And Kirby Super Star,
+  which never watches BW-RAM, ran its SA-1 0.9% slower in both versions --
+  the second with the plain stubs back for any run-ahead without BW-RAM,
+  the hot SA-1 functions instruction-identical and gwemu counting the same
+  SA-1 instructions. A core with only the unrelated `idle_sa1_sched` move
+  (the same 192 B core shrink, the same data moved) ran Kirby at log 46's
+  level, so the cost came with the run-ahead's code, not the data -- the
+  dispatch tables behind the grown SA-1 C code are the likely way, not
+  measured. Dropped; the patch is not kept in the tree. Test a placement
+  explanation with a build that has only the placement change before
+  accepting it.
 
 
 ### 4.12 The 65816 batch: per-opcode bookkeeping cost more than the opcodes

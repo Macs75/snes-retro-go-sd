@@ -307,6 +307,13 @@
 
 ### Changed
 
+- **Star Fox's Super FX code has 192 B more room.** The SA-1 span
+  runner's read-schedule builder (`idle_sa1_sched`), which only an SA-1 cart
+  runs, moved from the core into the SA-1 overlay, behind its engine: the
+  RAM_EMU pool left after Star Fox's block code is 596 → 788 B. Every pinned
+  window and SA-1 slot stays where it was. Kirby Super Star on device (PERF,
+  30 fps): the same as before, the SA-1 -0.1%; hashes equal.
+
 - **In-game saves work again after a replay or a recording.** A replay or a
   recording starts from power-on with the cartridge RAM cleared, so the
   battery save (`.sram`) is not written while one runs; it stayed off until

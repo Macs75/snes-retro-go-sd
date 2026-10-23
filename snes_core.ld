@@ -344,6 +344,7 @@ SECTIONS
       *sa1.o(.text* .rodata*)
       *sa1_cpu.o(.text* .rodata*)
       *sa1_engine.o(.text* .rodata*)
+      *(.sa1ovl.cold)                   /* main_snes.c's SA-1-only cold code (idle_sa1_sched) */
       . = ALIGN(4);
       __SA1_OVL_END__ = .;
     }

@@ -1391,7 +1391,12 @@ static int idle_sa1_read_held(Snes *s, const IdleSkip *g, int i, int j, int dots
 /* idle_sa1_awake_span's read schedule from boundary i and its run-ahead's
  * watch list (IdleSkip.sched_*): once per proof and boundary. GCC: out of
  * line, cold (for size) and outside the SA-1 overlay's span-runner slot,
- * which it did not fit in with the runner; nothing here is SA-1 code. */
+ * which it did not fit in with the runner; in the overlay behind the SA-1
+ * engine (.sa1ovl.cold, snes_core.ld), not in the core, whose every byte is
+ * Star Fox's pool margin -- only an SA-1 cart runs it. */
+#ifndef HOST_BUILD
+__attribute__((section(".sa1ovl.cold")))
+#endif
 static __attribute__((noinline, cold)) void idle_sa1_sched(IdleSkip *g, int i) {
   /* the lap's SA-1 reads from this boundary, in order: their boundaries and
    * their dots (a read the stable lap branches around reads nothing) */
