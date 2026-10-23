@@ -54,15 +54,19 @@ Host uses the C interpreters (no Thumb-2 ASM). Scale with `HOST_SCALE=2`
 On Zelda HW, phys Start/Select feed **X/Y**. Auto picks Zelda (with L/R) or
 Mario via `get_ofw_is_mario()`.
 
-| G&W | Zelda (défaut) | Simple | Mario |
-|-----|----------------|--------|-------|
-| B / A | B / A | B / A | B / A |
-| phys Select / Start | Y / X | Y / X | — |
-| TIME | Start | Start | Select |
-| GAME | *(modificateur)* | Select | Start |
-| GAME+TIME | Select | — | — |
-| GAME+B / GAME+A | L / R | — | L / R |
-| TIME+B / TIME+A | — | — | Y / X |
+| G&W | Zelda (défaut) | Zelda B | Simple | Mario | Mario B |
+|-----|----------------|---------|--------|-------|---------|
+| B / A | B / A | Y / B | B / A | B / A | Y / B |
+| phys Select / Start | Y / X | X / A | Y / X | — | — |
+| TIME | Start | Start | Start | Select | Select |
+| GAME | *(modificateur)* | *(modificateur)* | Select | Start | Start |
+| GAME+TIME | Select | Select | — | — | — |
+| GAME+B / GAME+A | L / R | L / R | — | L / R | L / R |
+| TIME+B / TIME+A | — | — | — | Y / X | X / A |
+
+"L/R on Start/Select" (Zelda unit, Zelda and Zelda B profiles): phys
+Select / Start give L / R, and GAME+B / GAME+A give what those two buttons
+gave.
 
 ## Layout
 
