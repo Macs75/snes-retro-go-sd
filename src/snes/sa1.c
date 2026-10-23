@@ -975,6 +975,16 @@ void sa1_saveload(Sa1* s, SaveLoadFunc* func, void* ctx) {
 
 /* --- scheduling ------------------------------------------------------------ */
 
+/* GCC: out of line in the release build (no SNES_PERF). Without PERF's timing
+ * sa1_sync is small enough that GCC inlined it, with its sa1_interpret call,
+ * at both of sa1_snes_read's catch-ups: 0x412 B against that function's fixed
+ * slot of 0x35c (snes_core.ld), and the release did not link. The PERF build,
+ * where every device measurement was made, calls it there already and is left
+ * as measured (byte-identical). Drop if the slot grows or GCC stops inlining
+ * it. */
+#ifndef SNES_PERF
+__attribute__((noinline))
+#endif
 void sa1_sync(Sa1* s, uint16_t v, uint16_t h) {
   int32_t lines = (int32_t)v - s->lastV;
   if (lines < 0) lines += s->snes->pal ? 312 : 262;
