@@ -13,13 +13,14 @@ import argparse, re
 def windows(path):
     out, cur = [], None
     for line in open(path, errors='replace'):
-        if line.startswith('PROF/emu:'):
+        if line.startswith('PROF/frame:'):     # a window's report starts here
             cur = {}
             out.append(cur)
-            m = re.search(r'cpu=(\d+) ppu=(\d+) apu=(\d+)', line)
-            cur['cpu'], cur['ppu'], cur['apu'] = (int(x) for x in m.groups())
         if cur is None:
             continue
+        if line.startswith('PROF/emu:'):
+            m = re.search(r'cpu=(\d+) ppu=(\d+) apu=(\d+)', line)
+            cur['cpu'], cur['ppu'], cur['apu'] = (int(x) for x in m.groups())
         m = re.search(r'span_runner=(\d+) cycles in (\d+) calls', line)
         if m:
             cur['span'], cur['calls'] = int(m.group(1)), int(m.group(2))

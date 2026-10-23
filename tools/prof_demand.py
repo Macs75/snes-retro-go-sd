@@ -24,7 +24,7 @@ PATS = [
 def windows(path):
     out, cur = [], None
     for line in open(path, errors='replace'):
-        if line.startswith('PROF/emu:'):
+        if line.startswith('PROF/frame:'):     # a window's report starts here
             cur = {}
             out.append(cur)
         if cur is None:
@@ -33,7 +33,7 @@ def windows(path):
             m = re.search(pat, line)
             if m:
                 cur.update(zip(keys, map(int, m.groups())))
-    return [w for w in out if 'budget' in w and w.get('shown')]
+    return [w for w in out if 'budget' in w and 'cpu' in w and w.get('shown')]
 
 
 def main():
